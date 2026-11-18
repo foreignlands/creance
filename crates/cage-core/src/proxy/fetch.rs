@@ -46,7 +46,8 @@ pub fn fetch_subscription_through(egress: &Egress, url: &str) -> Result<Vec<u8>,
                 // SSRF probe of the host and LAN. Hostnames resolve at the
                 // remote exit, so only literals need refusing here.
                 let host = next.host_str().unwrap_or_default();
-                if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+                let bare = host.trim_start_matches('[').trim_end_matches(']');
+                if let Ok(ip) = bare.parse::<std::net::IpAddr>() {
                     let blocked = match ip {
                         std::net::IpAddr::V4(v4) => {
                             v4.is_loopback()
@@ -119,7 +120,8 @@ mod tests {
     fn fetch_follows_redirects_within_proxy() {
         let proxy = MixedProxy::start(vec![]);
         let target = StaticServer::start(b"moved".to_vec());
-        let redirect = RedirectServer::start(&format!("http://{}/next", target.addr));
+        let target_host = target.addr.replace("127.0.0.1", "localhost");
+        let redirect = RedirectServer::start(&format!("http://{target_host}/next"));
         let egress = Egress::new(&loopback_config(&proxy.addr)).unwrap();
         let body =
             fetch_subscription_through(&egress, &format!("http://{}/sub", redirect.addr)).unwrap();
@@ -144,9 +146,11 @@ mod tests {
                 .unwrap_err();
             assert!(err.contains("内网或本机"), "target {target}: {err}");
         }
-        // Public literals and hostnames still follow normally.
+        // Hostnamed (resolvable) targets still follow normally — the guard
+        // is about literal addresses the local core would dial.
         let target = StaticServer::start(b"ok".to_vec());
-        let redirect = RedirectServer::start(&format!("http://{}/next", target.addr));
+        let target_host = target.addr.replace("127.0.0.1", "localhost");
+        let redirect = RedirectServer::start(&format!("http://{target_host}/next"));
         let egress = Egress::new(&loopback_config(&proxy.addr)).unwrap();
         let body =
             fetch_subscription_through(&egress, &format!("http://{}/sub", redirect.addr)).unwrap();
@@ -155,15 +159,14 @@ mod tests {
 
     #[test]
     fn fetch_bounds_redirect_loops() {
-        // The redirect points at the server itself: an endless loop that the
-        // hop bound must cut.
+        // One server redirecting to itself by hostname: an endless loop the
+        // hop bound must cut, via a hostname so the literal-IP guard stays
+        // out of the picture.
         let proxy = MixedProxy::start(vec![]);
-        let redirect = RedirectServer::start("self");
-        let self_url = format!("http://{}/sub", redirect.addr);
-        let _redirect = RedirectServer::start(&self_url);
+        let redirect = RedirectServer::start_self();
         let egress = Egress::new(&loopback_config(&proxy.addr)).unwrap();
-        let err = fetch_subscription_through(&egress, &self_url).unwrap_err();
+        let err = fetch_subscription_through(&egress, &format!("http://{}/sub", redirect.addr))
+            .unwrap_err();
         assert!(err.contains("redirect"), "{err}");
-        let _ = proxy;
     }
 }

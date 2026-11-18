@@ -11,8 +11,11 @@ pub struct StateDir(pub String);
 /// The markers of a VM.
 pub const VERSION_OF: &str = ".agent-vm-version-";
 pub const BUILT_BY_OF: &str = ".agent-vm-built-by-";
+pub const SSHFS_OF: &str = ".agent-vm-sshfs-";
 pub const TERM_OF: &str = ".agent-vm-term-";
 pub const FILE_MOUNTS_OF: &str = ".agent-vm-file-mounts-";
+pub const MOUNTS_OF: &str = ".agent-vm-mounts-";
+pub const CACHE_OF: &str = ".agent-vm-sshfs-cache-";
 pub const SCRATCH_OF: &str = ".agent-vm-scratch-";
 pub const POLICY_OF: &str = ".agent-vm-policy-";
 
@@ -24,8 +27,11 @@ pub const BASE_BUILT_BY: &str = ".agent-vm-base-built-by";
 const MARKERS: &[&str] = &[
     VERSION_OF,
     BUILT_BY_OF,
+    SSHFS_OF,
     TERM_OF,
     FILE_MOUNTS_OF,
+    MOUNTS_OF,
+    CACHE_OF,
     SCRATCH_OF,
     POLICY_OF,
 ];

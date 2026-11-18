@@ -24,12 +24,13 @@ const WORKBENCH_HTML: &str = include_str!("workbench.html");
 pub fn serve(profile: &str, config_path: &str, port: u16) -> Result<(), String> {
     let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|e| e.to_string())?;
     eprintln!("cage workbench on http://127.0.0.1:{port} (profile {profile})");
+    let port = listener.local_addr().map(|a| a.port()).unwrap_or(port);
     for stream in listener.incoming().flatten() {
         let ctx = ServeCtx {
             profile: profile.to_owned(),
             config_path: config_path.to_owned(),
         };
-        std::thread::spawn(move || handle(stream, ctx));
+        std::thread::spawn(move || handle(stream, port, ctx));
     }
     Ok(())
 }
@@ -39,10 +40,10 @@ struct ServeCtx {
     config_path: String,
 }
 
-fn handle(mut stream: std::net::TcpStream, ctx: ServeCtx) {
+fn handle(mut stream: std::net::TcpStream, port: u16, ctx: ServeCtx) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
-    let head = match read_header_block(&mut stream) {
-        Ok(h) if !h.is_empty() => h,
+    let (head, mut stream) = match crate::wire::read_header_block(&mut stream, 16 << 10) {
+        Ok((h, r)) if !h.is_empty() => (h, r),
         _ => return,
     };
     let text = String::from_utf8_lossy(&head).into_owned();
@@ -72,10 +73,7 @@ fn handle(mut stream: std::net::TcpStream, ctx: ServeCtx) {
     // Mutations must come from the same origin (the workbench itself) or
     // from no Origin at all (curl/CLI); a foreign Origin is a CSRF.
     if method == "POST" && !origin.is_empty() {
-        let allowed = format!(
-            "http://127.0.0.1:{}",
-            stream.local_addr().map(|a| a.port()).unwrap_or(0)
-        );
+        let allowed = format!("http://127.0.0.1:{port}");
         if origin != allowed {
             return reply(&mut stream, 403, "cross-origin mutation refused");
         }
@@ -257,7 +255,7 @@ fn nodes_json(ctx: &ServeCtx) -> serde_json::Value {
         .collect::<Vec<_>>())
 }
 
-fn reply(stream: &mut std::net::TcpStream, status: u16, message: &str) {
+fn reply<W: std::io::Write>(stream: &mut W, status: u16, message: &str) {
     let payload = json!({"error": message}).to_string();
     let _ = stream.write_all(
         format!(
@@ -266,26 +264,6 @@ fn reply(stream: &mut std::net::TcpStream, status: u16, message: &str) {
         )
         .as_bytes(),
     );
-}
-
-fn read_header_block(stream: &mut std::net::TcpStream) -> std::io::Result<Vec<u8>> {
-    let mut block = Vec::with_capacity(512);
-    let mut byte = [0u8; 1];
-    loop {
-        match stream.read(&mut byte)? {
-            0 => break,
-            _ => {
-                block.push(byte[0]);
-                if block.len() > 16 << 10 {
-                    return Err(std::io::Error::other("header too large"));
-                }
-                if block.ends_with(b"\r\n\r\n") || block.ends_with(b"\n\n") {
-                    break;
-                }
-            }
-        }
-    }
-    Ok(block)
 }
 
 /// Whether the workbench UI exists at build time (compile-time check that

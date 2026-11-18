@@ -33,6 +33,16 @@ impl TargetServer {
     }
 }
 
+/// Connects by IP literal without getaddrinfo — a hung resolver must never
+/// stall loopback test relays.
+fn connect_ip(host: &str, port: u16) -> std::io::Result<std::net::TcpStream> {
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return std::net::TcpStream::connect(std::net::SocketAddr::new(ip, port));
+    }
+    std::net::TcpStream::connect((host, port))
+        .or_else(|_| std::net::TcpStream::connect(format!("{host}:{port}").as_str()))
+}
+
 /// The response body the target returns for every request.
 pub const TARGET_BODY: &str = "cage-target-ok";
 
@@ -247,7 +257,7 @@ fn handle_socks5(stream: &mut TcpStream, users: Arc<Vec<(String, String)>>) {
             return;
         }
     };
-    let upstream = match TcpStream::connect((host.as_str(), port)) {
+    let upstream = match connect_ip(&host, port) {
         Ok(s) => s,
         Err(_) => {
             let _ = stream.write_all(&[0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0]);
@@ -302,7 +312,7 @@ fn handle_http_connect(stream: &mut TcpStream, users: Arc<Vec<(String, String)>>
         ),
         None => (target.clone(), 80),
     };
-    let upstream = match TcpStream::connect((host.as_str(), port)) {
+    let upstream = match connect_ip(&host, port) {
         Ok(s) => s,
         Err(_) => {
             let _ = stream.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
@@ -422,6 +432,35 @@ impl StaticServer {
 #[allow(dead_code)]
 pub struct RedirectServer {
     pub addr: String,
+}
+
+impl RedirectServer {
+    /// A server whose redirect points back at itself by hostname — for
+    /// redirect-loop tests without literal-IP guards firing. The listener
+    /// binds first so the Location names THIS server's port.
+    pub fn start_self() -> RedirectServer {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind self-redirect");
+        let addr = listener.local_addr().expect("addr").to_string();
+        let port = addr.rsplit(':').next().unwrap().to_owned();
+        let response = format!(
+            "HTTP/1.1 301 Moved Permanently\r\nLocation: http://localhost:{port}/sub\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+        let listener = listener.try_clone().expect("clone");
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut stream = stream;
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+                if read_header_block(&mut stream)
+                    .map(|h| h.is_empty())
+                    .unwrap_or(true)
+                {
+                    continue;
+                }
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        RedirectServer { addr }
+    }
 }
 
 #[allow(dead_code)]

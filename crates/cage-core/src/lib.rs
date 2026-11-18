@@ -29,5 +29,6 @@ pub mod serve;
 pub mod state;
 pub mod vm;
 pub mod vmname;
+pub mod wire;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

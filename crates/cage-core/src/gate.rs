@@ -153,12 +153,38 @@ pub struct Gate {
     shutdown: AtomicBool,
     config_path: String,
     record_path: String,
+    socket_path: String,
+    listener: Mutex<Option<UnixListener>>,
+}
+
+/// The owner of one running gate: keeps the server alive while held, stops
+/// it and removes its record and socket directory on drop.
+pub struct GateHandle {
+    gate: Arc<Gate>,
+    pub record: GateRecord,
+    instance_dir: String,
+}
+
+impl Drop for GateHandle {
+    fn drop(&mut self) {
+        self.gate.shutdown();
+        let record = Path::new(&self.instance_dir).join("cage-gate.json");
+        let _ = std::fs::remove_file(record);
+    }
+}
+
+/// Locks a gate mutex, recovering from a poisoned lock (a panicked handler
+/// must not cascade into every later call).
+fn lock_or_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 impl Gate {
     /// Starts a gate: creates the record in `instance_dir` (socket path,
-    /// token, run id) and spawns the control server. Returns the record.
-    pub fn start(instance_dir: &str, config_path: &str) -> Result<GateRecord, String> {
+    /// token, run id) and spawns the control server. The returned handle
+    /// owns the gate's lifetime — dropping it stops the server and removes
+    /// the socket directory.
+    pub fn start(instance_dir: &str, config_path: &str) -> Result<GateHandle, String> {
         let token = crate::proxy::token();
         let run_id = crate::proxy::token()[..32].to_owned();
         let sock_dir = std::env::temp_dir().join(format!(
@@ -204,17 +230,23 @@ impl Gate {
             shutdown: AtomicBool::new(false),
             config_path: config_path.to_owned(),
             record_path: record_path.to_string_lossy().into_owned(),
+            socket_path: socket.clone(),
+            listener: Mutex::new(Some(listener)),
         });
 
         // The lease watchdog: a gate left open (or checking) without renewal
-        // closes itself with a fixed reason.
-        let watchdog = gate.clone();
+        // closes itself with a fixed reason. It holds only a Weak reference
+        // so a dropped handle fully retires the gate.
+        let watchdog = Arc::downgrade(&gate);
         std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(500));
+            let Some(watchdog) = watchdog.upgrade() else {
+                return;
+            };
             if watchdog.shutdown.load(Ordering::Relaxed) {
                 return;
             }
-            std::thread::sleep(Duration::from_millis(500));
-            let mut inner = watchdog.inner.lock().expect("gate lock");
+            let mut inner = lock_or_recover(&watchdog.inner);
             if let (Some(opened), lease) = (inner.opened_at, inner.lease) {
                 if opened.elapsed() > lease {
                     inner.close("检测租期到期，等待重新检查");
@@ -222,34 +254,80 @@ impl Gate {
             }
         });
 
-        let server = gate.clone();
+        // The accept loop also holds only a Weak: it exits when the gate is
+        // dropped or shut down, and owns the socket-file cleanup.
+        let accept_sock = socket.clone();
+        let accept_dir = sock_dir.to_string_lossy().into_owned();
+        let server = Arc::downgrade(&gate);
         std::thread::spawn(move || {
-            for stream in listener.incoming().flatten() {
+            loop {
+                let Some(server) = server.upgrade() else {
+                    break;
+                };
                 if server.shutdown.load(Ordering::Relaxed) {
-                    return;
+                    break;
                 }
-                let server = server.clone();
-                std::thread::spawn(move || server.handle(stream));
+                // Accept on the listener the Gate still owns; taking it in
+                // shutdown() drops the fd and unblocks us with an error.
+                let accepted = {
+                    let guard = lock_or_recover(&server.listener);
+                    match guard.as_ref() {
+                        Some(listener) => listener.accept().map(|(s, _)| s),
+                        None => Err(std::io::Error::other("gate closed")),
+                    }
+                };
+                match accepted {
+                    Ok(stream) => {
+                        let server = server.clone();
+                        std::thread::spawn(move || server.handle(stream));
+                    }
+                    Err(_) => {
+                        if server.shutdown.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        // Transient accept errors (EMFILE, ECONNABORTED):
+                        // back off instead of spinning.
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                }
+                drop(server);
             }
+            let _ = std::fs::remove_file(&accept_sock);
+            let _ = std::fs::remove_dir(&accept_dir);
         });
-        Ok(record)
+        Ok(GateHandle {
+            gate,
+            record,
+            instance_dir: instance_dir.to_owned(),
+        })
     }
 
-    /// Stops the server loop (the socket file stays for bootout semantics).
+    /// Stops the server loop and closes the listening socket. The accept
+    /// thread removes the socket directory on its way out.
     pub fn shutdown(&self) {
         self.shutdown.store(true, Ordering::Relaxed);
+        // Dropping our listener fd alone leaves the accept thread's view
+        // open (fds are references); a self-connect wakes it so it observes
+        // the flag and exits.
+        if let Ok(mut guard) = self.listener.try_lock() {
+            *guard = None;
+        }
+        let _ = std::os::unix::net::UnixStream::connect(&self.socket_path);
     }
 
     /// The current status snapshot.
     pub fn status(&self) -> GateStatus {
-        self.inner.lock().expect("gate lock").status(&self.run_id)
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .status(&self.run_id)
     }
 
     fn handle(&self, mut stream: std::os::unix::net::UnixStream) {
         let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
         let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
-        let head = match read_header_block(&mut stream) {
-            Ok(h) if !h.is_empty() => h,
+        let (head, mut stream) = match crate::wire::read_header_block(&mut stream, 16 << 10) {
+            Ok((h, r)) if !h.is_empty() => (h, r),
             _ => return,
         };
         let text = String::from_utf8_lossy(&head).into_owned();
@@ -352,7 +430,7 @@ impl Gate {
                 .close(&format!("代理节点未应用：{e}"));
             return (409, error_json(&format!("代理节点未应用：{e}")));
         }
-        let mut inner = self.inner.lock().expect("gate lock");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.status(&self.run_id); // keep the counts shape warm
         match command.action.as_str() {
             "check" => {
@@ -483,26 +561,6 @@ fn error_json(message: &str) -> Vec<u8> {
     serde_json::json!({ "error": message })
         .to_string()
         .into_bytes()
-}
-
-fn read_header_block(stream: &mut std::os::unix::net::UnixStream) -> std::io::Result<Vec<u8>> {
-    let mut block = Vec::with_capacity(512);
-    let mut byte = [0u8; 1];
-    loop {
-        match stream.read(&mut byte)? {
-            0 => break,
-            _ => {
-                block.push(byte[0]);
-                if block.len() > 16 << 10 {
-                    return Err(std::io::Error::other("header too large"));
-                }
-                if block.ends_with(b"\r\n\r\n") || block.ends_with(b"\n\n") {
-                    break;
-                }
-            }
-        }
-    }
-    Ok(block)
 }
 
 /// A host-side client for one gate record: the calls `cage proxy-stop` and
@@ -660,7 +718,8 @@ mod tests {
         let (profile, config_path) = prepare_profile();
         let instance_dir = crate::paths::join(&profile, "lima/test-vm");
         fs::create_dir_all(&instance_dir).unwrap();
-        let record = Gate::start(&instance_dir, &config_path).unwrap();
+        let handle = Gate::start(&instance_dir, &config_path).unwrap();
+        let record = handle.record.clone();
         let client = GateClient::open(&instance_dir).unwrap();
 
         // Starts closed with the safety contract attached.
@@ -704,7 +763,8 @@ mod tests {
         let (profile, config_path) = prepare_profile();
         let instance_dir = crate::paths::join(&profile, "lima/test-vm");
         fs::create_dir_all(&instance_dir).unwrap();
-        let record = Gate::start(&instance_dir, &config_path).unwrap();
+        let handle = Gate::start(&instance_dir, &config_path).unwrap();
+        let record = handle.record.clone();
         use std::io::{Read, Write};
         use std::os::unix::net::UnixStream;
         let _raw_full = |request: &str| -> String {
@@ -754,7 +814,8 @@ mod tests {
         let (profile, config_path) = prepare_profile();
         let instance_dir = crate::paths::join(&profile, "lima/test-vm");
         fs::create_dir_all(&instance_dir).unwrap();
-        Gate::start(&instance_dir, &config_path).unwrap();
+        let handle = Gate::start(&instance_dir, &config_path).unwrap();
+        let _record = handle.record.clone();
         let client = GateClient::open(&instance_dir).unwrap();
 
         // Rotate the store revision and re-apply into config.json the way
@@ -785,7 +846,8 @@ mod tests {
         let (profile, config_path) = prepare_profile();
         let instance_dir = crate::paths::join(&profile, "lima/test-vm");
         fs::create_dir_all(&instance_dir).unwrap();
-        Gate::start(&instance_dir, &config_path).unwrap();
+        let handle = Gate::start(&instance_dir, &config_path).unwrap();
+        let _record = handle.record.clone();
         let client = GateClient::open(&instance_dir).unwrap();
 
         // A timezone change is not a revision change: refused.

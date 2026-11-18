@@ -55,21 +55,34 @@ enum TunnelKind {
 /// The IO surface a stackable TLS layer needs.
 trait RW: Read + Write + 'static {
     fn set_deadline(&self, at: Instant);
+    fn clear_deadline(&self);
 }
 
 impl RW for Tunnel {
     fn set_deadline(&self, at: Instant) {
-        if let Some(remaining) = at.checked_duration_since(Instant::now()) {
-            let remaining = remaining.max(Duration::from_millis(1));
-            let _ = self.0.set_read_timeout(Some(remaining));
-            let _ = self.0.set_write_timeout(Some(remaining));
-        }
+        // An already-passed deadline means the budget is spent: fail fast
+        // with a 1ms timeout instead of silently leaving the old one.
+        let remaining = at
+            .checked_duration_since(Instant::now())
+            .unwrap_or(Duration::from_millis(1))
+            .max(Duration::from_millis(1));
+        let _ = self.0.set_read_timeout(Some(remaining));
+        let _ = self.0.set_write_timeout(Some(remaining));
+    }
+
+    fn clear_deadline(&self) {
+        let _ = self.0.set_read_timeout(None);
+        let _ = self.0.set_write_timeout(None);
     }
 }
 
 impl RW for rustls::StreamOwned<rustls::ClientConnection, Box<dyn RW>> {
     fn set_deadline(&self, at: Instant) {
         self.sock.set_deadline(at)
+    }
+
+    fn clear_deadline(&self) {
+        self.sock.clear_deadline()
     }
 }
 
@@ -101,9 +114,22 @@ impl Channel {
     fn set_deadline(&self, at: Instant) {
         self.0.set_deadline(at)
     }
+
+    /// Removes read/write timeouts: the tunnel is unbounded from here on and
+    /// the next reader sets its own budget.
+    fn clear_deadline(&self) {
+        self.0.clear_deadline();
+    }
 }
 
 impl TunnelKind {
+    fn clear_deadline(&self) {
+        match self {
+            TunnelKind::Plain(t) => t.clear_deadline(),
+            TunnelKind::Tls(s) => s.sock.clear_deadline(),
+        }
+    }
+
     fn set_deadline(&self, at: Instant) {
         match self {
             TunnelKind::Plain(t) => t.set_deadline(at),
@@ -157,10 +183,15 @@ impl Egress {
             .is_some_and(|ip| matches!(ip, IpAddr::V4(_)))
     }
 
-    /// Opens a TCP connection to `addr` (`host:port`) through the upstream.
-    /// The host is never resolved locally.
+    /// Opens a TCP connection to `addr` (`host:port`) through the upstream
+    /// with the default dial budget. The host is never resolved locally.
     pub fn dial(&self, addr: &str) -> Result<Channel, String> {
-        let deadline = Instant::now() + DIAL_TIMEOUT;
+        self.dial_deadline(addr, Instant::now() + DIAL_TIMEOUT)
+    }
+
+    /// `dial` with a caller-owned deadline: the whole tunnel setup (TCP,
+    /// optional TLS, proxy handshake) must finish inside it.
+    pub fn dial_deadline(&self, addr: &str, deadline: Instant) -> Result<Channel, String> {
         let (host, port) = split_addr(addr)?;
         let upstream_host = self.upstream.host_str().unwrap_or_default().to_owned();
         let upstream_port = self
@@ -298,8 +329,8 @@ impl Egress {
         channel
             .write_all(req.as_bytes())
             .map_err(|e| user_error("发送代理 CONNECT 请求", e))?;
-        let head =
-            read_header_block(&mut channel).map_err(|e| user_error("读取代理 CONNECT 响应", e))?;
+        let (head, _leftover) = crate::wire::read_header_block(&mut channel, MAX_HEADER)
+            .map_err(|e| user_error("读取代理 CONNECT 响应", e))?;
         let status = parse_status(&head).ok_or_else(|| {
             "读取代理 CONNECT 响应失败；请检查代理；请求不会改为直连。".to_owned()
         })?;
@@ -308,6 +339,9 @@ impl Egress {
                 "代理拒绝 CONNECT 请求（HTTP {status}）；请求不会改为直连"
             ));
         }
+        // Go clears the socket deadline once the tunnel is live; the caller
+        // imposes its own per-request budget.
+        channel.clear_deadline();
         Ok(channel)
     }
 
@@ -458,10 +492,29 @@ fn push_socks5_target(req: &mut Vec<u8>, host: &str, port: u16) -> Result<(), St
 }
 
 fn tcp_connect(target: &str, deadline: Instant) -> std::io::Result<TcpStream> {
-    let addrs: Vec<_> = target.to_socket_addrs()?.collect();
+    // Numeric endpoints (which the cage config mandates) never go through
+    // getaddrinfo: a hung host resolver must not stall the egress dial.
+    let addrs: Vec<std::net::SocketAddr> = match target
+        .rsplit_once(':')
+        .and_then(|(h, p)| Some((h, p.parse::<u16>().ok()?)))
+    {
+        Some((host, port)) => match host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse::<std::net::IpAddr>()
+        {
+            Ok(ip) => vec![std::net::SocketAddr::new(ip, port)],
+            Err(_) => target.to_socket_addrs()?.collect(),
+        },
+        None => target.to_socket_addrs()?.collect(),
+    };
     let mut last = std::io::Error::new(std::io::ErrorKind::NotFound, "no address for upstream");
     for addr in addrs {
-        match TcpStream::connect_timeout(&addr, DIAL_TIMEOUT) {
+        let budget = deadline
+            .checked_duration_since(Instant::now())
+            .unwrap_or(Duration::from_millis(1))
+            .max(Duration::from_millis(1));
+        match TcpStream::connect_timeout(&addr, budget) {
             Ok(s) => {
                 let _ = s.set_nodelay(true);
                 let _ = s.set_read_timeout(Some(
@@ -563,7 +616,7 @@ pub fn request_bounded(
     let host = u.host_str().ok_or("request URL has no host")?.to_owned();
     let default_port = if https { 443 } else { 80 };
     let port = u.port().unwrap_or(default_port);
-    let channel = egress.dial(&join_addr(&host, port))?;
+    let channel = egress.dial_deadline(&join_addr(&host, port), deadline)?;
     let Channel(mut kind) = channel;
     if https {
         let inner: Box<dyn RW> = match kind {
@@ -602,36 +655,16 @@ pub fn request_bounded(
         .write_all(req.as_bytes())
         .map_err(|e| e.to_string())?;
     channel.write_all(body).map_err(|e| e.to_string())?;
-    let head = read_header_block(&mut channel).map_err(|e| e.to_string())?;
+    let (head, mut body_stream) =
+        crate::wire::read_header_block(&mut channel, MAX_HEADER).map_err(|e| e.to_string())?;
     let status = parse_status(&head).ok_or("invalid HTTP response")?;
     let headers = parse_headers(&head);
-    let http_body = read_body(&mut channel, &headers, max_body)?;
+    let http_body = read_body(&mut body_stream, &headers, max_body)?;
     Ok(HttpResponse {
         status,
         headers,
         body: http_body,
     })
-}
-
-fn read_header_block<C: Read>(channel: &mut C) -> Result<Vec<u8>, std::io::Error> {
-    let mut block = Vec::with_capacity(512);
-    let mut byte = [0u8; 1];
-    loop {
-        match channel.read(&mut byte) {
-            Ok(0) => break,
-            Ok(_) => {
-                block.push(byte[0]);
-                if block.len() > MAX_HEADER {
-                    return Err(std::io::Error::other("HTTP response header too large"));
-                }
-                if block.ends_with(b"\r\n\r\n") || block.ends_with(b"\n\n") {
-                    break;
-                }
-            }
-            Err(e) => return Err(e),
-        }
-    }
-    Ok(block)
 }
 
 fn parse_status(head: &[u8]) -> Option<u16> {
@@ -672,6 +705,8 @@ fn read_body<C: Read>(
     {
         body = read_chunked(channel, max_body)?;
     } else if let Some(len) = header("content-length").and_then(|v| v.parse::<u64>().ok()) {
+        // Exact read: EOF is never required — peers may hold the tunnel
+        // open after the body.
         if len > max_body as u64 {
             return Err("HTTP response body too large".to_owned());
         }
@@ -679,14 +714,20 @@ fn read_body<C: Read>(
             .take(len)
             .read_to_end(&mut body)
             .map_err(|e| e.to_string())?;
+        if body.len() as u64 != len {
+            return Err("incomplete HTTP response body".to_owned());
+        }
     } else {
-        channel
-            .take(max_body as u64)
+        // Without Content-Length the stream ends at EOF; read one byte past
+        // the cap so an oversized body errors instead of importing silently
+        // truncated.
+        (&mut *channel)
+            .take(max_body as u64 + 1)
             .read_to_end(&mut body)
             .map_err(|e| e.to_string())?;
-    }
-    if body.len() > max_body {
-        return Err("HTTP response body too large".to_owned());
+        if body.len() > max_body {
+            return Err("HTTP response body too large".to_owned());
+        }
     }
     Ok(body)
 }
@@ -838,7 +879,10 @@ mod tests {
             );
             (200, reply.pack().unwrap())
         });
-        let egress = loopback_egress(&support_proxy(), stub.url());
+        let egress = loopback_egress(
+            &crate::tests_support::MixedProxy::start(vec![]).addr,
+            stub.url(),
+        );
         let reply = egress
             .exchange_dns(&query("example.com", crate::dnsmsg::TYPE_A))
             .unwrap();
@@ -850,7 +894,10 @@ mod tests {
     #[test]
     fn doh_fences_aaaa_queries_before_the_wire() {
         let stub = support_doh(|_| (200, Vec::new()));
-        let egress = loopback_egress(&support_proxy(), stub.url());
+        let egress = loopback_egress(
+            &crate::tests_support::MixedProxy::start(vec![]).addr,
+            stub.url(),
+        );
         let reply = egress
             .exchange_dns(&query("example.com", crate::dnsmsg::TYPE_AAAA))
             .unwrap();
@@ -865,7 +912,10 @@ mod tests {
     #[test]
     fn doh_fences_local_names_before_the_wire() {
         let stub = support_doh(|_| (200, Vec::new()));
-        let egress = loopback_egress(&support_proxy(), stub.url());
+        let egress = loopback_egress(
+            &crate::tests_support::MixedProxy::start(vec![]).addr,
+            stub.url(),
+        );
         for name in [
             "localhost",
             "api.localhost",
@@ -890,7 +940,10 @@ mod tests {
             }
             (200, Message::reply(q, 0, Vec::new()).pack().unwrap())
         });
-        let egress = loopback_egress(&support_proxy(), stub.url());
+        let egress = loopback_egress(
+            &crate::tests_support::MixedProxy::start(vec![]).addr,
+            stub.url(),
+        );
         let reply = egress
             .exchange_dns(&query("retry.example.com", crate::dnsmsg::TYPE_A))
             .unwrap();
@@ -906,7 +959,10 @@ mod tests {
             reply.id = reply.id.wrapping_add(1);
             (200, reply.pack().unwrap())
         });
-        let egress = loopback_egress(&support_proxy(), stub.url());
+        let egress = loopback_egress(
+            &crate::tests_support::MixedProxy::start(vec![]).addr,
+            stub.url(),
+        );
         let err = egress
             .exchange_dns(&query("wrong-id.example.com", crate::dnsmsg::TYPE_A))
             .unwrap_err();
@@ -916,7 +972,10 @@ mod tests {
     #[test]
     fn doh_client_errors_are_terminal_not_retried() {
         let stub = support_doh(|_| (404, Vec::new()));
-        let egress = loopback_egress(&support_proxy(), stub.url());
+        let egress = loopback_egress(
+            &crate::tests_support::MixedProxy::start(vec![]).addr,
+            stub.url(),
+        );
         let err = egress
             .exchange_dns(&query("gone.example.com", crate::dnsmsg::TYPE_A))
             .unwrap_err();
@@ -934,98 +993,6 @@ mod doh_support {
     use std::sync::Arc;
 
     type Answer = Arc<dyn Fn(&crate::dnsmsg::Message) -> (u16, Vec<u8>) + Send + Sync>;
-
-    /// The proxy side of the DoH tunnel: a socks5 CONNECT relay on loopback
-    /// (domain targets only, no auth — the stub just carries bytes).
-    pub fn proxy() -> String {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind socks5 stub");
-        let addr = listener.local_addr().expect("addr").to_string();
-        let listener = listener.try_clone().expect("clone");
-        std::thread::spawn(move || {
-            for stream in listener.incoming().flatten() {
-                std::thread::spawn(move || {
-                    let mut stream = stream;
-                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
-                    let mut head = [0u8; 2];
-                    if stream.read_exact(&mut head).is_err() || head[0] != 0x05 {
-                        return;
-                    }
-                    let mut methods = vec![0u8; head[1] as usize];
-                    if stream.read_exact(&mut methods).is_err() {
-                        return;
-                    }
-                    if !methods.contains(&0x00) {
-                        let _ = stream.write_all(&[0x05, 0xff]);
-                        return;
-                    }
-                    if stream.write_all(&[0x05, 0x00]).is_err() {
-                        return;
-                    }
-                    let mut head = [0u8; 4];
-                    if stream.read_exact(&mut head).is_err() {
-                        return;
-                    }
-                    let (host, port) = match head[3] {
-                        0x01 => {
-                            let mut octets = [0u8; 4];
-                            if stream.read_exact(&mut octets).is_err() {
-                                return;
-                            }
-                            let mut port = [0u8; 2];
-                            if stream.read_exact(&mut port).is_err() {
-                                return;
-                            }
-                            (
-                                std::net::IpAddr::V4(std::net::Ipv4Addr::from(octets)).to_string(),
-                                u16::from_be_bytes(port),
-                            )
-                        }
-                        0x03 => {
-                            let mut len = [0u8; 1];
-                            if stream.read_exact(&mut len).is_err() {
-                                return;
-                            }
-                            let mut host = vec![0u8; len[0] as usize];
-                            if stream.read_exact(&mut host).is_err() {
-                                return;
-                            }
-                            let mut port = [0u8; 2];
-                            if stream.read_exact(&mut port).is_err() {
-                                return;
-                            }
-                            (
-                                String::from_utf8_lossy(&host).into_owned(),
-                                u16::from_be_bytes(port),
-                            )
-                        }
-                        _ => return,
-                    };
-                    let mut upstream = match std::net::TcpStream::connect((host.as_str(), port)) {
-                        Ok(s) => s,
-                        Err(_) => {
-                            let _ = stream.write_all(&[0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0]);
-                            return;
-                        }
-                    };
-                    let _ = stream.write_all(&[0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]);
-                    let mut upstream_clone = match upstream.try_clone() {
-                        Ok(s) => s,
-                        Err(_) => return,
-                    };
-                    let mut stream_clone = match stream.try_clone() {
-                        Ok(s) => s,
-                        Err(_) => return,
-                    };
-                    let up = std::thread::spawn(move || {
-                        let _ = std::io::copy(&mut stream_clone, &mut upstream_clone);
-                    });
-                    let _ = std::io::copy(&mut upstream, &mut stream);
-                    let _ = up.join();
-                });
-            }
-        });
-        addr
-    }
 
     /// A DoH stub speaking plain HTTP on loopback; counts requests so tests
     /// can assert whether the wire was touched at all.
@@ -1065,10 +1032,13 @@ mod doh_support {
                                 .then(|| v.trim().parse().ok())?
                         })
                         .unwrap_or(0);
+                    eprintln!("DOHSTUB: head ok len={len}");
                     let mut wire = vec![0u8; len];
                     if stream.read_exact(&mut wire).is_err() {
+                        eprintln!("DOHSTUB: body read FAILED");
                         return;
                     }
+                    eprintln!("DOHSTUB: body ok");
                     let body = match crate::dnsmsg::Message::unpack(&wire) {
                         Ok(query) => {
                             let (status, body) = answer(&query);
@@ -1083,17 +1053,16 @@ mod doh_support {
                         }
                         Err(_) => b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n".to_vec(),
                     };
-                    let _ = stream.write_all(&body);
+                    match stream.write_all(&body) {
+                        Ok(()) => eprintln!("DOHSTUB: resp written {}", body.len()),
+                        Err(e) => eprintln!("DOHSTUB: resp write ERR {e}"),
+                    }
+                    let _ = stream.shutdown(std::net::Shutdown::Write);
                 });
             }
         });
         (format!("http://{addr}/dns-query"), hits)
     }
-}
-
-#[cfg(test)]
-fn support_proxy() -> String {
-    doh_support::proxy()
 }
 
 #[cfg(test)]
