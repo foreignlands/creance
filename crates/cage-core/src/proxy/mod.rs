@@ -385,11 +385,22 @@ pub fn select_and_apply(profile: &str, config_path: &str, node: &str) -> Result<
     Ok(store)
 }
 
-/// Starts the managed core for the profile's applied node. Every real start
-/// rotates the revision, so a stale record can never re-open a gate.
+/// Starts the managed core for the profile's applied node. An already
+/// running, matching core is a no-op (no rotation, no gate disturbance) —
+/// the revision rotates only when a real restart is about to happen, so a
+/// stale record can never re-open a gate.
 pub fn start_managed(profile: &str, config_path: &str) -> Result<(), String> {
     let config = crate::config::load(config_path)?;
-    let mut store = applied(profile, &config.proxy_url, &config.proxy_revision)?;
+    let store = applied(profile, &config.proxy_url, &config.proxy_revision)?;
+    // Fast path (Go proxyCommand): same physical binding and a running,
+    // matching core means nothing to do.
+    let config_yaml = crate::paths::join(&dir(profile), "config.yaml");
+    let bound = runtime::bound_interface(&config_yaml).unwrap_or_default();
+    let physical = service::physical_interface().unwrap_or_default();
+    if !physical.is_empty() && bound == physical && service::running(profile, &store) {
+        return Ok(());
+    }
+    let mut store = store;
     store.revision = token();
     save(profile, &store)?;
     let mut config = config;

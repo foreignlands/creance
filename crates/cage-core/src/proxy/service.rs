@@ -96,7 +96,10 @@ fn api(profile: &str, method: &str, path: &str) -> Result<serde_json::Value, Str
         .write_all(req.as_bytes())
         .map_err(|e| e.to_string())?;
     let mut raw = Vec::new();
-    stream.read_to_end(&mut raw).map_err(|e| e.to_string())?;
+    stream
+        .take(1 << 20)
+        .read_to_end(&mut raw)
+        .map_err(|e| e.to_string())?;
     let split = raw
         .windows(4)
         .position(|w| w == b"\r\n\r\n")
@@ -116,7 +119,7 @@ fn api(profile: &str, method: &str, path: &str) -> Result<serde_json::Value, Str
 
 /// Whether the running core is the one this store describes: same port, same
 /// binding, same selection. Anything else counts as not running.
-fn check_running(profile: &str, store: &Store) -> Result<(), String> {
+pub fn check_running(profile: &str, store: &Store) -> Result<(), String> {
     let bound = bound_interface(
         &Path::new(&dir(profile))
             .join("config.yaml")
@@ -174,6 +177,8 @@ pub fn stop(profile: &str) -> Result<(), String> {
     let domain = format!("gui/{}", uid());
     let label = format!("{domain}/{}", service_label(profile));
     if run_command("launchctl", &["print", &label]).is_err() {
+        // Not loaded: a leftover plist from a failed bootstrap is residue.
+        let _ = std::fs::remove_file(service_path(profile));
         return Ok(());
     }
     if run_command("launchctl", &["bootout", &domain, &service_path(profile)]).is_err() {
@@ -257,6 +262,9 @@ pub fn start(profile: &str, store: &Store) -> Result<(), String> {
     write_private(&service_path(profile), plist.as_bytes())?;
     let domain = format!("gui/{}", uid());
     if run_command("launchctl", &["bootstrap", &domain, &service_path(profile)]).is_err() {
+        // Roll the half-started state back off so a retry starts clean.
+        let _ = run_command("launchctl", &["bootout", &domain, &service_path(profile)]);
+        let _ = std::fs::remove_file(service_path(profile));
         return Err("无法启动 Cage 自带代理核心".to_owned());
     }
     let deadline = Instant::now() + START_BUDGET;
@@ -294,6 +302,20 @@ pub fn log_relay_proxy(profile: &str) -> i32 {
         return 1;
     };
     let config = Path::new(&proxy_dir).join("config.yaml");
+    // Signal disposition is installed BEFORE the child exists: a SIGTERM
+    // arriving between spawn and handler setup would otherwise kill the
+    // relay and orphan mihomo.
+    unsafe {
+        CHILD_PID.store(0, Ordering::Relaxed);
+        libc::signal(
+            libc::SIGTERM,
+            forward_signal as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGINT,
+            forward_signal as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        );
+    }
     let mut child = match std::process::Command::new(&core)
         .arg("-d")
         .arg(&proxy_dir)
@@ -314,11 +336,7 @@ pub fn log_relay_proxy(profile: &str) -> i32 {
             return 1;
         }
     };
-    unsafe {
-        CHILD_PID.store(child.id() as i32, Ordering::Relaxed);
-        libc::signal(libc::SIGTERM, forward_signal as *const () as usize);
-        libc::signal(libc::SIGINT, forward_signal as *const () as usize);
-    }
+    CHILD_PID.store(child.id() as i32, Ordering::Relaxed);
     // The log handle now moves into the writer thread; `report` above owns
     // it until the child is up, so the file is opened again for streaming.
     let log = std::fs::OpenOptions::new()
@@ -401,21 +419,17 @@ fn xml_escape(s: &str) -> String {
 }
 
 /// Copies an executable into the proxy directory unless the destination
-/// already matches (same size and not older than the source).
+/// already has identical content (sha256; size is only a cheap pre-filter).
 fn copy_executable_if_changed(src: &str, dst: &str) -> Result<(), String> {
-    let src_meta = std::fs::metadata(src).map_err(|e| e.to_string())?;
-    if let Ok(dst_meta) = std::fs::metadata(dst) {
-        if dst_meta.len() == src_meta.len()
-            && dst_meta
-                .modified()
-                .ok()
-                .zip(src_meta.modified().ok())
-                .is_some_and(|(d, s)| d >= s)
+    let src_bytes = std::fs::read(src).map_err(|e| e.to_string())?;
+    if let Ok(dst_bytes) = std::fs::read(dst) {
+        if dst_bytes.len() == src_bytes.len()
+            && sha2::Sha256::digest(&dst_bytes) == sha2::Sha256::digest(&src_bytes)
         {
             return Ok(());
         }
     }
-    std::fs::copy(src, dst).map_err(|e| e.to_string())?;
+    std::fs::write(dst, &src_bytes).map_err(|e| e.to_string())?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

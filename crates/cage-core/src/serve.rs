@@ -15,6 +15,9 @@ use std::net::TcpListener;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+/// Concurrent connection ceiling for the loopback workbench.
+const MAX_CONNECTIONS: usize = 64;
+
 const CHECK_URL: &str = "https://1.1.1.1/cdn-cgi/trace";
 const CHECK_BUDGET: Duration = Duration::from_secs(25);
 /// The UI, embedded at build time.
@@ -25,12 +28,25 @@ pub fn serve(profile: &str, config_path: &str, port: u16) -> Result<(), String> 
     let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|e| e.to_string())?;
     eprintln!("cage workbench on http://127.0.0.1:{port} (profile {profile})");
     let port = listener.local_addr().map(|a| a.port()).unwrap_or(port);
+    let live = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     for stream in listener.incoming().flatten() {
+        // A local process must not be able to thread-flood the workbench.
+        if live.load(std::sync::atomic::Ordering::Relaxed) >= MAX_CONNECTIONS {
+            let mut stream = stream;
+            let _ = stream.write_all(b"HTTP/1.1 503 Busy\r\nContent-Length: 0\r\n\r\n");
+            continue;
+        }
+        live.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let live = live.clone();
         let ctx = ServeCtx {
             profile: profile.to_owned(),
             config_path: config_path.to_owned(),
+            live: live.clone(),
         };
-        std::thread::spawn(move || handle(stream, port, ctx));
+        std::thread::spawn(move || {
+            handle(stream, port, ctx);
+            live.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        });
     }
     Ok(())
 }
@@ -38,10 +54,14 @@ pub fn serve(profile: &str, config_path: &str, port: u16) -> Result<(), String> 
 struct ServeCtx {
     profile: String,
     config_path: String,
+    /// Keeps the connection slot owned by this handler's spawn scope alive.
+    #[allow(dead_code)]
+    live: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
 fn handle(mut stream: std::net::TcpStream, port: u16, ctx: ServeCtx) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
     let (head, mut stream) = match crate::wire::read_header_block(&mut stream, 16 << 10) {
         Ok((h, r)) if !h.is_empty() => (h, r),
         _ => return,
@@ -65,6 +85,12 @@ fn handle(mut stream: std::net::TcpStream, port: u16, ctx: ServeCtx) {
     }
     if body_len > 1 << 20 {
         return reply(&mut stream, 400, "body too large");
+    }
+    if text
+        .lines()
+        .any(|l| l.eq_ignore_ascii_case("transfer-encoding: chunked"))
+    {
+        return reply(&mut stream, 400, "chunked bodies are not supported");
     }
     let mut body = vec![0u8; body_len];
     if body_len > 0 && stream.read_exact(&mut body).is_err() {
