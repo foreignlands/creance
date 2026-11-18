@@ -38,10 +38,37 @@ pub fn fetch_subscription_through(egress: &Egress, url: &str) -> Result<Vec<u8>,
                     .header("location")
                     .ok_or("redirect response without Location")?;
                 let base = url::Url::parse(&current).map_err(|e| e.to_string())?;
-                current = base
+                let next = base
                     .join(location)
-                    .map_err(|e| format!("invalid redirect target: {e}"))?
-                    .to_string();
+                    .map_err(|e| format!("invalid redirect target: {e}"))?;
+                // A literal loopback/private/link-local target is dialed by
+                // the LOCAL core, turning a hostile subscription into an
+                // SSRF probe of the host and LAN. Hostnames resolve at the
+                // remote exit, so only literals need refusing here.
+                let host = next.host_str().unwrap_or_default();
+                if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+                    let blocked = match ip {
+                        std::net::IpAddr::V4(v4) => {
+                            v4.is_loopback()
+                                || v4.is_private()
+                                || v4.is_link_local()
+                                || v4.is_unspecified()
+                                || v4.is_broadcast()
+                                || v4.is_multicast()
+                        }
+                        std::net::IpAddr::V6(v6) => {
+                            v6.is_loopback()
+                                || v6.is_unspecified()
+                                || v6.is_multicast()
+                                || (v6.segments()[0] & 0xfe00) == 0xfc00 // unique-local
+                                || (v6.segments()[0] & 0xffc0) == 0xfe80 // link-local
+                        }
+                    };
+                    if blocked {
+                        return Err(format!("订阅重定向指向内网或本机地址（{host}），已拒绝"));
+                    }
+                }
+                current = next.to_string();
             }
             status => return Err(format!("subscription fetch returned HTTP {status}")),
         }
@@ -97,6 +124,33 @@ mod tests {
         let body =
             fetch_subscription_through(&egress, &format!("http://{}/sub", redirect.addr)).unwrap();
         assert_eq!(body, b"moved");
+    }
+
+    #[test]
+    fn fetch_refuses_private_redirect_targets() {
+        // SSRF guard: a redirect to loopback/private/link-local literals is
+        // dialed by the LOCAL core and must be refused, not followed.
+        let proxy = MixedProxy::start(vec![]);
+        for target in [
+            "http://127.0.0.1:8080/admin",
+            "http://10.1.2.3/x",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://192.168.1.1/router",
+            "http://[::1]:80/x",
+        ] {
+            let redirect = RedirectServer::start(target);
+            let egress = Egress::new(&loopback_config(&proxy.addr)).unwrap();
+            let err = fetch_subscription_through(&egress, &format!("http://{}/sub", redirect.addr))
+                .unwrap_err();
+            assert!(err.contains("内网或本机"), "target {target}: {err}");
+        }
+        // Public literals and hostnames still follow normally.
+        let target = StaticServer::start(b"ok".to_vec());
+        let redirect = RedirectServer::start(&format!("http://{}/next", target.addr));
+        let egress = Egress::new(&loopback_config(&proxy.addr)).unwrap();
+        let body =
+            fetch_subscription_through(&egress, &format!("http://{}/sub", redirect.addr)).unwrap();
+        assert_eq!(body, b"ok");
     }
 
     #[test]

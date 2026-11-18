@@ -299,6 +299,11 @@ pub fn log_relay_proxy(profile: &str) -> i32 {
         .arg(&proxy_dir)
         .arg("-f")
         .arg(&config)
+        // The core inherits NOTHING from the user's shell: host proxies and
+        // credentials (HTTP_PROXY, ANTHROPIC keys, ...) must not reach it.
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", &proxy_dir)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()

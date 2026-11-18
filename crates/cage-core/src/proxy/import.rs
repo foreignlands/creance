@@ -12,6 +12,10 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
 /// The protocols the bundled core supports for imports.
+/// The node fields cage canonicalizes (case/underscore-insensitively) before
+/// reading or counting them.
+const CANONICAL_KEYS: &[&str] = &["name", "type", "server", "udp", "dialer-proxy"];
+
 const SUPPORTED_TYPES: &[&str] = &[
     "http",
     "socks5",
@@ -59,17 +63,29 @@ pub fn parse_nodes(data: &[u8], source_id: &str) -> Result<(Vec<Node>, Vec<NodeI
             ..Default::default()
         };
         let map = match yaml_object(item) {
-            Ok(m) => {
-                let name = str_field(&m, "name");
-                if name.len() <= 240 {
-                    issue.name = name.clone();
+            Ok(mut m) => {
+                // Canonicalize the cage-managed keys BEFORE anything reads
+                // them: mihomo matches keys case-insensitively, so `Name:`
+                // and `name:` are the same field and duplicate detection
+                // must see one spelling only.
+                match normalize_import_keys(&mut m, CANONICAL_KEYS) {
+                    Ok(()) => {
+                        let name = str_field(&m, "name");
+                        if name.len() <= 240 {
+                            issue.name = name.clone();
+                        }
+                        let typ = str_field(&m, "type");
+                        if SUPPORTED_TYPES.contains(&typ.as_str()) {
+                            issue.r#type = typ.clone();
+                        }
+                        *name_counts.entry(name).or_default() += 1;
+                        Some(m)
+                    }
+                    Err(e) => {
+                        issue.reason = e;
+                        None
+                    }
                 }
-                let typ = str_field(&m, "type");
-                if SUPPORTED_TYPES.contains(&typ.as_str()) {
-                    issue.r#type = typ.clone();
-                }
-                *name_counts.entry(name).or_default() += 1;
-                Some(m)
             }
             Err(e) => {
                 issue.reason = e;
@@ -86,16 +102,12 @@ pub fn parse_nodes(data: &[u8], source_id: &str) -> Result<(Vec<Node>, Vec<NodeI
         let Some(map) = map else {
             continue;
         };
-        let key_error =
-            normalize_import_keys(map, &["name", "type", "server", "udp", "dialer-proxy"]).err();
         let name = str_field(map, "name");
         let typ = str_field(map, "type");
         let server = str_field(map, "server");
-        issue.reason = if let Some(e) = key_error {
-            e
-        } else if name.trim().is_empty() || name.len() > 240 {
+        issue.reason = if name.trim().is_empty() || name.len() > 240 {
             "节点名称为空或过长".to_owned()
-        } else if name_counts[&name] > 1 {
+        } else if name_counts.get(&name).copied().unwrap_or(1) > 1 {
             "节点名称重复，无法确定代理链引用".to_owned()
         } else if !SUPPORTED_TYPES.contains(&typ.as_str()) {
             "节点协议暂不支持".to_owned()
@@ -401,18 +413,22 @@ pub(super) fn normalize_websocket(map: &mut Map<String, Value>) -> Result<(), St
         map.remove("ws-path");
     }
     if let Some(headers) = map.get("ws-headers").cloned() {
-        let incoming = web_socket_headers(&headers)?;
+        let mut merged = web_socket_headers(&headers)?;
         if let Some(current) = opts.get("headers") {
             let modern = web_socket_headers(current)?;
-            for (k, v) in &modern {
-                if let Some(prev) = incoming.get(k) {
-                    if prev != v {
+            // Go semantics: the modern set merges into the legacy one —
+            // equal values overwrite harmlessly, differing values conflict,
+            // and modern-only headers are KEPT, never dropped.
+            for (k, v) in modern {
+                if let Some(prev) = merged.get(&k) {
+                    if prev != &v {
                         return Err("WebSocket 字段 ws-headers 与 ws-opts.headers 冲突".to_owned());
                     }
                 }
+                merged.insert(k, v);
             }
         }
-        opts.insert("headers".to_owned(), Value::Object(incoming));
+        opts.insert("headers".to_owned(), Value::Object(merged));
         map.remove("ws-headers");
     }
     map.insert("ws-opts".to_owned(), Value::Object(opts));
@@ -775,5 +791,64 @@ proxies:
         let exit = nodes.iter().find(|n| n.name == "Exit A").unwrap();
         assert_eq!(exit.id, hex::encode(&digest[..12]));
         assert_eq!(exit.id.len(), 24);
+    }
+}
+
+#[cfg(test)]
+mod adversarial_tests {
+    use super::*;
+
+    #[test]
+    fn case_variant_keys_never_panic_and_count_once() {
+        // mihomo matches keys case-insensitively; a subscription spelling
+        // `Name:` must import identically to `name:`.
+        let y = "proxies:\n  - Name: CaseExit\n    TYPE: ss\n    Server: 192.0.2.9\n    PORT: 8388\n    cipher: aes-128-gcm\n    password: x\n";
+        let (nodes, skipped) = parse_nodes(y.as_bytes(), "src").expect("case variants import");
+        assert!(skipped.is_empty(), "{skipped:?}");
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].name, "CaseExit");
+
+        // Same-name nodes through case variants are still duplicates: one
+        // canonical spelling means one count of two.
+        let dup = "proxies:\n  - name: X\n    type: ss\n    server: 1.1.1.1\n    port: 1\n    cipher: aes-128-gcm\n    password: x\n  - NAME: X\n    type: ss\n    server: 2.2.2.2\n    port: 1\n    cipher: aes-128-gcm\n    password: x\n";
+        let err = parse_nodes(dup.as_bytes(), "src").unwrap_err();
+        assert!(err.contains("没有可导入的节点"), "{err}");
+    }
+
+    #[test]
+    fn duplicate_key_spellings_are_refused() {
+        // `name` and `NAME` in one node: two spellings of one field.
+        let y = "proxies:\n  - name: A\n    NAME: B\n    type: ss\n    server: 1.1.1.1\n    port: 1\n    cipher: aes-128-gcm\n    password: x\n";
+        let err = parse_nodes(y.as_bytes(), "src").unwrap_err();
+        assert!(err.contains("重复写法"), "{err}");
+    }
+
+    #[test]
+    fn ws_headers_merge_keeps_modern_only_headers() {
+        // Legacy ws-headers + modern ws-opts.headers: the union survives,
+        // a modern-only header is never dropped, conflicts still error.
+        let y = "proxies:\n  - name: WS\n    type: vmess\n    server: example.com\n    port: 443\n    uuid: 00000000-0000-0000-0000-000000000000\n    network: ws\n    ws-path: /api\n    ws-headers:\n      Host: example.com\n    ws-opts:\n      path: /api\n      headers:\n        User-Agent: cage-test\n";
+        let (nodes, _) = parse_nodes(y.as_bytes(), "src").unwrap();
+        let headers = &nodes[0].config["ws-opts"]["headers"];
+        assert_eq!(
+            headers.get("Host").and_then(Value::as_str),
+            Some("example.com"),
+            "legacy header kept"
+        );
+        assert_eq!(
+            headers.get("User-Agent").and_then(Value::as_str),
+            Some("cage-test"),
+            "modern-only header kept (union, not legacy-only)"
+        );
+    }
+
+    #[test]
+    fn ws_headers_conflicting_values_still_refused() {
+        let y = "proxies:\n  - name: WS2\n    type: trojan\n    server: example.com\n    port: 443\n    password: x\n    network: ws\n    ws-headers:\n      Host: a.example\n    ws-opts:\n      headers:\n        Host: b.example\n";
+        let err = parse_nodes(y.as_bytes(), "src").unwrap_err();
+        assert!(
+            err.contains("冲突") || err.contains("没有可导入的节点"),
+            "{err}"
+        );
     }
 }
