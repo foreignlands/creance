@@ -1,0 +1,21 @@
+[package]
+name = "creance-proxy"
+description = "Managed proxy lifecycle: subscription store and import, mihomo runtime config, launchd service."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+url = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+libc = { workspace = true }
+creance-net = { workspace = true }
+creance-vm = { workspace = true }
+
+[lints]
+workspace = true

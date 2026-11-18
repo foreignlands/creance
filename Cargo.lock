@@ -62,33 +62,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cage"
-version = "0.1.0"
-dependencies = [
- "cage-core",
- "clap",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "cage-core"
-version = "0.1.0"
-dependencies = [
- "hex",
- "libc",
- "rand",
- "rustls",
- "rustls-pki-types",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2",
- "url",
- "webpki-roots 0.26.11",
-]
-
-[[package]]
 name = "cc"
 version = "1.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -157,6 +130,73 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "creance"
+version = "0.2.0"
+dependencies = [
+ "clap",
+ "creance-gate",
+ "creance-net",
+ "creance-proxy",
+ "creance-vm",
+ "hex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+]
+
+[[package]]
+name = "creance-gate"
+version = "0.2.0"
+dependencies = [
+ "creance-net",
+ "creance-proxy",
+ "creance-vm",
+ "libc",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "creance-net"
+version = "0.2.0"
+dependencies = [
+ "rustls",
+ "rustls-pki-types",
+ "url",
+ "webpki-roots 0.26.11",
+]
+
+[[package]]
+name = "creance-proxy"
+version = "0.2.0"
+dependencies = [
+ "creance-net",
+ "creance-vm",
+ "hex",
+ "libc",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "url",
+]
+
+[[package]]
+name = "creance-vm"
+version = "0.2.0"
+dependencies = [
+ "creance-net",
+ "hex",
+ "libc",
+ "rand",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
 ]
 
 [[package]]

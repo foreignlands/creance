@@ -1,0 +1,18 @@
+[package]
+name = "creance-gate"
+description = "Exit policy and the per-instance network gate control plane."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+libc = { workspace = true }
+creance-net = { workspace = true }
+creance-vm = { workspace = true }
+creance-proxy = { workspace = true }
+
+[lints]
+workspace = true

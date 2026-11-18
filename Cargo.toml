@@ -1,11 +1,18 @@
 [workspace]
 resolver = "2"
-members = ["crates/cage-core", "crates/cage"]
+members = [
+    "crates/creance",
+    "crates/creance-gate",
+    "crates/creance-net",
+    "crates/creance-proxy",
+    "crates/creance-vm",
+]
 
 [workspace.package]
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/Lee-xeo/Claude-Cage"
+repository = "https://github.com/your-org/creance"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -20,6 +27,14 @@ rustls-pki-types = "1"
 webpki-roots = "0.26"
 clap = { version = "4", features = ["derive"] }
 libc = "0.2"
+
+creance-net = { path = "crates/creance-net" }
+creance-vm = { path = "crates/creance-vm" }
+creance-proxy = { path = "crates/creance-proxy" }
+creance-gate = { path = "crates/creance-gate" }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
 
 [profile.release]
 lto = true

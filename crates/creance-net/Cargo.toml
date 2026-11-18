@@ -1,0 +1,16 @@
+[package]
+name = "creance-net"
+description = "Proxy-only network fabric: SOCKS5/CONNECT/TLS tunnels, DoH, DNS wire codec."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+url = { workspace = true }
+rustls = { workspace = true }
+rustls-pki-types = { workspace = true }
+webpki-roots = { workspace = true }
+
+[lints]
+workspace = true

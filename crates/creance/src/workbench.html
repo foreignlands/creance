@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>creance</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#0f1117; --card:#171a23; --line:#262b38; --text:#e6e9f0; --dim:#8b93a7; --ok:#4ade80; --bad:#f87171; --warn:#fbbf24; --accent:#6c8cff; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--text); font:14px/1.6 -apple-system,"SF Pro Text","PingFang SC",sans-serif; padding:24px; max-width:980px; margin:0 auto; }
+  h1 { font-size:18px; margin-bottom:4px; }
+  .sub { color:var(--dim); font-size:12px; margin-bottom:20px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .card h2 { font-size:13px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; margin-bottom:10px; }
+  .row { display:flex; justify-content:space-between; gap:8px; padding:4px 0; }
+  .k { color:var(--dim); } .v { text-align:right; word-break:break-all; }
+  .pill { padding:1px 9px; border-radius:99px; font-size:12px; border:1px solid var(--line); }
+  .pill.ok { color:var(--ok); border-color:var(--ok); } .pill.bad { color:var(--bad); border-color:var(--bad); } .pill.warn { color:var(--warn); border-color:var(--warn); }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:7px 14px; font-size:13px; cursor:pointer; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--text); }
+  button:disabled { opacity:.5; cursor:default; }
+  input, select { background:#0c0e14; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:7px 10px; font-size:13px; width:100%; }
+  label { display:block; color:var(--dim); font-size:12px; margin:8px 0 4px; }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  #log { font:12px/1.5 "SF Mono",monospace; color:var(--dim); height:120px; overflow:auto; background:#0c0e14; border-radius:8px; padding:8px; margin-top:8px; }
+  .nodes { max-height:220px; overflow:auto; }
+  .node { display:flex; gap:8px; align-items:center; padding:5px 6px; border-radius:6px; cursor:pointer; }
+  .node:hover { background:#1e2230; } .node.sel { background:#20263a; }
+  .node .t { color:var(--dim); font-size:11px; }
+  .full { grid-column:1/-1; }
+  .err { color:var(--bad); font-size:12px; margin-top:6px; min-height:16px; white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<h1>creance</h1>
+<div class="sub">contained workspace — 状态 / 订阅 / 节点 / 核心生命周期 / 出口检查</div>
+
+<div class="grid">
+  <div class="card" id="status-card">
+    <h2>状态</h2>
+    <div class="row"><span class="k">实例</span><span class="v" id="st-instance">—</span></div>
+    <div class="row"><span class="k">代理应用</span><span class="v" id="st-applied">—</span></div>
+    <div class="row"><span class="k">核心运行</span><span class="v" id="st-core">—</span></div>
+    <div class="row"><span class="k">路由</span><span class="v" id="st-route">—</span></div>
+    <div class="row"><span class="k">节点数</span><span class="v" id="st-nodes">—</span></div>
+    <div class="row"><span class="k">出口指纹</span><span class="v" id="st-tz">—</span></div>
+    <div class="actions">
+      <button onclick="act('/api/proxy/start')">启动核心</button>
+      <button class="ghost" onclick="act('/api/proxy/stop')">停止核心</button>
+      <button class="ghost" onclick="act('/api/check')">出口检查</button>
+    </div>
+    <div class="err" id="status-err"></div>
+  </div>
+
+  <div class="card">
+    <h2>导入订阅</h2>
+    <label>来源名称</label><input id="sub-name" placeholder="我的订阅">
+    <label>订阅 URL（经代理拉取，无直连回退）</label><input id="sub-url" placeholder="https://example.com/sub.yaml">
+    <div class="actions"><button onclick="importSub()">导入</button>
+    <button class="ghost" onclick="act('/api/proxy/refresh-x')"> </button></div>
+    <div class="err" id="import-err"></div>
+  </div>
+
+  <div class="card full">
+    <h2>节点（点击应用为出口）</h2>
+    <div class="nodes" id="node-list"></div>
+  </div>
+
+  <div class="card full">
+    <h2>操作日志</h2>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+function log(m) { const d = document.createElement('div'); d.textContent = `[${new Date().toLocaleTimeString()}] ${m}`; $('log').prepend(d); }
+async function j(url, body) {
+  const r = await fetch(url, body ? {method:'POST', body: JSON.stringify(body)} : undefined);
+  const v = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(v.error || r.statusText);
+  return v;
+}
+async function refresh() {
+  try {
+    const s = await j('/api/status');
+    $('st-instance').textContent = s.instance;
+    const pill = (ok, warn) => `<span class="pill ${ok ? 'ok' : warn ? 'warn' : 'bad'}">${ok ? '✓' : warn ? '…' : '✗'}</span>`;
+    $('st-applied').innerHTML = pill(s.applied);
+    $('st-core').innerHTML = pill(s.core_running);
+    $('st-route').textContent = (s.route || []).join(' → ') || '—';
+    $('st-nodes').textContent = s.nodes;
+    $('st-tz').textContent = `${s.timezone || ''} · ${s.locale || ''}`;
+    const nodes = await j('/api/nodes');
+    $('node-list').innerHTML = nodes.map(n =>
+      `<div class="node ${n.id === s.selected ? 'sel' : ''}" onclick="selectNode('${n.id}')">
+        <span>${n.name}</span><span class="t">${n.type} · ${n.source}</span>
+        ${n.id === s.selected ? '<span class="pill ok">当前</span>' : ''}</div>`).join('');
+  } catch (e) { log('状态刷新失败: ' + e.message); }
+}
+async function selectNode(id) {
+  try { await j('/api/proxy/select', {node: id}); log('已应用节点 ' + id); }
+  catch (e) { log('应用失败: ' + e.message); }
+  refresh();
+}
+async function importSub() {
+  $('import-err').textContent = '';
+  try {
+    const r = await j('/api/proxy/import', {name: $('sub-name').value, url: $('sub-url').value});
+    log(`导入成功，共 ${r.nodes} 个节点`);
+  } catch (e) { $('import-err').textContent = e.message; log('导入失败: ' + e.message); }
+  refresh();
+}
+async function act(path) {
+  $('status-err').textContent = '';
+  try { await j(path, {}); log(path + ' 成功'); }
+  catch (e) { $('status-err').textContent = e.message; log(path + ' 失败: ' + e.message); }
+  refresh();
+}
+refresh(); setInterval(refresh, 5000);
+</script>
+</body>
+</html>
