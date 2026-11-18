@@ -2,6 +2,7 @@
 //! diagnostics over the layer crates.
 
 pub mod diagnose;
+pub mod escape;
 pub mod serve;
 
 pub use creance_net;

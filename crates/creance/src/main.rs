@@ -4,8 +4,7 @@
 //! (override with `CREANCE_CONFIG` or the legacy `CLAUDE_CAGE_CONFIG`).
 //! Unsafe environment variables are stripped before anything runs.
 
-use creance::diagnose;
-use creance::serve;
+use creance::{diagnose, escape, serve};
 
 use clap::Parser;
 use creance_gate::gate;
@@ -53,6 +52,7 @@ fn main() {
         Commands::Up => cmd_up(),
         Commands::Shell { command } => cmd_shell(command),
         Commands::Claude => cmd_shell(vec!["claude".to_owned()]),
+        Commands::EscapeTest => cmd_escape_test(),
         Commands::Doctor => {
             let report = diagnose::diagnose(&profile(), &config::config_path());
             print!("{}", diagnose::render(&report));
@@ -121,7 +121,9 @@ enum Commands {
     /// Re-fetch every source that carries a URL.
     ProxyRefresh,
     /// Apply a node as the exit and record it in config.json.
-    ProxySelect { node: String },
+    ProxySelect {
+        node: String,
+    },
     /// Create the environment VM (Lima) for this profile.
     Setup {
         #[arg(long, default_value_t = 8)]
@@ -146,6 +148,8 @@ enum Commands {
     /// Run Claude Code in the environment VM.
     Claude,
     /// Diagnose the environment VM.
+    /// Run the containment probe suite (host checks + in-guest probes).
+    EscapeTest,
     Doctor,
     /// Serve the lean workbench (loopback HTTP + single-page UI).
     Serve {
@@ -156,7 +160,9 @@ enum Commands {
     Version,
     /// Internal: own the proxy core's output for launchd. Not for direct use.
     #[command(hide = true)]
-    LogRelay { kind: String },
+    LogRelay {
+        kind: String,
+    },
 }
 
 fn profile() -> String {
@@ -240,6 +246,48 @@ fn cmd_check() -> i32 {
         Ok(r) => fail(format!("proxy check returned HTTP {}", r.status)),
         Err(_) => fail("proxy transport check failed (no direct fallback)".to_owned()),
     }
+}
+
+fn cmd_escape_test() -> i32 {
+    let profile = profile();
+    let config_path = config::config_path();
+    // Host-side probes first: they need no VM.
+    let probes = escape::host_probes(&profile, &config_path);
+    let mut code = escape::report(&probes);
+    // In-guest probes when the environment exists: stage the script and run
+    // it through the VM shell. The flag file on the host is the oracle.
+    let instance = instance();
+    let instance_yaml = creance_vm::paths::join(
+        &creance_vm::vm::lima_home(&profile),
+        &format!("{instance}/lima.yaml"),
+    );
+    if std::path::Path::new(&instance_yaml).exists() {
+        let flag = format!("{}.escape-flag", creance_vm::vm::environment_dir(&profile));
+        let script = escape::guest_script(&flag);
+        let mut child = std::process::Command::new("limactl")
+            .env("LIMA_HOME", creance_vm::vm::lima_home(&profile))
+            .arg("shell")
+            .arg(&instance)
+            .arg("sh")
+            .arg("-s")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::inherit())
+            .spawn();
+        if let Ok(child) = &mut child {
+            use std::io::Write;
+            if let Some(stdin) = child.stdin.as_mut() {
+                let _ = stdin.write_all(script.as_bytes());
+            }
+            drop(child.stdin.take());
+            match child.wait() {
+                Ok(status) if !status.success() => code = 1,
+                _ => {}
+            }
+        } else {
+            eprintln!("cannot run in-guest probes (limactl unavailable)");
+        }
+    }
+    code
 }
 
 fn cmd_proxy_start() -> i32 {
