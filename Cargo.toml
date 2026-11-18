@@ -12,7 +12,7 @@ members = [
 version = "0.2.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/your-org/creance"
+repository = "https://github.com/foreignlands/creance"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

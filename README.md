@@ -42,29 +42,24 @@ with an automated escape-probe suite. Rust, layer-decoupled, no black magic.
 
 ## Quick start
 
-```sh
-# Toolchain stays inside the repo (nothing global is touched):
-export RUSTUP_HOME="$PWD/.toolchain/rustup" CARGO_HOME="$PWD/.toolchain/cargo"
-export PATH="$PWD/.toolchain/cargo/bin:$PATH"
-
-scripts/ci.sh                 # fmt + clippy -D warnings + tests + release build
-./target/release/creance --help
-```
+面向使用者的完整上手见 **[docs/QUICKSTART.md](docs/QUICKSTART.md)**（安装
+→ 配代理 → 起 VM → 验收隔离，5 条命令）。概览：
 
 ```sh
-creance init                                # private profile (~/.creance)
-creance proxy-import --name my --url https://…   # through the proxy, SSRF-guarded
-creance proxy-select "US-Exit"              # apply end-to-end (store+config agree)
-creance proxy-start                         # mihomo under launchd, idempotent
-creance check                               # transport check, no direct fallback
-creance setup && creance up                 # Ubuntu 24.04 VM, guest tz = profile
-creance shell bash                          # work inside
-creance escape-test                         # prove containment (or see what's pending)
-creance doctor / serve / stop               # diagnose · workbench UI · teardown
+sh scripts/install.sh         # 构建 + 安装 ~/.local/bin/creance
+creance init && creance proxy-import --name my --url https://… && creance proxy-select "US-Exit" && creance proxy-start && creance check
+creance setup && creance up && creance shell bash
+creance escape-test           # 验收隔离
 ```
 
 `CREANCE_CONFIG` selects a profile (legacy `CLAUDE_CAGE_CONFIG` honored;
 existing `~/.claude-cage` profiles keep working).
+
+## Night-audit harness
+
+[`harness/`](harness/README.md) — 把一个 LLM（GLM 5.3 Flash）变成整夜
+运转的对抗性审查员：循环协议、上下文压缩协议、findings 记录、20 项
+攻击面地图，以及把模型关进 VM 让它全力逃逸的红队任务书。
 
 ## Escape-test: the acceptance harness
 

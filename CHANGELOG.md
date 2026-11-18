@@ -7,6 +7,12 @@ All notable changes to creance are documented here. The format follows
 ## [0.2.0] — 2026-11-18
 
 ### Added
+- Packaged for use: `scripts/install.sh` (build + install + bundled core),
+  `docs/QUICKSTART.md`, online-smoke recipe (local mihomo `direct` core —
+  real Internet round-trips without owning a node; verified live).
+- Night-audit harness (`harness/`): operator prompt with loop/compression/
+  findings protocols, 20-entry attack-surface map, escape-drill brief for
+  in-VM model red-teaming.
 - `escape-test` command: automated containment probes (host-side now,
   in-guest script with a flag-file oracle; unimplemented layers report
   `not enforced` instead of faking a pass).
