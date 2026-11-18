@@ -1,73 +1,50 @@
-# ROADMAP — 实施状态
+# ROADMAP
 
-当前状态：**103 个测试全绿（clippy 0 警告，release 构建可用）**，以下 P0–P3 核心链路均已实现并实机验证。
-参考仓库在 workspace 的 `refs/`（只读借鉴）。
+creance 的定位：**通用的 AI agent 隔离容器**（功能对标 Claude Cage，防范对象当前以 Claude 为主，架构不绑定任何单一模型）。
 
-## P0 — 核心链路 ✅
+## 版本路线（详见 RELEASES.md）
 
-- [x] **mihomo 核心获取**：`scripts/fetch-proxy-core.sh`（v1.19.34 实机校验生成配置通过 `mihomo -t`）
-- [x] **proxy-start 端到端**：launchd 自包含 job（`proxy/cage-relay` + `proxy/mihomo` 拷贝进 proxy 目录），
-      生命周期全验证：start → `running:true` → stop → 干净 bootout → 重启幂等
-      - 排障记录：launchd 下 dyld 对 `target/` 目录内二进制的 `open()` 被环境挂起——自包含拷贝同时解决
-        生产打包问题；relay 的所有失败现在都写入 `proxy/proxy.log`（launchd 下无 stderr）
-- [x] **在线冒烟**：2 个 `#[ignore]` 测试（`CAGE_ONLINE_PROXY` 环境变量指定真实节点后 `cargo test -- --ignored`）
+- **0.3 — VM 网络强制面（下一站，最大项）**：guest 流量物理路由经 gate（参考 gvisor-tap-vsock 用户态交换机思路，或 Lima usernet hook 等效点）。完成即把 escape-test 的 net-direct-egress / net-dns-external / net-ipv6 探针从 SKIP 翻为强制。
+- **0.4 — guest profile + 一次性凭据**：per-session 凭据经 gate 注入、可吊销（"逃逸成功但无物可偷"）。
+- **0.5 — 多环境 + 快照**。
+- **0.6 — API 稳定化**（rustdoc、MSRV、semver-checks 入 CI）→ 0.7–0.9 RC → 1.0 GA。
 
-## P1 — VM 主链 ✅
+## escape 探针清单（研究A产出，逐步翻绿）
 
-- [x] **cage setup**：生成 Lima 模板（Ubuntu 24.04 cloud image，vz，内存/CPU/磁盘参数），
-      **Lima 原生 `timezone` 字段对齐 guest 指纹**，provision 只补 locale + 工具链；
-      staging yaml 命名 `<instance>.yaml`（lima 2.x 以文件 stem 决定实例名）
-- [x] **lima home symlink**：`/tmp/cage-lima-<uid>-<hash>` → `state/lima`（深层 mktemp 路径本身
-      就会撑爆 UNIX_PATH_MAX——这是 Go 版 managed-storage-link 的同类设计）
-- [x] **端到端实机验证**：setup（下载镜像 ~700MB）→ create → up（vz, aarch64, READY）→
-      `cage shell /bin/sh -c 'uname -m'` → VM 内时区 = profile 配置的 Etc/UTC → `cage stop` 干净关机
-- [x] **cage gate 控制面**：host 侧 unix socket HTTP（Bearer token + Host: cage + Origin 拒绝）、
-      状态机（Closed/Checking/Open + epoch + 租期 watchdog）、5 个动作（check/fault/grant/renew/close/
-      proxy-revision）、安全报告授权（5 项必需检查）、sync 快照语义（revision 变化或初次绑定补全可采纳，
-      其余变更 409 需重启）、`proxy-start/stop` 自动同步 gate
-      - **边界**：强制执行面（ Allows/DialContext/ExchangeDNS 挂到 VM 网络交换层）依赖 lima usernet
-        hook（Go fork）——Rust 版需自建 VM 网络层，见「待办」
-- [x] **订阅 URL 拉取**：`fetch.rs` 经 egress（纯代理、8 MiB 传输上限、≤5 跳重定向），
-      `cage proxy-import --url` + `cage proxy-refresh`
+已强制：config-valid / env-no-host-credentials / proxy-numeric-endpoint。
+待强制面落地后翻绿：fs-flag-readable（VM 内旗标 oracle）/ net-direct-egress（杀掉 mihomo 后 curl 必须失败）/ net-dns-external（dig @8.8.8.8 拒）/ net-ipv6 / 大陆出口命中拒 / AAAA-本地名围栏 / 挂载点扫描 / ssh-material / docker.sock·lima socket / 供应链探针（恶意 postinstall 外传被拦）/ 时区-出口一致性。
+红队方法论参考 sandbox_escape_bench 的「宿主旗标 + 场景 setup」结构。
 
-## P2 — 状态与兼容 ✅
+## 架构参考（研究A结论，已采纳/计划）
 
-- [x] **state.rs**：marker 文件（Read/Write 原子/Rename/Forget/BaseLabel 日期格式）对齐 Go 语义
-- [x] **instance_name 兼容**：legacy 截断恢复（唯一有效截断 + lima.yaml 确认）
-- [x] **PID 复用防护**：`cage-running.json` 携带进程启动时间戳（macOS sysctl `kinfo_proc` 原始缓冲读
-      `p_starttime`），liveness = PID 存活 + 启动时间匹配；fingerprint 不符 → 要求先 `cage stop`
+- 分层现实：microVM（VZ，已用）给硬件边界；用户态网络栈（gvisor-tap-vsock 模式）把「唯一出口」从配置约束升级为**拓扑约束**——guest 物理上不存在第二条路（0.3 采纳）。
+- 数据面最小化：Lima 默认可写挂载与 root guestagent 是已知面——0.3 显式关 mounts/port-forwards；guest root 不视为信任边界。
+- 出口审计 + 一次性凭据（0.4）。
+- 判定为过度设计（不采纳）：gVisor-in-VM 嵌套、Kata/K8s、自建 Firecracker 栈、时序侧信道缓解、独立 TPM。
+- 值得借鉴：apple/container（每容器独立只读块设备 rootfs）、containers/gvisor-tap-vsock、UKGovernmentBEIS/sandbox_escape_bench。
 
-## P3 — 外周 ✅（标注项除外）
+## 命名与发布（研究B结论，已采纳）
 
-- [x] **cage doctor**：limactl/核心/配置/应用节点/磁盘/内存/实例 七项判定（✅/⚠️/❌ + 可行动提示）
-- [x] **cage serve**：精简 workbench——loopback HTTP API（status/nodes/import/select/start/stop/check）
-      + 单页 UI（`workbench.html` 内嵌），CSRF 拒绝跨源 POST；端到端测试（UI 路由、CSRF、导入→选节点→应用）
-- [x] **guestprofile**：**未实现**（无 VM provision 消费者前是半成品）——保持 ROADMAP 待办
-- [x] **延迟测量 / Linux 分支**：未实现（保持待办）
+- **creance**：训鹰长绳（任其飞翔、不容逃逸）；crates.io 与 GitHub 双空闲；repo=crate=bin 同名（zellij 模式）。
+- 多 crate：creance-net/-vm/-proxy/-gate + 根 crate creance；共享 [workspace.package]/[workspace.lints]；暂不拆 creance-core（勿提前）。
+- 发布：Keep-a-Changelog CHANGELOG + semver 0.x（破坏性升 minor）+ cargo-release（计划）+ git-cliff；edition 2024 与 rust-version 留待 0.6 API 稳定时一并声明。
+- 注意：MetaCubeX/mihomo 源码在 **Alpha 分支**（main 被无关项目占用）；release 资产 URL 不受影响。
 
-## 待办（下一轮）
+## 与 Claude Cage (Go) 的对齐状态
 
-1. **VM 网络交换层**：Rust 版 usernet（或在 Lima hook 点接 gate）→ gate 强制执行面生效
-2. **gate 强制执行**：`Egress::allows/dial` 接入 gate 状态机 + guest DoH（ExchangeDNS 已就绪）
-3. **guestprofile** 生成器 + provisioning 消费
-4. **Linux 平台**（systemd 替代 launchd、`physical_interface` Linux 分支）
-5. **延迟测量**（mihomo `/proxies/<id>/delay` API 已在 control socket 上可达）
-
-## 借鉴落地（来自同类型项目）
-
-| 仓库 | 已采纳 |
+| 能力 | 状态 |
 |---|---|
-| `refs/clash-rs` | 集成测试模式（RAII 服务器 + 随机端口 + 回环端到端）；认证失败语义；`#[serde(tag="type")]` 建模范式（待办） |
-| `refs/mihomo`（Alpha） | mixed 端口 1 字节 peek 分流；authenticator 空用户表 = 不启用；`/configs` 字段语义 |
-| `refs/leaf` | handler trait 分层（gate 强制执行面参考） |
-| `refs/meow-rs` | Rust 版 mihomo（未来内置核心参考） |
+| 配置/出口策略/大陆网段 | ✅ creance-vm（对齐 + 修复 Go 版 6 处缺陷） |
+| 纯代理 egress + DoH | ✅ creance-net |
+| 托管代理 + launchd | ✅ creance-proxy（含幂等/回滚/sha256 更新等加固） |
+| gate 控制面 | ✅ creance-gate；**强制执行面 0.3** |
+| VM 生命周期 | ✅ creance-vm（limactl + 短路径 lima home；镜像名 arm64 修正） |
+| 订阅导入/URL 拉取 | ✅（键规范化先于计数、ws-headers 并集、SSRF 拒绝——均超 Go 版） |
+| workbench | ✅ 精简版（loopback + CSRF 防护 + 连接上限） |
+| guestprofile/多账号/移动端/desktop | 未实现（0.4+ 按需） |
 
-注意：`MetaCubeX/mihomo` 的 **main 分支被无关项目占用**，Go 源码在 **Alpha 分支**。
+## 已知简化
 
-## 已知简化（阅读代码时注意）
-
-- `vm.rs::environment_dir`：未实现 `-downloads` 嵌套 profile 的相对路径特判
-- `gate.rs`：租期 watchdog 是 500ms 轮询（原版 timer 精度更高）；诊断端口（198.18.0.254:80）未实现
-- `egress.rs`：HTTP 头逐字节读取（每隧道一个请求，可接受）
-- `config.rs::validate_timezone`：依赖 `/usr/share/zoneinfo`，无 tzdata 系统回退到结构校验
-- workbench UI 是单页最小实现（无登录/多 profile 切换）
+- escape-test 的网络探针待 0.3 强制面；gate 诊断端口（198.18.0.254:80）未实现。
+- `environment_dir` 未实现嵌套 profile 相对路径特判；workbench 为单页最小实现。
+- 在线冒烟测试需 `CAGE_ONLINE_PROXY=<真实节点> cargo test -- --ignored`。

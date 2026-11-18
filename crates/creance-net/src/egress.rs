@@ -25,8 +25,6 @@ const DNS_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(6);
 const MAX_HEADER: usize = 16 << 10;
 const MAX_HTTP_BODY: usize = 64 << 10;
 
-/// An HTTP/1.1 response with its body fully read.
-
 /// The proxy endpoint must be http(s)/socks5 with a numeric host and port —
 /// the proxy bootstrap itself may not need a resolver.
 pub fn validate_proxy_url(s: &str) -> Result<(), String> {
