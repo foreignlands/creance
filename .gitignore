@@ -1,0 +1,11 @@
+# Isolated per-project toolchain (rustup + cargo homes)
+.toolchain/
+
+# Build outputs
+target/
+**/target/
+
+# Editor
+.idea/
+.vscode/
+.DS_Store

@@ -1,0 +1,472 @@
+//! cage — the Rust CLI of the Claude Cage control plane.
+//!
+//! Every command operates on one profile: the directory holding config.json
+//! (override with `CLAUDE_CAGE_CONFIG`). Unsafe environment variables are
+//! stripped before anything runs.
+
+use cage_core::config;
+use cage_core::egress::Egress;
+use cage_core::gate;
+use cage_core::proxy::{self, service};
+use cage_core::running;
+use cage_core::vm;
+use cage_core::vmname;
+use clap::Parser;
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::Path;
+use std::time::{Duration, Instant};
+
+/// The default trace check target: a plain endpoint that reports the egress IP.
+const CHECK_URL: &str = "https://1.1.1.1/cdn-cgi/trace";
+const CHECK_BUDGET: Duration = Duration::from_secs(25);
+
+fn main() {
+    for name in [
+        "AGENT_VM_UNSAFE_OPEN_NETWORK",
+        "AGENT_VM_UNSAFE_WRITABLE_GIT",
+        "AGENT_VM_UNSAFE_DISABLE_SECURITY_PROMPTS",
+    ] {
+        std::env::remove_var(name);
+    }
+    let cli = Cli::parse();
+    std::process::exit(match cli.command {
+        Commands::Init => cmd_init(),
+        Commands::Check => cmd_check(),
+        Commands::ProxyStart => cmd_proxy_start(),
+        Commands::ProxyStop => cmd_simple(|| {
+            let _ = gate::close_gates(&profile());
+            service::stop(&profile())
+        }),
+        Commands::ProxyStatus => cmd_proxy_status(),
+        Commands::ProxyImport {
+            name,
+            file,
+            url,
+            interval,
+            select,
+        } => cmd_proxy_import(name, file, url, interval, select),
+        Commands::ProxyRefresh => cmd_proxy_refresh(),
+        Commands::ProxySelect { node } => cmd_proxy_select(node),
+        Commands::Setup { memory, cpus } => cmd_setup(memory, cpus),
+        Commands::List => vm::list(&profile()),
+        Commands::Stop { keep_proxy } => cmd_stop(keep_proxy),
+        Commands::Up => cmd_up(),
+        Commands::Shell { command } => cmd_shell(command),
+        Commands::Claude => cmd_shell(vec!["claude".to_owned()]),
+        Commands::Doctor => {
+            let report = cage_core::diagnose::diagnose(&profile(), &config::config_path());
+            print!("{}", cage_core::diagnose::render(&report));
+            if report
+                .iter()
+                .any(|c| c.status == cage_core::diagnose::Status::Fail)
+            {
+                1
+            } else {
+                0
+            }
+        }
+        Commands::Serve { port } => {
+            match cage_core::serve::serve(&profile(), &config::config_path(), port) {
+                Ok(()) => 0,
+                Err(e) => fail(e),
+            }
+        }
+        Commands::Version => {
+            println!("cage {}", cage_core::VERSION);
+            0
+        }
+        Commands::LogRelay { kind } => {
+            if kind != "proxy" {
+                eprintln!("log-relay owns only the proxy core");
+                2
+            } else {
+                service::log_relay_proxy(&profile())
+            }
+        }
+    });
+}
+
+#[derive(clap::Parser)]
+#[command(
+    name = "cage",
+    version,
+    about = "Claude Cage — local isolated Claude development (Rust core)",
+    after_help = "Configuration: ~/.claude-cage/config.json (override CLAUDE_CAGE_CONFIG).\nEach configuration directory is an independent cage profile.\nOnly explicitly opened project folders are shared. No host Claude credentials are imported."
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(clap::Subcommand)]
+enum Commands {
+    /// Create a private profile configuration.
+    Init,
+    /// Verify the proxy transport through the configured upstream (no VM).
+    Check,
+    /// Start the managed proxy core with the applied node.
+    ProxyStart,
+    /// Stop the managed proxy core.
+    ProxyStop,
+    /// Show the applied node, route, endpoint and running state.
+    ProxyStatus,
+    /// Import nodes from a Clash/Mihomo YAML file or subscription URL.
+    ProxyImport {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        file: Option<String>,
+        #[arg(long)]
+        url: Option<String>,
+        #[arg(long, default_value_t = 0)]
+        interval: u32,
+        #[arg(long)]
+        select: Option<String>,
+    },
+    /// Re-fetch every source that carries a URL.
+    ProxyRefresh,
+    /// Apply a node as the exit and record it in config.json.
+    ProxySelect { node: String },
+    /// Create the environment VM (Lima) for this profile.
+    Setup {
+        #[arg(long, default_value_t = 8)]
+        memory: u32,
+        #[arg(long, default_value_t = 4)]
+        cpus: u32,
+    },
+    /// List this profile's VMs.
+    List,
+    /// Stop the environment VM and its proxy core.
+    Stop {
+        #[arg(long)]
+        keep_proxy: bool,
+    },
+    /// Start the environment VM.
+    Up,
+    /// Open a shell (or run a command) in the environment VM.
+    Shell {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
+    /// Run Claude Code in the environment VM.
+    Claude,
+    /// Diagnose the environment VM.
+    Doctor,
+    /// Serve the lean workbench (loopback HTTP + single-page UI).
+    Serve {
+        #[arg(long, default_value_t = 5173)]
+        port: u16,
+    },
+    /// Print this build's version.
+    Version,
+    /// Internal: own the proxy core's output for launchd. Not for direct use.
+    #[command(hide = true)]
+    LogRelay { kind: String },
+}
+
+fn profile() -> String {
+    let path = config::config_path();
+    Path::new(&path)
+        .parent()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| ".".to_owned())
+}
+
+fn instance() -> String {
+    vmname::home_limit(&vm::lima_home(&profile()), false).name(&vm::environment_dir(&profile()))
+}
+
+fn fail(err: String) -> i32 {
+    eprintln!("{err}");
+    1
+}
+
+fn cmd_simple<F: FnOnce() -> Result<(), String>>(f: F) -> i32 {
+    match f() {
+        Ok(()) => 0,
+        Err(e) => fail(e),
+    }
+}
+
+fn cmd_init() -> i32 {
+    let path = config::config_path();
+    let parent = Path::new(&path)
+        .parent()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| ".".to_owned());
+    if let Err(e) = cage_core::private::ensure_private_dir(&parent) {
+        return fail(e.to_string());
+    }
+    let bytes = match serde_json::to_vec_pretty(&config::default_config()) {
+        Ok(b) => b,
+        Err(e) => return fail(e.to_string()),
+    };
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+    {
+        Ok(mut f) => {
+            use std::io::Write;
+            if let Err(e) = f.write_all(&bytes) {
+                return fail(e.to_string());
+            }
+            println!("Configuration created: {path}");
+            0
+        }
+        Err(e) => fail(e.to_string()),
+    }
+}
+
+fn cmd_check() -> i32 {
+    let path = config::config_path();
+    let cfg = match config::load(&path) {
+        Ok(c) => c,
+        Err(e) => return fail(e),
+    };
+    let egress = match Egress::new(&cfg) {
+        Ok(e) => e,
+        Err(e) => return fail(e),
+    };
+    match cage_core::egress::request(
+        &egress,
+        "GET",
+        CHECK_URL,
+        None,
+        &[],
+        Instant::now() + CHECK_BUDGET,
+    ) {
+        Ok(r) if r.status == 200 => {
+            println!("Proxy transport OK. Guest traffic still requires VM acceptance checks.");
+            0
+        }
+        Ok(r) => fail(format!("proxy check returned HTTP {}", r.status)),
+        Err(_) => fail("proxy transport check failed (no direct fallback)".to_owned()),
+    }
+}
+
+fn cmd_proxy_start() -> i32 {
+    cmd_simple(|| {
+        proxy::start_managed(&profile(), &config::config_path())?;
+        // Running instances get told about the (re)started core so their
+        // gates re-open only against the fresh revision.
+        if let Ok(client) = gate::GateClient::open(&gate_instance_dir()) {
+            let _ = client.sync_proxy_revision();
+        }
+        Ok(())
+    })
+}
+
+fn gate_instance_dir() -> String {
+    cage_core::paths::join(&vm::lima_home(&profile()), &instance())
+}
+
+fn cmd_proxy_status() -> i32 {
+    let path = config::config_path();
+    let cfg = match config::load(&path) {
+        Ok(c) => c,
+        Err(e) => return fail(e),
+    };
+    let profile = profile();
+    let store = match proxy::load(&profile) {
+        Ok(s) => s,
+        Err(e) => return fail(e),
+    };
+    println!("endpoint: {}", store.endpoint());
+    println!("sources: {} ({} nodes)", store.sources.len(), store.count());
+    match proxy::applied(&profile, &cfg.proxy_url, &cfg.proxy_revision) {
+        Ok(applied) => {
+            let name = applied
+                .find(&applied.selected)
+                .map(|n| n.name.clone())
+                .unwrap_or_default();
+            println!("applied: {} ({name})", applied.selected);
+            match applied.route() {
+                Ok(route) => println!("route: {}", route.join(" -> ")),
+                Err(e) => println!("route: unavailable ({e})"),
+            }
+            println!("core running: {}", service::running(&profile, &applied));
+            0
+        }
+        Err(e) => {
+            println!("applied: none ({e})");
+            2
+        }
+    }
+}
+
+fn cmd_proxy_import(
+    name: String,
+    file: Option<String>,
+    url: Option<String>,
+    interval: u32,
+    select: Option<String>,
+) -> i32 {
+    if interval > 168 {
+        return fail("更新间隔应为 0–168 小时，0 表示手动更新".to_owned());
+    }
+    let data = match (&file, &url) {
+        (Some(file), _) => match std::fs::read(file) {
+            Ok(d) => d,
+            Err(e) => return fail(format!("cannot read {file}: {e}")),
+        },
+        (None, Some(url)) => {
+            let cfg = match config::load(&config::config_path()) {
+                Ok(c) => c,
+                Err(e) => return fail(e),
+            };
+            match proxy::fetch::fetch_subscription(&cfg, url) {
+                Ok(d) => {
+                    println!("fetched {} bytes from {url}", d.len());
+                    d
+                }
+                Err(e) => return fail(e),
+            }
+        }
+        (None, None) => return fail("pass --file or --url".to_owned()),
+    };
+    let profile = profile();
+    let mut store = match proxy::load(&profile) {
+        Ok(s) => s,
+        Err(e) => return fail(e),
+    };
+    if let Err(e) = store.import(&name, "", &data, "", interval, "cli") {
+        return fail(e);
+    }
+    if let Err(e) = proxy::save(&profile, &store) {
+        return fail(e);
+    }
+    println!("imported {} nodes from {name}", store.count());
+    if let Some(node) = select {
+        return cmd_proxy_select(node);
+    }
+    0
+}
+
+fn cmd_proxy_refresh() -> i32 {
+    let path = config::config_path();
+    let cfg = match config::load(&path) {
+        Ok(c) => c,
+        Err(e) => return fail(e),
+    };
+    let profile = profile();
+    let store = match proxy::load(&profile) {
+        Ok(s) => s,
+        Err(e) => return fail(e),
+    };
+    let mut refreshed = 0;
+    for source in &store.sources {
+        if source.url.is_empty() {
+            continue;
+        }
+        match proxy::fetch::fetch_subscription(&cfg, &source.url) {
+            Ok(data) => {
+                let mut store = match proxy::load(&profile) {
+                    Ok(s) => s,
+                    Err(e) => return fail(e),
+                };
+                if let Err(e) = store.import(
+                    &source.name,
+                    &source.url,
+                    &data,
+                    &source.id,
+                    source.interval_hours,
+                    "refresh",
+                ) {
+                    eprintln!("{}: {e}", source.name);
+                    continue;
+                }
+                if proxy::save(&profile, &store).is_ok() {
+                    refreshed += 1;
+                }
+            }
+            Err(e) => eprintln!("{}: {e}", source.name),
+        }
+    }
+    println!("refreshed {refreshed} source(s)");
+    if refreshed > 0 {
+        0
+    } else {
+        2
+    }
+}
+
+fn cmd_setup(memory: u32, cpus: u32) -> i32 {
+    let path = config::config_path();
+    let cfg = match config::load(&path) {
+        Ok(c) => c,
+        Err(e) => return fail(e),
+    };
+    let profile = profile();
+    let instance = instance();
+    let options = cage_core::lima::SetupOptions {
+        memory_gib: memory,
+        cpus,
+        disk_gib: 24,
+        workspace: vm::environment_dir(&profile),
+        timezone: cfg.timezone.clone(),
+        locale: cfg.locale.clone(),
+    };
+    if let Err(e) = cage_core::lima::setup_instance(&profile, &instance, &options) {
+        return fail(e);
+    }
+    let code = vm::create(&profile, &instance);
+    if code == 0 {
+        println!("instance {instance} created; run `cage up` to start it");
+    }
+    code
+}
+
+fn cmd_proxy_select(node: String) -> i32 {
+    cmd_simple(|| {
+        proxy::select_and_apply(&profile(), &config::config_path(), &node)?;
+        println!("applied {node}; run `cage proxy-start` to launch the core");
+        Ok(())
+    })
+}
+
+fn cmd_stop(keep_proxy: bool) -> i32 {
+    let profile = profile();
+    let code = vm::stop_vm(&profile, &instance());
+    if code == 0 && !keep_proxy {
+        let _ = gate::close_gates(&profile);
+        return cmd_simple(|| service::stop(&profile));
+    }
+    code
+}
+
+fn cmd_up() -> i32 {
+    let path = config::config_path();
+    let cfg = match config::load(&path) {
+        Ok(c) => c,
+        Err(e) => return fail(e),
+    };
+    let profile = profile();
+    if let Err(e) = running::check_running(&vm::state_dir(&profile), &cfg) {
+        return fail(e);
+    }
+    let instance = instance();
+    let code = vm::up(&profile, &instance);
+    if code == 0 {
+        let instance_dir = cage_core::paths::join(&vm::lima_home(&profile), &instance);
+        let _ = running::record_running(&instance_dir, &cfg);
+        println!("Environment is up. External networking stays closed until the proxy core is applied and started (`cage proxy-select` + `cage proxy-start`).");
+    }
+    code
+}
+
+fn cmd_shell(command: Vec<String>) -> i32 {
+    let path = config::config_path();
+    let cfg = match config::load(&path) {
+        Ok(c) => c,
+        Err(e) => return fail(e),
+    };
+    let profile = profile();
+    if let Err(e) = running::check_running(&vm::state_dir(&profile), &cfg) {
+        return fail(e);
+    }
+    let instance = instance();
+    let refs: Vec<&str> = command.iter().map(String::as_str).collect();
+    vm::shell(&profile, &instance, &refs)
+}

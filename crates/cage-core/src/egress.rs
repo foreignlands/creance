@@ -1,0 +1,1119 @@
+//! The cage egress: exactly one upstream, never a direct fallback.
+//!
+//! All guest TCP connections and DNS exchanges cross the configured proxy.
+//! Hostnames are handed to the proxy unresolved — the host resolver never
+//! sees guest destinations, and a failed proxy never degrades into a direct
+//! connection.
+//!
+//! Wire shapes, by proxy scheme and target:
+//! - `socks5`  → SOCKS5 stream (RFC 1928/1929), TLS added on top for HTTPS targets
+//! - `http`    → CONNECT tunnel, TLS added on top for HTTPS targets
+//! - `https`   → TLS to the proxy, CONNECT through it, then TLS to the target
+
+use crate::config::Config;
+use crate::dnsmsg::Message;
+use rustls_pki_types::ServerName;
+use std::io::{ErrorKind, Read, Write};
+use std::net::{IpAddr, TcpStream, ToSocketAddrs};
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
+
+/// One attempt budget, matching the Go egress.
+const DIAL_TIMEOUT: Duration = Duration::from_secs(20);
+const DNS_TOTAL_TIMEOUT: Duration = Duration::from_secs(20);
+const DNS_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(6);
+/// A header block cannot be larger than this.
+const MAX_HEADER: usize = 16 << 10;
+const MAX_HTTP_BODY: usize = 64 << 10;
+
+/// An HTTP/1.1 response with its body fully read.
+#[derive(Debug)]
+pub struct HttpResponse {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+impl HttpResponse {
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    }
+}
+
+/// A TCP tunnel through the proxy: SOCKS5 or CONNECT. TLS layers stack on
+/// top, type-erased, so an HTTPS proxy carrying an HTTPS target works.
+pub struct Channel(TunnelKind);
+
+enum TunnelKind {
+    Plain(Tunnel),
+    Tls(Box<rustls::StreamOwned<rustls::ClientConnection, Box<dyn RW>>>),
+}
+
+/// The IO surface a stackable TLS layer needs.
+trait RW: Read + Write + 'static {
+    fn set_deadline(&self, at: Instant);
+}
+
+impl RW for Tunnel {
+    fn set_deadline(&self, at: Instant) {
+        if let Some(remaining) = at.checked_duration_since(Instant::now()) {
+            let remaining = remaining.max(Duration::from_millis(1));
+            let _ = self.0.set_read_timeout(Some(remaining));
+            let _ = self.0.set_write_timeout(Some(remaining));
+        }
+    }
+}
+
+impl RW for rustls::StreamOwned<rustls::ClientConnection, Box<dyn RW>> {
+    fn set_deadline(&self, at: Instant) {
+        self.sock.set_deadline(at)
+    }
+}
+
+impl Read for Channel {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match &mut self.0 {
+            TunnelKind::Plain(t) => t.read(buf),
+            TunnelKind::Tls(s) => s.read(buf),
+        }
+    }
+}
+
+impl Write for Channel {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match &mut self.0 {
+            TunnelKind::Plain(t) => t.write(buf),
+            TunnelKind::Tls(s) => s.write(buf),
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        match &mut self.0 {
+            TunnelKind::Plain(t) => t.flush(),
+            TunnelKind::Tls(s) => s.flush(),
+        }
+    }
+}
+
+impl Channel {
+    fn set_deadline(&self, at: Instant) {
+        self.0.set_deadline(at)
+    }
+}
+
+impl TunnelKind {
+    fn set_deadline(&self, at: Instant) {
+        match self {
+            TunnelKind::Plain(t) => t.set_deadline(at),
+            TunnelKind::Tls(s) => s.sock.set_deadline(at),
+        }
+    }
+}
+
+/// A TCP stream to the proxy, with per-operation deadlines.
+struct Tunnel(TcpStream);
+
+impl Read for Tunnel {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.0.read(buf)
+    }
+}
+
+impl Write for Tunnel {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
+/// The single-upstream egress.
+pub struct Egress {
+    upstream: url::Url,
+    dns_url: String,
+}
+
+impl Egress {
+    pub fn new(config: &Config) -> Result<Egress, String> {
+        config.validate()?;
+        Ok(Egress {
+            upstream: url::Url::parse(&config.proxy_url)
+                .map_err(|_| "invalid proxy URL".to_owned())?,
+            dns_url: config.dns_url.clone(),
+        })
+    }
+
+    /// Whether this egress would carry a connection: TCP only, IPv4 only —
+    /// UDP and ICMP have no fallback, and guest IPv6 offers no measured route.
+    pub fn allows(&self, network: &str, host: &str) -> bool {
+        if network != "tcp" {
+            return false;
+        }
+        host.rsplit_once(':')
+            .and_then(|(h, _)| h.parse::<IpAddr>().ok())
+            .is_some_and(|ip| matches!(ip, IpAddr::V4(_)))
+    }
+
+    /// Opens a TCP connection to `addr` (`host:port`) through the upstream.
+    /// The host is never resolved locally.
+    pub fn dial(&self, addr: &str) -> Result<Channel, String> {
+        let deadline = Instant::now() + DIAL_TIMEOUT;
+        let (host, port) = split_addr(addr)?;
+        let upstream_host = self.upstream.host_str().unwrap_or_default().to_owned();
+        let upstream_port = self
+            .upstream
+            .port()
+            .ok_or("proxy requires a valid explicit port")?;
+        let socks = self.upstream.scheme().starts_with("socks5");
+        let stream =
+            tcp_connect(&format!("{upstream_host}:{upstream_port}"), deadline).map_err(|e| {
+                user_error(
+                    if socks {
+                        "连接指定 SOCKS5 代理"
+                    } else {
+                        "连接指定代理"
+                    },
+                    e,
+                )
+            })?;
+        let tunnel = Tunnel(stream);
+        tunnel.set_deadline(deadline);
+        match self.upstream.scheme() {
+            s if s.starts_with("socks5") => {
+                let tunnel = self.socks5_connect(tunnel, host, port)?;
+                Ok(Channel(TunnelKind::Plain(tunnel)))
+            }
+            "http" => self.http_connect(Channel(TunnelKind::Plain(tunnel)), host, port),
+            "https" => {
+                let tls =
+                    tls_wrap(Box::new(tunnel), &upstream_host).map_err(|_| user_tls_failure())?;
+                self.http_connect(Channel(TunnelKind::Tls(tls)), host, port)
+            }
+            other => Err(format!("unsupported proxy scheme {other}")),
+        }
+    }
+
+    /// RFC 1928 handshake on our own socket, so half-close stays available
+    /// to the relay after authentication.
+    fn socks5_connect(&self, mut tunnel: Tunnel, host: &str, port: u16) -> Result<Tunnel, String> {
+        const FAIL: &str = "连接指定 SOCKS5 代理";
+        let auth = self
+            .upstream
+            .password()
+            .map(|pw| (self.upstream.username().to_owned(), pw.to_owned()));
+        let mut greeting = vec![0x05u8];
+        match &auth {
+            Some(_) => greeting.extend([0x02, 0x00, 0x02]),
+            None => greeting.extend([0x01, 0x00]),
+        }
+        tunnel
+            .write_all(&greeting)
+            .map_err(|e| user_error(FAIL, e))?;
+        let mut reply = [0u8; 2];
+        tunnel
+            .read_exact(&mut reply)
+            .map_err(|e| user_error(FAIL, e))?;
+        if reply[0] != 0x05 {
+            return Err("代理不是 SOCKS5 协议；请检查代理；请求不会改为直连。".to_owned());
+        }
+        match reply[1] {
+            0x00 => {}
+            0x02 => {
+                let (user, pass) = auth
+                    .clone()
+                    .ok_or("SOCKS5 代理要求用户名密码认证，但配置中没有凭据")?;
+                let mut req = vec![0x01u8, user.len() as u8];
+                req.extend_from_slice(user.as_bytes());
+                req.push(pass.len() as u8);
+                req.extend_from_slice(pass.as_bytes());
+                tunnel.write_all(&req).map_err(|e| user_error(FAIL, e))?;
+                let mut status = [0u8; 2];
+                tunnel
+                    .read_exact(&mut status)
+                    .map_err(|e| user_error(FAIL, e))?;
+                if status[1] != 0x00 {
+                    return Err("SOCKS5 代理认证失败；请检查代理；请求不会改为直连。".to_owned());
+                }
+            }
+            _ => {
+                return Err(
+                    "SOCKS5 代理拒绝了全部认证方式；请检查代理；请求不会改为直连。".to_owned(),
+                )
+            }
+        }
+        let mut req = vec![0x05u8, 0x01, 0x00];
+        push_socks5_target(&mut req, host, port)?;
+        tunnel.write_all(&req).map_err(|e| user_error(FAIL, e))?;
+        let mut head = [0u8; 4];
+        tunnel
+            .read_exact(&mut head)
+            .map_err(|e| user_error(FAIL, e))?;
+        if head[0] != 0x05 {
+            return Err("代理不是 SOCKS5 协议；请检查代理；请求不会改为直连。".to_owned());
+        }
+        if head[1] != 0x00 {
+            return Err(format!(
+                "SOCKS5 代理拒绝连接（code {}）；请检查代理；请求不会改为直连。",
+                head[1]
+            ));
+        }
+        let skip = match head[3] {
+            0x01 => 4 + 2,
+            0x04 => 16 + 2,
+            0x03 => {
+                let mut len = [0u8; 1];
+                tunnel
+                    .read_exact(&mut len)
+                    .map_err(|e| user_error(FAIL, e))?;
+                len[0] as usize + 2
+            }
+            other => return Err(format!("SOCKS5 代理返回未知地址类型 {other}")),
+        };
+        let mut bound = vec![0u8; skip];
+        tunnel
+            .read_exact(&mut bound)
+            .map_err(|e| user_error(FAIL, e))?;
+        Ok(tunnel)
+    }
+
+    /// HTTP CONNECT on the (possibly TLS-wrapped) upstream channel.
+    fn http_connect(&self, mut channel: Channel, host: &str, port: u16) -> Result<Channel, String> {
+        let target = join_addr(host, port);
+        let mut req = format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n");
+        if !self.upstream.username().is_empty() || self.upstream.password().is_some() {
+            let credentials = format!(
+                "{}:{}",
+                self.upstream.username(),
+                self.upstream.password().unwrap_or_default()
+            );
+            req.push_str(&format!(
+                "Proxy-Authorization: Basic {}\r\n",
+                base64(credentials.as_bytes())
+            ));
+        }
+        req.push_str("\r\n");
+        channel
+            .write_all(req.as_bytes())
+            .map_err(|e| user_error("发送代理 CONNECT 请求", e))?;
+        let head =
+            read_header_block(&mut channel).map_err(|e| user_error("读取代理 CONNECT 响应", e))?;
+        let status = parse_status(&head).ok_or_else(|| {
+            "读取代理 CONNECT 响应失败；请检查代理；请求不会改为直连。".to_owned()
+        })?;
+        if status != 200 {
+            return Err(format!(
+                "代理拒绝 CONNECT 请求（HTTP {status}）；请求不会改为直连"
+            ));
+        }
+        Ok(channel)
+    }
+
+    /// DNS over HTTPS through the same upstream. The host resolver is never
+    /// consulted, even when the upstream fails.
+    pub fn exchange_dns(&self, q: &Message) -> Result<Message, String> {
+        // The exit policy measures IPv4; no unmeasured IPv6 route is offered.
+        if q.is_aaaa_query() {
+            return Ok(Message::reply(q, 0, Vec::new()));
+        }
+        if q.asks_local_name() {
+            return Ok(Message::reply(
+                q,
+                crate::dnsmsg::RCODE_NAME_ERROR,
+                Vec::new(),
+            ));
+        }
+        let wire = q.pack()?;
+        let deadline = Instant::now() + DNS_TOTAL_TIMEOUT;
+        let mut last = String::new();
+        for attempt in 0..3 {
+            if Instant::now() >= deadline {
+                return Err(dns_unavailable());
+            }
+            match self.exchange_dns_once(q, &wire, deadline) {
+                Ok(msg) => return Ok(msg),
+                Err((retry, message)) => {
+                    last = message;
+                    if !retry {
+                        return Err(last);
+                    }
+                    if attempt < 2 {
+                        let backoff = Duration::from_millis(150 * (attempt as u64 + 1));
+                        if Instant::now() + backoff > deadline {
+                            return Err(last);
+                        }
+                        std::thread::sleep(backoff);
+                    }
+                }
+            }
+        }
+        Err(last)
+    }
+
+    fn exchange_dns_once(
+        &self,
+        q: &Message,
+        wire: &[u8],
+        deadline: Instant,
+    ) -> Result<Message, (bool, String)> {
+        // Every attempt gets its own fresh connection and its own cap, within
+        // the total budget.
+        let attempt_deadline = Instant::now()
+            + DNS_ATTEMPT_TIMEOUT.min(
+                deadline
+                    .checked_duration_since(Instant::now())
+                    .unwrap_or_default(),
+            );
+        let response = request(
+            self,
+            "POST",
+            &self.dns_url,
+            Some("application/dns-message"),
+            wire,
+            attempt_deadline,
+        )
+        .map_err(|_| (true, dns_unavailable()))?;
+        if response.status == 429 || response.status >= 500 {
+            return Err((
+                true,
+                format!("cage DNS upstream returned HTTP {}", response.status),
+            ));
+        }
+        if response.status != 200 {
+            return Err((
+                false,
+                format!("cage DNS upstream returned HTTP {}", response.status),
+            ));
+        }
+        let msg = Message::unpack(&response.body)
+            .map_err(|_| (false, "invalid DNS upstream response".to_owned()))?;
+        if !msg.response || msg.id != q.id {
+            return Err((false, "mismatched DNS upstream response".to_owned()));
+        }
+        Ok(msg)
+    }
+}
+
+fn dns_unavailable() -> String {
+    "cage DNS upstream unavailable; check the configured DoH endpoint through the selected proxy"
+        .to_owned()
+}
+
+/// Errors that keep the no-direct-fallback contract: actionable, never
+/// hinting at a direct route.
+fn user_error(action: &str, cause: std::io::Error) -> String {
+    if matches!(cause.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) {
+        return format!("{action}超时；请检查代理；请求不会改为直连。");
+    }
+    format!("{action}失败（{cause}）；请检查代理；请求不会改为直连。")
+}
+
+fn user_tls_failure() -> String {
+    "验证 HTTPS 代理的加密连接失败；请检查代理；请求不会改为直连。".to_owned()
+}
+
+fn split_addr(addr: &str) -> Result<(&str, u16), String> {
+    let (host, port) = addr
+        .rsplit_once(':')
+        .ok_or_else(|| format!("invalid target address {addr}"))?;
+    let port: u16 = port
+        .parse()
+        .map_err(|_| format!("invalid target port in {addr}"))?;
+    Ok((host.trim_start_matches('[').trim_end_matches(']'), port))
+}
+
+/// `host:port`, with IPv6 literals re-bracketed.
+fn join_addr(host: &str, port: u16) -> String {
+    if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    }
+}
+
+fn push_socks5_target(req: &mut Vec<u8>, host: &str, port: u16) -> Result<(), String> {
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(v4)) => {
+            req.push(0x01);
+            req.extend_from_slice(&v4.octets());
+        }
+        Ok(IpAddr::V6(v6)) => {
+            req.push(0x04);
+            req.extend_from_slice(&v6.octets());
+        }
+        Err(_) => {
+            let bytes = host.as_bytes();
+            if bytes.is_empty() || bytes.len() > 255 {
+                return Err("invalid SOCKS5 target name".to_owned());
+            }
+            req.push(0x03);
+            req.push(bytes.len() as u8);
+            req.extend_from_slice(bytes);
+        }
+    }
+    req.extend_from_slice(&port.to_be_bytes());
+    Ok(())
+}
+
+fn tcp_connect(target: &str, deadline: Instant) -> std::io::Result<TcpStream> {
+    let addrs: Vec<_> = target.to_socket_addrs()?.collect();
+    let mut last = std::io::Error::new(std::io::ErrorKind::NotFound, "no address for upstream");
+    for addr in addrs {
+        match TcpStream::connect_timeout(&addr, DIAL_TIMEOUT) {
+            Ok(s) => {
+                let _ = s.set_nodelay(true);
+                let _ = s.set_read_timeout(Some(
+                    deadline
+                        .saturating_duration_since(Instant::now())
+                        .max(Duration::from_millis(1)),
+                ));
+                return Ok(s);
+            }
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
+}
+
+static TLS_CONFIG: OnceLock<std::sync::Arc<rustls::ClientConfig>> = OnceLock::new();
+
+fn tls_config() -> std::sync::Arc<rustls::ClientConfig> {
+    TLS_CONFIG
+        .get_or_init(|| {
+            let mut roots = rustls::RootCertStore::empty();
+            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            std::sync::Arc::new(
+                rustls::ClientConfig::builder()
+                    .with_root_certificates(roots)
+                    .with_no_client_auth(),
+            )
+        })
+        .clone()
+}
+
+type TlsStream = rustls::StreamOwned<rustls::ClientConnection, Box<dyn RW>>;
+
+/// TLS-wraps a tunnel and completes the handshake before returning.
+fn tls_wrap(inner: Box<dyn RW>, host: &str) -> Result<Box<TlsStream>, String> {
+    let server_name = ServerName::try_from(host.to_owned())
+        .map_err(|_| format!("invalid TLS server name {host}"))?;
+    let mut conn = rustls::ClientConnection::new(tls_config(), server_name)
+        .map_err(|e| format!("TLS setup failed: {e}"))?;
+    let mut sock: Box<dyn RW> = inner;
+    let deadline = Instant::now() + DIAL_TIMEOUT;
+    sock.set_deadline(deadline);
+    while conn.is_handshaking() {
+        if Instant::now() >= deadline {
+            return Err(
+                "验证 HTTPS 代理的加密连接超时；请检查代理；请求不会改为直连。".to_string(),
+            );
+        }
+        match conn.complete_io(&mut sock) {
+            Ok(_) => {}
+            Err(e) if e.kind() == ErrorKind::Interrupted => {}
+            Err(e) => {
+                return Err(format!(
+                    "验证 HTTPS 代理的加密连接失败（{e}）；请检查代理；请求不会改为直连。"
+                ))
+            }
+        }
+    }
+    Ok(Box::new(rustls::StreamOwned::new(conn, sock)))
+}
+
+/// One HTTP/1.1 request through `egress`'s upstream. No redirects, no
+/// direct fallback. `max_body` bounds the response (64 KiB for DoH and
+/// probes, the 8 MiB import cap for subscriptions).
+pub fn request(
+    egress: &Egress,
+    method: &str,
+    url: &str,
+    content_type: Option<&str>,
+    body: &[u8],
+    deadline: Instant,
+) -> Result<HttpResponse, String> {
+    request_bounded(
+        egress,
+        method,
+        url,
+        content_type,
+        body,
+        deadline,
+        MAX_HTTP_BODY,
+    )
+}
+
+pub fn request_bounded(
+    egress: &Egress,
+    method: &str,
+    url: &str,
+    content_type: Option<&str>,
+    body: &[u8],
+    deadline: Instant,
+    max_body: usize,
+) -> Result<HttpResponse, String> {
+    let u = url::Url::parse(url).map_err(|_| format!("invalid request URL {url}"))?;
+    let https = match u.scheme() {
+        "https" => true,
+        "http" => false,
+        other => return Err(format!("unsupported request scheme {other}")),
+    };
+    let host = u.host_str().ok_or("request URL has no host")?.to_owned();
+    let default_port = if https { 443 } else { 80 };
+    let port = u.port().unwrap_or(default_port);
+    let channel = egress.dial(&join_addr(&host, port))?;
+    let Channel(mut kind) = channel;
+    if https {
+        let inner: Box<dyn RW> = match kind {
+            TunnelKind::Plain(t) => Box::new(t),
+            // An HTTPS proxy's TLS layer already ends at the target; stack one more.
+            TunnelKind::Tls(s) => Box::new(*s),
+        };
+        kind = TunnelKind::Tls(tls_wrap(inner, &host)?);
+    }
+    let mut channel = Channel(kind);
+    let path = if u.path().is_empty() {
+        "/".to_owned()
+    } else {
+        let mut p = u.path().to_owned();
+        if let Some(q) = u.query() {
+            p.push('?');
+            p.push_str(q);
+        }
+        p
+    };
+    let host_header = if port == default_port {
+        host.clone()
+    } else {
+        join_addr(&host, port)
+    };
+    let mut req = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {host_header}\r\nConnection: close\r\nContent-Length: {}\r\n",
+        body.len()
+    );
+    if let Some(ct) = content_type {
+        req.push_str(&format!("Content-Type: {ct}\r\nAccept: {ct}\r\n"));
+    }
+    req.push_str("User-Agent: cage\r\n\r\n");
+    channel.set_deadline(deadline);
+    channel
+        .write_all(req.as_bytes())
+        .map_err(|e| e.to_string())?;
+    channel.write_all(body).map_err(|e| e.to_string())?;
+    let head = read_header_block(&mut channel).map_err(|e| e.to_string())?;
+    let status = parse_status(&head).ok_or("invalid HTTP response")?;
+    let headers = parse_headers(&head);
+    let http_body = read_body(&mut channel, &headers, max_body)?;
+    Ok(HttpResponse {
+        status,
+        headers,
+        body: http_body,
+    })
+}
+
+fn read_header_block<C: Read>(channel: &mut C) -> Result<Vec<u8>, std::io::Error> {
+    let mut block = Vec::with_capacity(512);
+    let mut byte = [0u8; 1];
+    loop {
+        match channel.read(&mut byte) {
+            Ok(0) => break,
+            Ok(_) => {
+                block.push(byte[0]);
+                if block.len() > MAX_HEADER {
+                    return Err(std::io::Error::other("HTTP response header too large"));
+                }
+                if block.ends_with(b"\r\n\r\n") || block.ends_with(b"\n\n") {
+                    break;
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(block)
+}
+
+fn parse_status(head: &[u8]) -> Option<u16> {
+    let text = std::str::from_utf8(head).ok()?;
+    let line = text.lines().next()?;
+    let mut parts = line.split_whitespace();
+    parts.next()?;
+    parts.next()?.parse().ok()
+}
+
+fn parse_headers(head: &[u8]) -> Vec<(String, String)> {
+    let text = String::from_utf8_lossy(head);
+    text.lines()
+        .skip(1)
+        .take_while(|l| !l.is_empty())
+        .filter_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            Some((k.trim().to_owned(), v.trim().to_owned()))
+        })
+        .collect()
+}
+
+fn read_body<C: Read>(
+    channel: &mut C,
+    headers: &[(String, String)],
+    max_body: usize,
+) -> Result<Vec<u8>, String> {
+    let header = |name: &str| -> Option<&str> {
+        headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    };
+    let mut body = Vec::new();
+    if header("transfer-encoding")
+        .map(|v| v.eq_ignore_ascii_case("chunked"))
+        .unwrap_or(false)
+    {
+        body = read_chunked(channel, max_body)?;
+    } else if let Some(len) = header("content-length").and_then(|v| v.parse::<u64>().ok()) {
+        if len > max_body as u64 {
+            return Err("HTTP response body too large".to_owned());
+        }
+        (&mut *channel)
+            .take(len)
+            .read_to_end(&mut body)
+            .map_err(|e| e.to_string())?;
+    } else {
+        channel
+            .take(max_body as u64)
+            .read_to_end(&mut body)
+            .map_err(|e| e.to_string())?;
+    }
+    if body.len() > max_body {
+        return Err("HTTP response body too large".to_owned());
+    }
+    Ok(body)
+}
+
+fn read_chunked<C: Read>(channel: &mut C, max_body: usize) -> Result<Vec<u8>, String> {
+    let mut body = Vec::new();
+    loop {
+        let mut line = Vec::new();
+        loop {
+            let mut b = [0u8; 1];
+            if channel.read(&mut b).map_err(|e| e.to_string())? == 0 {
+                return Ok(body);
+            }
+            line.push(b[0]);
+            if line.ends_with(b"\r\n") {
+                break;
+            }
+            if line.len() > 16 {
+                return Err("invalid chunk header".to_owned());
+            }
+        }
+        let text = String::from_utf8_lossy(&line);
+        let size = usize::from_str_radix(text.trim().split(';').next().unwrap_or("0"), 16)
+            .map_err(|_| "invalid chunk size".to_owned())?;
+        if size == 0 {
+            return Ok(body);
+        }
+        if body.len() + size > max_body {
+            return Err("HTTP response body too large".to_owned());
+        }
+        let mut chunk = vec![0u8; size];
+        channel.read_exact(&mut chunk).map_err(|e| e.to_string())?;
+        body.extend_from_slice(&chunk);
+        let mut crlf = [0u8; 2];
+        let _ = channel.read_exact(&mut crlf);
+    }
+}
+
+/// RFC 4648, padding included — one call site (proxy auth), no dependency.
+fn base64(input: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+        out.push(TABLE[(n >> 18 & 63) as usize] as char);
+        out.push(TABLE[(n >> 12 & 63) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[(n >> 6 & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[(n & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base64_matches_rfc4648_vectors() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn addr_helpers() {
+        assert_eq!(split_addr("1.2.3.4:1080").unwrap(), ("1.2.3.4", 1080));
+        assert_eq!(split_addr("[::1]:8080").unwrap(), ("::1", 8080));
+        assert!(split_addr("no-port").is_err());
+        assert_eq!(join_addr("::1", 80), "[::1]:80");
+        assert_eq!(join_addr("1.2.3.4", 80), "1.2.3.4:80");
+    }
+
+    #[test]
+    fn allows_is_tcp_ipv4_only() {
+        let cfg = crate::config::default_config();
+        let e = Egress::new(&cfg).unwrap();
+        assert!(e.allows("tcp", "1.2.3.4:443"));
+        assert!(!e.allows("udp", "1.2.3.4:53"));
+        assert!(!e.allows("tcp", "[2001:db8::1]:443"));
+        assert!(!e.allows("icmp", "1.2.3.4"));
+    }
+
+    #[test]
+    fn socks5_target_encoding() {
+        let mut req = vec![0x05, 0x01, 0x00];
+        push_socks5_target(&mut req, "claude.ai", 443).unwrap();
+        assert_eq!(req[3], 0x03);
+        assert_eq!(req[4], 9);
+        assert_eq!(&req[5..14], b"claude.ai");
+        assert_eq!(&req[14..16], &443u16.to_be_bytes());
+        let mut req2 = vec![0x05, 0x01, 0x00];
+        push_socks5_target(&mut req2, "1.2.3.4", 8080).unwrap();
+        assert_eq!(req2[3], 0x01);
+        assert_eq!(&req2[4..8], &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn status_and_header_parsing() {
+        let head = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n";
+        assert_eq!(parse_status(head), Some(200));
+        let headers = parse_headers(head);
+        assert_eq!(headers[0].0, "Content-Type");
+        assert_eq!(headers[0].1, "text/plain");
+        assert_eq!(parse_status(b"garbage"), None);
+    }
+
+    /// Builds an egress against a loopback proxy and an `http://` DoH stub.
+    /// Only tests may bypass the https-only validation this way; production
+    /// goes through `Egress::new`.
+    fn loopback_egress(proxy_addr: &str, dns_url: String) -> Egress {
+        Egress {
+            upstream: url::Url::parse(&format!("socks5://{proxy_addr}")).unwrap(),
+            dns_url,
+        }
+    }
+
+    fn query(name: &str, qtype: u16) -> Message {
+        Message::query(0x1234, name, qtype)
+    }
+
+    #[test]
+    fn doh_parses_answers_through_the_proxy() {
+        let stub = support_doh(|q| {
+            let reply = Message::reply(
+                q,
+                0,
+                vec![crate::dnsmsg::Resource {
+                    name: q.questions[0].name.clone(),
+                    rtype: crate::dnsmsg::TYPE_A,
+                    class: crate::dnsmsg::CLASS_INET,
+                    ttl: 60,
+                    data: vec![1, 2, 3, 4],
+                }],
+            );
+            (200, reply.pack().unwrap())
+        });
+        let egress = loopback_egress(&support_proxy(), stub.url());
+        let reply = egress
+            .exchange_dns(&query("example.com", crate::dnsmsg::TYPE_A))
+            .unwrap();
+        assert!(reply.response);
+        assert_eq!(reply.answers.len(), 1);
+        assert_eq!(reply.answers[0].data, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn doh_fences_aaaa_queries_before_the_wire() {
+        let stub = support_doh(|_| (200, Vec::new()));
+        let egress = loopback_egress(&support_proxy(), stub.url());
+        let reply = egress
+            .exchange_dns(&query("example.com", crate::dnsmsg::TYPE_AAAA))
+            .unwrap();
+        assert!(reply.response);
+        assert!(
+            reply.answers.is_empty(),
+            "AAAA gets an empty Success, never upstream"
+        );
+        assert_eq!(stub.hits(), 0, "no DoH request may be made for AAAA");
+    }
+
+    #[test]
+    fn doh_fences_local_names_before_the_wire() {
+        let stub = support_doh(|_| (200, Vec::new()));
+        let egress = loopback_egress(&support_proxy(), stub.url());
+        for name in [
+            "localhost",
+            "api.localhost",
+            "svc.internal",
+            "printer.local",
+        ] {
+            let reply = egress
+                .exchange_dns(&query(name, crate::dnsmsg::TYPE_A))
+                .unwrap();
+            assert_eq!(reply.rcode, crate::dnsmsg::RCODE_NAME_ERROR, "{name}");
+        }
+        assert_eq!(stub.hits(), 0);
+    }
+
+    #[test]
+    fn doh_retries_server_errors_then_succeeds() {
+        let counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter_clone = counter.clone();
+        let stub = support_doh(move |q| {
+            if counter_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0 {
+                return (500, Vec::new());
+            }
+            (200, Message::reply(q, 0, Vec::new()).pack().unwrap())
+        });
+        let egress = loopback_egress(&support_proxy(), stub.url());
+        let reply = egress
+            .exchange_dns(&query("retry.example.com", crate::dnsmsg::TYPE_A))
+            .unwrap();
+        assert!(reply.response);
+        assert!(counter.load(std::sync::atomic::Ordering::Relaxed) >= 2);
+    }
+
+    #[test]
+    fn doh_rejects_mismatched_replies() {
+        // A reply with the wrong id is invalid, not a retry.
+        let stub = support_doh(|q| {
+            let mut reply = Message::reply(q, 0, Vec::new());
+            reply.id = reply.id.wrapping_add(1);
+            (200, reply.pack().unwrap())
+        });
+        let egress = loopback_egress(&support_proxy(), stub.url());
+        let err = egress
+            .exchange_dns(&query("wrong-id.example.com", crate::dnsmsg::TYPE_A))
+            .unwrap_err();
+        assert!(err.contains("mismatched"), "{err}");
+    }
+
+    #[test]
+    fn doh_client_errors_are_terminal_not_retried() {
+        let stub = support_doh(|_| (404, Vec::new()));
+        let egress = loopback_egress(&support_proxy(), stub.url());
+        let err = egress
+            .exchange_dns(&query("gone.example.com", crate::dnsmsg::TYPE_A))
+            .unwrap_err();
+        assert!(err.contains("HTTP 404"), "{err}");
+        assert_eq!(stub.hits(), 1, "4xx must not be retried");
+    }
+}
+
+#[cfg(test)]
+/// Handles for the DoH stub tests above: a loopback socks5 relay and a plain
+/// HTTP DoH stub, both std-only.
+mod doh_support {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::Arc;
+
+    type Answer = Arc<dyn Fn(&crate::dnsmsg::Message) -> (u16, Vec<u8>) + Send + Sync>;
+
+    /// The proxy side of the DoH tunnel: a socks5 CONNECT relay on loopback
+    /// (domain targets only, no auth — the stub just carries bytes).
+    pub fn proxy() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind socks5 stub");
+        let addr = listener.local_addr().expect("addr").to_string();
+        let listener = listener.try_clone().expect("clone");
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                std::thread::spawn(move || {
+                    let mut stream = stream;
+                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+                    let mut head = [0u8; 2];
+                    if stream.read_exact(&mut head).is_err() || head[0] != 0x05 {
+                        return;
+                    }
+                    let mut methods = vec![0u8; head[1] as usize];
+                    if stream.read_exact(&mut methods).is_err() {
+                        return;
+                    }
+                    if !methods.contains(&0x00) {
+                        let _ = stream.write_all(&[0x05, 0xff]);
+                        return;
+                    }
+                    if stream.write_all(&[0x05, 0x00]).is_err() {
+                        return;
+                    }
+                    let mut head = [0u8; 4];
+                    if stream.read_exact(&mut head).is_err() {
+                        return;
+                    }
+                    let (host, port) = match head[3] {
+                        0x01 => {
+                            let mut octets = [0u8; 4];
+                            if stream.read_exact(&mut octets).is_err() {
+                                return;
+                            }
+                            let mut port = [0u8; 2];
+                            if stream.read_exact(&mut port).is_err() {
+                                return;
+                            }
+                            (
+                                std::net::IpAddr::V4(std::net::Ipv4Addr::from(octets)).to_string(),
+                                u16::from_be_bytes(port),
+                            )
+                        }
+                        0x03 => {
+                            let mut len = [0u8; 1];
+                            if stream.read_exact(&mut len).is_err() {
+                                return;
+                            }
+                            let mut host = vec![0u8; len[0] as usize];
+                            if stream.read_exact(&mut host).is_err() {
+                                return;
+                            }
+                            let mut port = [0u8; 2];
+                            if stream.read_exact(&mut port).is_err() {
+                                return;
+                            }
+                            (
+                                String::from_utf8_lossy(&host).into_owned(),
+                                u16::from_be_bytes(port),
+                            )
+                        }
+                        _ => return,
+                    };
+                    let mut upstream = match std::net::TcpStream::connect((host.as_str(), port)) {
+                        Ok(s) => s,
+                        Err(_) => {
+                            let _ = stream.write_all(&[0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0]);
+                            return;
+                        }
+                    };
+                    let _ = stream.write_all(&[0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]);
+                    let mut upstream_clone = match upstream.try_clone() {
+                        Ok(s) => s,
+                        Err(_) => return,
+                    };
+                    let mut stream_clone = match stream.try_clone() {
+                        Ok(s) => s,
+                        Err(_) => return,
+                    };
+                    let up = std::thread::spawn(move || {
+                        let _ = std::io::copy(&mut stream_clone, &mut upstream_clone);
+                    });
+                    let _ = std::io::copy(&mut upstream, &mut stream);
+                    let _ = up.join();
+                });
+            }
+        });
+        addr
+    }
+
+    /// A DoH stub speaking plain HTTP on loopback; counts requests so tests
+    /// can assert whether the wire was touched at all.
+    pub fn doh(answer: Answer) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+        let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind doh stub");
+        let addr = listener.local_addr().expect("addr").to_string();
+        let listener = listener.try_clone().expect("clone");
+        let hits_clone = hits.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let answer = answer.clone();
+                let hits = hits_clone.clone();
+                std::thread::spawn(move || {
+                    hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let mut stream = stream;
+                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+                    let mut block = Vec::new();
+                    let mut byte = [0u8; 1];
+                    loop {
+                        match stream.read(&mut byte) {
+                            Ok(0) | Err(_) => break,
+                            Ok(_) => {
+                                block.push(byte[0]);
+                                if block.ends_with(b"\r\n\r\n") {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    let text = String::from_utf8_lossy(&block);
+                    let len: usize = text
+                        .lines()
+                        .find_map(|l| {
+                            let (k, v) = l.split_once(':')?;
+                            k.eq_ignore_ascii_case("content-length")
+                                .then(|| v.trim().parse().ok())?
+                        })
+                        .unwrap_or(0);
+                    let mut wire = vec![0u8; len];
+                    if stream.read_exact(&mut wire).is_err() {
+                        return;
+                    }
+                    let body = match crate::dnsmsg::Message::unpack(&wire) {
+                        Ok(query) => {
+                            let (status, body) = answer(&query);
+                            format!(
+                                "HTTP/1.1 {status}\r\nContent-Type: application/dns-message\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                body.len()
+                            )
+                            .into_bytes()
+                            .into_iter()
+                            .chain(body)
+                            .collect::<Vec<u8>>()
+                        }
+                        Err(_) => b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n".to_vec(),
+                    };
+                    let _ = stream.write_all(&body);
+                });
+            }
+        });
+        (format!("http://{addr}/dns-query"), hits)
+    }
+}
+
+#[cfg(test)]
+fn support_proxy() -> String {
+    doh_support::proxy()
+}
+
+#[cfg(test)]
+struct DohHandle {
+    url: String,
+    hits: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[cfg(test)]
+impl DohHandle {
+    fn url(&self) -> String {
+        self.url.clone()
+    }
+    fn hits(&self) -> usize {
+        self.hits.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+#[cfg(test)]
+fn support_doh(answer: impl Fn(&Message) -> (u16, Vec<u8>) + Send + Sync + 'static) -> DohHandle {
+    let (url, hits) = doh_support::doh(std::sync::Arc::new(answer));
+    DohHandle { url, hits }
+}
