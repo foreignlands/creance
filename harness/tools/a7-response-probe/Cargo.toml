@@ -1,0 +1,15 @@
+[package]
+name = "a7-response-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# A7/A8/B2/B3/B4 probe crate. testsupport_fixed.rs is a patched copy of
+# crates/creance-net/src/testsupport.rs (relay shutdown-order fix).
+
+[dependencies]
+libc = "0.2"
+creance-net = { path = "../../../crates/creance-net" }
+url = "2"
+
+[workspace]

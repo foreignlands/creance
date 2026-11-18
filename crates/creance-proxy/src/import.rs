@@ -12,6 +12,37 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
 /// The protocols the bundled core supports for imports.
+/// A single linear pass over the raw bytes: refuse absurd flow-nesting
+/// depth (>128 — the parser's own limit, but reached here in O(n)) and
+/// absurd single-line length (>1 MiB, another quadratic-scanner vector).
+fn precheck_depth(data: &[u8]) -> Result<(), String> {
+    let mut depth: u32 = 0;
+    let mut line_start = 0usize;
+    for (i, &b) in data.iter().enumerate() {
+        match b {
+            b'[' | b'{' => {
+                depth = depth.saturating_add(1);
+                if depth > 128 {
+                    return Err("订阅嵌套过深（>128 层），已拒绝".to_owned());
+                }
+            }
+            b']' | b'}' => depth = depth.saturating_sub(1),
+            b'\n' => {
+                if i - line_start > 1 << 20 {
+                    return Err("订阅包含超长单行（>1 MiB），已拒绝".to_owned());
+                }
+                line_start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    // The final line has no trailing newline — check it too.
+    if data.len() - line_start > 1 << 20 {
+        return Err("订阅包含超长单行（>1 MiB），已拒绝".to_owned());
+    }
+    Ok(())
+}
+
 /// The node fields cage canonicalizes (case/underscore-insensitively) before
 /// reading or counting them.
 const CANONICAL_KEYS: &[&str] = &["name", "type", "server", "udp", "dialer-proxy"];
@@ -37,6 +68,10 @@ pub fn parse_nodes(data: &[u8], source_id: &str) -> Result<(Vec<Node>, Vec<NodeI
     if data.is_empty() || data.len() > MAX_IMPORT {
         return Err("配置为空或超过 8 MiB".to_owned());
     }
+    // FINDING-001: deep flow nesting is quadratic in the YAML scanner's
+    // event stream — a 1 MiB bomb burns minutes of CPU before the parser's
+    // own recursion limit rejects it. One linear pass refuses it instantly.
+    precheck_depth(data)?;
     let yaml: serde_yaml::Value = serde_yaml::from_slice(data).map_err(|_| {
         "无法读取 YAML，请导入 Clash/Mihomo 节点订阅或配置；暂不支持 Base64 列表或分享链接"
             .to_owned()
@@ -797,6 +832,29 @@ proxies:
 #[cfg(test)]
 mod adversarial_tests {
     use super::*;
+
+    #[test]
+    fn deep_flow_bombs_are_refused_in_linear_time() {
+        // FINDING-001 regression: the same payload that burned 14s in the
+        // scanner must now be refused by the precheck in milliseconds.
+        let mut bomb = b"proxies: ".to_vec();
+        bomb.extend(std::iter::repeat_n(b'[', 100_000));
+        bomb.extend(std::iter::repeat_n(b']', 100_000));
+        let t = std::time::Instant::now();
+        let err = parse_nodes(&bomb, "src").unwrap_err();
+        assert!(err.contains("嵌套过深"), "{err}");
+        assert!(
+            t.elapsed() < std::time::Duration::from_secs(1),
+            "precheck must be linear: took {:?}",
+            t.elapsed()
+        );
+        // The oversized single-line variant too.
+        let mut long_line = b"proxies: [".to_vec();
+        long_line.extend(std::iter::repeat_n(b'x', 2 << 20));
+        long_line.extend(b"]");
+        let err = parse_nodes(&long_line, "src").unwrap_err();
+        assert!(err.contains("超长单行"), "{err}");
+    }
 
     #[test]
     fn case_variant_keys_never_panic_and_count_once() {

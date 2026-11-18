@@ -1,0 +1,10 @@
+[package]
+name = "a6-dns-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# A6 探针：dnsmsg_copy.rs 是 crates/creance-net/src/dnsmsg.rs 的**逐字节拷贝**
+# （2026-11-18 快照），独立编译以直接驱动 pub unpack/pack。测试矩阵见 main.rs。
+
+[workspace]

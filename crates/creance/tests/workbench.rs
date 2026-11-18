@@ -70,6 +70,9 @@ fn post(port: u16, path: &str, body: &str) -> (String, String) {
 
 #[test]
 fn workbench_end_to_end() {
+    // The loopback stub servers speak plaintext http; the https-only
+    // subscription policy (FINDING-009) has its own unit coverage.
+    std::env::set_var("CREANCE_ALLOW_HTTP_SUB", "1");
     let (profile, config_path) = util::fresh_profile();
     let port = start_server(&profile, &config_path);
 

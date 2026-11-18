@@ -1,0 +1,13 @@
+[package]
+name = "a1-yaml-bomb"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# 独立探针：只测 serde_yaml 0.9.34（生产锁定的同一版本）的库层行为。
+# parse_nodes 集成层用 release/creance 二进制黑盒验证（见 run.sh）。
+[dependencies]
+serde_yaml = "=0.9.34+deprecated"
+unsafe-libyaml = "0.2.11"
+
+[workspace]

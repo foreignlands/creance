@@ -163,10 +163,14 @@ pub fn sanitized_env(extra: &[(&str, String)]) -> Vec<(String, String)> {
 
 fn limactl(profile: &str, args: &[std::ffi::OsString]) -> std::process::Command {
     let mut cmd = Command::new("limactl");
-    cmd.env("LIMA_HOME", lima_home(profile));
+    // Strip the inherited environment FIRST, then inject ours: env_remove
+    // clears any earlier env() of the same name, and LIMA_HOME itself sits
+    // in STRIPPED — setting it before the strip loop silently deleted it,
+    // sending every VM operation to the global ~/.lima (FINDING-010).
     for name in STRIPPED {
         cmd.env_remove(name);
     }
+    cmd.env("LIMA_HOME", lima_home(profile));
     cmd.args(args);
     cmd
 }
@@ -275,6 +279,30 @@ mod tests {
         std::fs::create_dir_all(&profile).unwrap();
         assert_eq!(environment_dir(&profile), format!("{profile}-downloads"));
         std::fs::remove_dir_all(&profile).unwrap();
+    }
+
+    #[test]
+    fn limactl_carries_lima_home_despite_stripping() {
+        // FINDING-010 regression: STRIPPED contains LIMA_HOME, so an env()
+        // issued before the strip loop was silently deleted.
+        let profile = std::env::temp_dir()
+            .join(format!("cage-env-{}", crate::token()[..12].to_owned()))
+            .to_string_lossy()
+            .into_owned();
+        let cmd = limactl(&profile, &[]);
+        let seen: Vec<_> = cmd
+            .get_envs()
+            .filter(|(k, _)| k.to_string_lossy() == "LIMA_HOME")
+            .collect();
+        assert_eq!(seen.len(), 1, "LIMA_HOME must be set exactly once");
+        let value = seen[0]
+            .1
+            .expect("set, not removed")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(value, lima_home(&profile));
+        // And it must still be absent from the inherited-environment strip set.
+        let _ = std::fs::remove_dir_all(&profile);
     }
 
     #[test]
