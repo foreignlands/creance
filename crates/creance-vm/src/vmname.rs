@@ -31,16 +31,25 @@ const LONGEST_SOCK: &str = "ssh.sock.1234567890123456";
 
 /// Fits the longest socket in this home: `<home>/<name>/<socket>` must stay
 /// under `UNIX_PATH_MAX`.
+///
+/// Lima's formula: <home>/<name>/<socket> must fit UNIX_PATH_MAX-1, i.e.
+/// name <= UnixPathMax - 1 - len(home) - len("/") - len("/" + sock).
 pub fn home_limit(home: &str, logical: bool) -> Limit {
+    Limit((socket_budget(home, logical).clamp(1, 76)) as usize)
+}
+
+/// The raw instance-name budget a home leaves, in bytes — it goes negative
+/// when the (physical, canonicalized) home is too deep to host a Lima
+/// instance at all (F-023). Callers must fail on budgets below the
+/// shortest meaningful name (10: `p` + `-xxxxxxxx`), which the clamped
+/// `home_limit` cannot express.
+pub fn socket_budget(home: &str, logical: bool) -> isize {
     let real = if logical {
         home.to_owned()
     } else {
         resolve_existing(home).unwrap_or_else(|| home.to_owned())
     };
-    // Lima's formula: <home>/<name>/<socket> must fit UNIX_PATH_MAX-1, i.e.
-    // name <= UnixPathMax - 1 - len(home) - len("/") - len("/" + sock).
-    let n = unix_path_max().saturating_sub(1 + real.len() + 1 + 1 + LONGEST_SOCK.len());
-    Limit(n.clamp(1, 76))
+    unix_path_max() as isize - (1 + real.len() + 1 + 1 + LONGEST_SOCK.len()) as isize
 }
 
 fn resolve_existing(home: &str) -> Option<String> {

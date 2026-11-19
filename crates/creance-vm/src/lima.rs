@@ -185,6 +185,18 @@ pub fn setup_instance(
     instance: &str,
     options: &SetupOptions,
 ) -> Result<String, String> {
+    // F-023: a physical Lima home too deep for the socket budget cannot
+    // host an instance at all — say so here, before limactl's raw
+    // UNIX_PATH_MAX fatal. The shortest meaningful name ("p-xxxxxxxx")
+    // needs 10 bytes of budget.
+    const MIN_NAME_BUDGET: isize = 10;
+    let home = vm::lima_home(profile);
+    let budget = crate::vmname::socket_budget(&home, false);
+    if budget < MIN_NAME_BUDGET {
+        return Err(format!(
+            "profile 路径过深：Lima home {home} 只剩 {budget} 字节套接字预算（至少需要 {MIN_NAME_BUDGET}）；请把 profile 移到更浅的目录（如 ~/creance/<名>）后重试"
+        ));
+    }
     // `limactl create --name=<instance> <file>` owns the instance directory,
     // so the generated YAML is staged outside the Lima home and handed to it.
     let stage_dir = crate::paths::join(&vm::state_dir(profile), "setup");
@@ -269,6 +281,22 @@ mod tests {
         let yaml = String::from_utf8(generate_lima_yaml(&opts).unwrap()).unwrap();
         assert!(yaml.contains("timezone: Asia/Tokyo"), "{yaml}");
         assert!(yaml.contains("locale-gen ja_JP.UTF-8"), "{yaml}");
+    }
+
+    #[test]
+    fn deep_profiles_fail_with_an_actionable_error() {
+        // F-023: a home past the socket budget must fail here with advice,
+        // not inside limactl with a raw UNIX_PATH_MAX fatal.
+        let deep = format!(
+            "{}/{}",
+            std::env::temp_dir().to_string_lossy(),
+            "d".repeat(70)
+        );
+        std::fs::create_dir_all(&deep).unwrap();
+        let err = setup_instance(&deep, "t-deep", &options()).unwrap_err();
+        assert!(err.contains("路径过深"), "{err}");
+        assert!(err.contains("更浅"), "must say what to do: {err}");
+        std::fs::remove_dir_all(&deep).unwrap();
     }
 
     #[test]
