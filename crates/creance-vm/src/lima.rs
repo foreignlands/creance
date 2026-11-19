@@ -77,8 +77,22 @@ pub fn generate_lima_yaml(options: &SetupOptions) -> Result<Vec<u8>, String> {
             &options.locale,
             &options.guest.session_token,
             &options.guest.hostname,
+            &options.guest.username,
         )),
     );
+
+    // F-020/F-022: the guest user is the generated identity, never a mirror
+    // of the host account. `uid` stays unset ON PURPOSE: vz virtiofs mounts
+    // pass uid numbers through unmapped, so lima's host-mirrored uid is what
+    // keeps the writable workspace writable — a number leaks nothing; the
+    // name and GECOS comment are the identity, and both are ours.
+    // `passwordlessSudo: false` alone does NOT close the privilege path
+    // (lima then provisions a random password inside the guest); the
+    // provision script strips the sudoers grant itself.
+    let mut user = Mapping::new();
+    user.insert("name".into(), Yaml::from(options.guest.username.clone()));
+    user.insert("comment".into(), Yaml::from("creance guest"));
+    user.insert("passwordlessSudo".into(), Yaml::from(false));
 
     let mut containerd = Mapping::new();
     containerd.insert("system".into(), Yaml::from(false));
@@ -109,6 +123,7 @@ pub fn generate_lima_yaml(options: &SetupOptions) -> Result<Vec<u8>, String> {
         "provision".into(),
         Yaml::Sequence(vec![Yaml::Mapping(provision)]),
     );
+    root.insert("user".into(), Yaml::Mapping(user));
     root.insert("containerd".into(), Yaml::Mapping(containerd));
     root.insert("ssh".into(), Yaml::Mapping(ssh));
     root.insert("plain".into(), Yaml::from(false));
@@ -121,7 +136,7 @@ pub fn generate_lima_yaml(options: &SetupOptions) -> Result<Vec<u8>, String> {
 /// The guest bootstrap: fingerprint (timezone/locale) first, then the tool
 /// chain. Guest networking is not yet gated (see ROADMAP); the apt step
 /// runs on the VM's NAT until the cage network layer is in place.
-fn provision_script(locale: &str, session_token: &str, hostname: &str) -> String {
+fn provision_script(locale: &str, session_token: &str, hostname: &str, username: &str) -> String {
     format!(
         r#"#!/bin/sh
 set -e
@@ -147,6 +162,17 @@ iptables -A OUTPUT -p udp --dport 67 -j ACCEPT
 iptables -A OUTPUT -p icmp -j ACCEPT
 iptables -P OUTPUT DROP
 iptables-save > /etc/iptables/rules.v4 2>/dev/null || iptables-save > /etc/iptables.up.rules
+
+# 020 PRIVILEGE RETIREMENT — cloud-init unconditionally grants the guest
+# user sudo (NOPASSWD, or a random password parked in ~/password when
+# passwordlessSudo is false). The enforcement plane is only as strong as
+# the weakest privilege path, so the grant dies here: without it the
+# firewall above cannot be lifted from inside the guest.
+SUDOERS=/etc/sudoers.d/90-cloud-init-users
+[ -f "$SUDOERS" ] && sed -i '\#^{username} #d' "$SUDOERS" || true
+passwd -l {username} 2>/dev/null || true
+GUEST_HOME=$(getent passwd {username} | cut -d: -f6)
+[ -n "$GUEST_HOME" ] && rm -f "$GUEST_HOME/password" || true
 "#
     )
 }
@@ -178,6 +204,12 @@ mod tests {
     fn options() -> SetupOptions {
         SetupOptions {
             workspace: "/Users/me/project".to_owned(),
+            guest: crate::guestprofile::Profile {
+                version: 1,
+                hostname: "cage-abc12345".to_owned(),
+                username: "devabc12345".to_owned(),
+                session_token: "ab".repeat(24),
+            },
             ..Default::default()
         }
     }
@@ -190,11 +222,23 @@ mod tests {
         // FINDING-024: lima rejects a `hostname` field — the identity lands
         // via provision's hostnamectl instead, so the field must stay absent.
         assert!(v["hostname"].is_null(), "{yaml}");
+        // F-020/F-022: the guest user is the generated identity with no
+        // passwordless sudo; uid stays unset so the writable mount keeps
+        // working (vz virtiofs passes uid numbers through unmapped).
+        assert_eq!(v["user"]["name"], "devabc12345");
+        assert_eq!(v["user"]["comment"], "creance guest");
+        assert_eq!(v["user"]["passwordlessSudo"], Yaml::Bool(false));
+        assert!(v["user"]["uid"].is_null(), "uid must stay host-mirrored");
         let script = v["provision"][0]["script"].as_str().unwrap_or_default();
         assert!(
             script.contains("hostnamectl set-hostname cage-"),
             "identity must land via provision"
         );
+        assert!(
+            script.contains("sed -i '\\#^devabc12345 #d'"),
+            "the cloud-init sudoers grant must die in provision"
+        );
+        assert!(script.contains("passwd -l devabc12345"));
         assert!(
             script.contains("CREANCE_SESSION_TOKEN="),
             "credential handed off"

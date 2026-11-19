@@ -307,10 +307,12 @@ fn cmd_escape_test() -> i32 {
     if std::path::Path::new(&instance_yaml).exists() {
         let flag = format!("{}.escape-flag", creance_vm::vm::environment_dir(&profile));
         let store = creance_proxy::load(&profile).ok();
+        let guest = creance_vm::guestprofile::Profile::load_or_create(&profile).ok();
         let script = escape::guest_script(
             &flag,
             &store.as_ref().map(|s| s.auth.clone()).unwrap_or_default(),
             store.as_ref().map(|s| s.port).unwrap_or(17896),
+            &guest.map(|g| g.username).unwrap_or_default(),
         );
         let child = std::process::Command::new("limactl")
             .env("LIMA_HOME", creance_vm::vm::lima_home(&profile))

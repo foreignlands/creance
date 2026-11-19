@@ -39,7 +39,11 @@ pub fn ensure(profile: &str, instance: &str, guest_port: u16) -> Result<(), Stri
     let Some(port) = ssh_port else {
         return Err(format!("instance {instance} is not running"));
     };
-    let user = vsock_user();
+    // F-022: ssh in as the generated guest identity, never the host user
+    // name lima would mirror by default.
+    let user = crate::guestprofile::Profile::load_or_create(profile)
+        .map_err(|e| format!("guest profile unavailable: {e}"))?
+        .username;
     let child = Command::new("ssh")
         .arg("-i")
         .arg(paths::join(&home, "_config/user"))
@@ -86,9 +90,4 @@ pub fn ensure(profile: &str, instance: &str, guest_port: u16) -> Result<(), Stri
 pub fn stop(profile: &str) -> Result<(), String> {
     pidfile::stop(&pidfile::proxy_pid_file(profile, "tunnel.pid"));
     Ok(())
-}
-
-/// The guest user lima provisions (host user name; lima mirrors it).
-fn vsock_user() -> String {
-    std::env::var("USER").unwrap_or_else(|_| "lima".to_owned())
 }

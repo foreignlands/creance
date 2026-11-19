@@ -228,8 +228,9 @@ fn count_declared_mounts(lima_yaml: &str) -> Result<usize, String> {
 
 /// The in-guest probe script: run inside the VM, prints one `PROBE id
 /// RESULT` line per check (RESULT in PASS/ESCAPE/SKIP). Kept POSIX-sh so it
-/// runs on any guest.
-pub fn guest_script(flag_path: &str, auth: &str, port: u16) -> String {
+/// runs on any guest. `expected_user` is the generated guest identity the
+/// VM must be running as (F-022).
+pub fn guest_script(flag_path: &str, auth: &str, port: u16, expected_user: &str) -> String {
     let _ = auth;
     format!(
         r#"#!/bin/sh
@@ -246,6 +247,18 @@ probe() {{
 }}
 # Filesystem: the host flag must not be reachable by any guest path.
 probe fs-flag-readable true
+# Identity (020/022): the session runs as the generated identity, and no
+# privilege path may exist — root inside the guest could lift the firewall.
+if [ "$(/usr/bin/id -un)" != "{expected_user}" ]; then
+  echo "PROBE guest-identity ESCAPE"
+else
+  echo "PROBE guest-identity PASS"
+fi
+if /usr/bin/sudo -n true 2>/dev/null; then
+  echo "PROBE guest-privilege ESCAPE"
+else
+  echo "PROBE guest-privilege PASS"
+fi
 # Credentials: no host secrets in the guest environment. The external
 # commands are spelled with absolute paths so a polluted guest PATH cannot
 # fake the oracle (FINDING-011).
@@ -404,12 +417,15 @@ mod tests {
 
     #[test]
     fn guest_script_is_posix_and_flags_every_probe() {
-        let script = guest_script("/nonexistent-flag", "deadbeef", 17896);
+        let script = guest_script("/nonexistent-flag", "deadbeef", 17896, "devabc12345");
         assert!(script.starts_with("#!/bin/sh"));
         for required in [
             "probe fs-flag-readable",
             "PROBE env-credentials",
             "PROBE net-direct-egress ESCAPE",
+            // F-020/F-022: identity and privilege probes.
+            "/usr/bin/id -un)\" != \"devabc12345\"",
+            "PROBE guest-privilege ESCAPE",
         ] {
             assert!(script.contains(required), "missing {required}");
         }
