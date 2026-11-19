@@ -750,18 +750,57 @@ pub fn spawn_daemon(
     Ok(())
 }
 
+/// Whether the daemon a record names is still serving its socket, on
+/// connect-level evidence only (F-029): a frozen, loaded, or slow daemon
+/// still accepts connections and must never be retired — a status call
+/// timing out says "slow", not "dead", and acting on it mutinied healthy
+/// daemons (record deleted, live tunnel cut, replacement spawned). Only a
+/// refused or vanished socket proves death; anything inconclusive counts
+/// as alive.
+fn daemon_serving(instance_dir: &str) -> bool {
+    let record = creance_vm::paths::join(instance_dir, "cage-gate.json");
+    let Ok(bytes) = std::fs::read(&record) else {
+        return false; // no record: nothing serving
+    };
+    let socket = serde_json::from_slice::<GateRecord>(&bytes)
+        .ok()
+        .map(|r| r.socket)
+        .unwrap_or_default();
+    if socket.is_empty() {
+        return false;
+    }
+    let Ok(addr) = std::os::unix::net::SocketAddr::from_pathname(&socket) else {
+        return false;
+    };
+    // Local unix connects complete or refuse immediately (R4's filler kept
+    // 200 connections queued against a healthy daemon and every connect
+    // still returned), so connect_addr is the whole probe.
+    match std::os::unix::net::UnixStream::connect_addr(&addr) {
+        Ok(_) => true,
+        // The socket file outlived its listener: refused or gone.
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+            ) =>
+        {
+            false
+        }
+        // Anything else inconclusive: do not mutiny.
+        Err(_) => true,
+    }
+}
+
 /// Removes a record whose daemon no longer serves it (F-019: SIGKILL and
 /// reboots leave records behind; existence alone must never pass for a
-/// working gate). True when a stale record was retired.
+/// working gate; F-029: only connect-level death counts). True when a
+/// stale record was retired.
 fn retire_stale_record(instance_dir: &str) -> bool {
     let record = creance_vm::paths::join(instance_dir, "cage-gate.json");
     if !Path::new(&record).exists() {
         return false;
     }
-    if GateClient::open(instance_dir)
-        .and_then(|client| client.status())
-        .is_ok()
-    {
+    if daemon_serving(instance_dir) {
         return false;
     }
     let _ = std::fs::remove_file(&record);
@@ -960,14 +999,17 @@ pub fn close_gates(profile: &str) -> Result<(), String> {
             let instance_dir = entry.path().to_string_lossy().into_owned();
             let record = Path::new(&instance_dir).join("cage-gate.json");
             if record.exists() {
-                match GateClient::open(&instance_dir)
-                    .and_then(|c| c.close("代理核心停止或重启，等待重新检测").map(|_| ()))
-                {
-                    Ok(()) => {}
-                    Err(e) if e.contains("unreachable") => {
-                        let _ = std::fs::remove_file(&record);
+                // F-029: the same connect-level evidence everywhere — a
+                // dead daemon's record is cleaned here, a serving (or
+                // merely slow) one gets its close command and errors count.
+                if daemon_serving(&instance_dir) {
+                    if let Err(e) = GateClient::open(&instance_dir)
+                        .and_then(|c| c.close("代理核心停止或重启，等待重新检测").map(|_| ()))
+                    {
+                        last = Some(e);
                     }
-                    Err(e) => last = Some(e),
+                } else {
+                    let _ = std::fs::remove_file(&record);
                 }
             }
         }
@@ -1177,6 +1219,57 @@ mod tests {
         fs::write(&record_path, b"not json").unwrap();
         assert!(!handle.gate.still_owner(), "garbage record: hold back");
         drop(handle);
+        fs::remove_dir_all(&profile).unwrap();
+    }
+
+    #[test]
+    fn daemon_serving_distinguishes_slow_from_dead() {
+        // F-029 regression: only connect-level death retires a record.
+        let (profile, config_path) = prepare_profile();
+        let instance_dir = creance_vm::paths::join(&profile, "lima/test-vm");
+        fs::create_dir_all(&instance_dir).unwrap();
+        let record_path = creance_vm::paths::join(&instance_dir, "cage-gate.json");
+        let write_record = |socket: &str| {
+            let record = serde_json::json!({
+                "socket": socket,
+                "token": creance_proxy::token(),
+                "run_id": creance_proxy::token()[..32].to_owned(),
+            });
+            fs::write(&record_path, serde_json::to_vec(&record).unwrap()).unwrap();
+        };
+
+        // A gate that serves: alive.
+        let handle = Gate::start(
+            &instance_dir,
+            &config_path,
+            &profile,
+            "gate-test-inst",
+            17896,
+        )
+        .unwrap();
+        assert!(daemon_serving(&instance_dir), "serving gate is alive");
+        drop(handle);
+
+        // The frozen-daemon shape: a listener that never accepts or reads
+        // still completes connects — it must count as ALIVE, not stale.
+        let frozen_dir = std::env::temp_dir().join(format!(
+            "cage-gate-frozen-{}",
+            creance_proxy::token()[..8].to_owned()
+        ));
+        fs::create_dir_all(&frozen_dir).unwrap();
+        let frozen_sock = frozen_dir.join("control.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&frozen_sock).unwrap();
+        write_record(frozen_sock.to_string_lossy().as_ref());
+        assert!(
+            daemon_serving(&instance_dir),
+            "frozen-but-bound daemon must not be retired"
+        );
+
+        // The dead shape: the listener is gone, its socket file remains
+        // (exactly what a SIGKILLed daemon leaves behind).
+        drop(listener);
+        assert!(!daemon_serving(&instance_dir), "refused socket is dead");
+        fs::remove_dir_all(&frozen_dir).unwrap();
         fs::remove_dir_all(&profile).unwrap();
     }
 
