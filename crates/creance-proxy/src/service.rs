@@ -83,15 +83,18 @@ pub fn validate(profile: &str, store: &Store) -> Result<(), String> {
     Ok(())
 }
 
-/// One HTTP request over the core's private control socket.
-fn api(profile: &str, method: &str, path: &str) -> Result<serde_json::Value, String> {
+/// One HTTP request over the core's private control socket. F-042: the
+/// controller requires the store's auth as its bearer secret now — a
+/// credential-less same-uid process used to be able to flip the running
+/// egress with a single unauthenticated request.
+fn api(profile: &str, auth: &str, method: &str, path: &str) -> Result<serde_json::Value, String> {
     use std::os::unix::net::UnixStream;
     let mut stream =
         UnixStream::connect(socket(profile)).map_err(|_| "代理控制通道不可达".to_owned())?;
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
     let req = format!(
-        "{method} {path} HTTP/1.1\r\nHost: cage-proxy\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n"
+        "{method} {path} HTTP/1.1\r\nHost: cage-proxy\r\nAuthorization: Bearer {auth}\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n"
     );
     stream
         .write_all(req.as_bytes())
@@ -129,7 +132,7 @@ pub fn check_running(profile: &str, store: &Store) -> Result<(), String> {
     if bound.is_empty() {
         return Err("readiness: no bound interface".to_owned());
     }
-    let configs = api(profile, "GET", "/configs")?;
+    let configs = api(profile, &store.auth, "GET", "/configs")?;
     let port_matches = configs
         .get("mixed-port")
         .and_then(serde_json::Value::as_u64)
@@ -140,10 +143,16 @@ pub fn check_running(profile: &str, store: &Store) -> Result<(), String> {
     if configs.get("interface-name").and_then(|v| v.as_str()) != Some(bound.as_str()) {
         return Err("readiness: interface".to_owned());
     }
+    // F-042: the RUNNING mode must still be the generated "rule" — a
+    // flipped mode=direct (or any other runtime divergence) reads as not
+    // running, even through channels the secret cannot reach.
+    if configs.get("mode").and_then(|v| v.as_str()) != Some("rule") {
+        return Err("readiness: mode".to_owned());
+    }
     if configs.get("unified-delay") != Some(&serde_json::Value::Bool(true)) {
         return Err("readiness: unified-delay".to_owned());
     }
-    let group = api(profile, "GET", &format!("/proxies/{GROUP}"))?;
+    let group = api(profile, &store.auth, "GET", &format!("/proxies/{GROUP}"))?;
     if group.get("now").and_then(|v| v.as_str()) != Some(store.selected.as_str()) {
         return Err("readiness: selection".to_owned());
     }

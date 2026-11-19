@@ -90,6 +90,13 @@ pub fn generate(store: &Store, profile: &str) -> Result<Vec<u8>, String> {
         "external-controller-unix".into(),
         Yaml::from(crate::socket(profile)),
     );
+    // F-042: the controller used to be credential-less — a same-uid
+    // process could flip the running egress (mode=direct, a MATCH,DIRECT
+    // reload) with one unauthenticated request and no on-disk trace,
+    // hijacking the exit-evidence oracle. The controller now requires
+    // the store's auth as its bearer secret (same trust domain as the
+    // mixed-port credential, held by exactly the same holders).
+    root.insert("secret".into(), Yaml::from(store.auth.clone()));
     root.insert("tun".into(), Yaml::Mapping(tun));
     root.insert("dns".into(), Yaml::Mapping(dns));
     root.insert("geo-auto-update".into(), Yaml::from(false));
@@ -223,11 +230,13 @@ mod tests {
         let proxies = v["proxies"].as_sequence().unwrap();
         assert_eq!(proxies[0]["name"], "id-exit");
         assert_eq!(proxies[0]["udp"], Yaml::Bool(false));
-        // The control socket is namespaced by profile hash.
+        // The control socket is namespaced by profile hash, and the
+        // controller demands the store's auth as its secret (F-042).
         assert!(v["external-controller-unix"]
             .as_str()
             .unwrap()
             .starts_with("/tmp/cage-proxy-"));
+        assert_eq!(v["secret"], Yaml::String(s.auth.clone()));
     }
 
     #[test]
