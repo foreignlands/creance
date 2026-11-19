@@ -276,6 +276,16 @@ impl Egress {
             .upstream
             .password()
             .map(|pw| (self.upstream.username().to_owned(), pw.to_owned()));
+        // RFC 1929 carries each credential in one length byte: refuse
+        // over-long values instead of truncating them into a broken frame.
+        if let Some((user, pass)) = &auth {
+            if user.len() > 255 || pass.len() > 255 {
+                return Err(
+                    "SOCKS5 代理凭据过长（用户名与密码各限 255 字节）；请检查代理；请求不会改为直连。"
+                        .to_owned(),
+                );
+            }
+        }
         let mut greeting = vec![0x05u8];
         match &auth {
             Some(_) => greeting.extend([0x02, 0x00, 0x02]),
@@ -930,6 +940,77 @@ mod tests {
             .collect();
         let mut reader = wire;
         read_body(&mut reader, &headers, max)
+    }
+
+    /// A SOCKS5 stub that demands username/password auth and records the
+    /// ULEN of any sub-negotiation frame it receives (FINDING-013: over-long
+    /// credentials must be refused before any frame is written).
+    fn auth_demanding_socks5() -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::net::TcpListener;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let got_frame = Arc::new(AtomicUsize::new(0));
+        let hits = got_frame.clone();
+        let listener = listener.try_clone().unwrap();
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                let mut buf = [0u8; 1024];
+                if stream.read(&mut buf).unwrap_or(0) == 0 {
+                    continue;
+                }
+                if stream.write_all(&[0x05, 0x02]).is_err() {
+                    continue;
+                }
+                // Sub-negotiation: [0x01, ULEN, user.., PLEN, pass..].
+                let n = stream.read(&mut buf).unwrap_or(0);
+                if n >= 2 && buf[0] == 0x01 {
+                    hits.store(buf[1] as usize, Ordering::SeqCst);
+                    let _ = stream.write_all(&[0x01, 0x01]); // auth failed
+                }
+            }
+        });
+        (addr, got_frame)
+    }
+
+    #[test]
+    fn socks5_overlong_credentials_are_refused_without_frames() {
+        use std::sync::atomic::Ordering;
+        let user = "u".repeat(300);
+        let (addr, got_frame) = auth_demanding_socks5();
+        let e = loopback_egress(
+            &format!("{user}:p@{addr}"),
+            "https://1.1.1.1/dns-query".to_string(),
+        );
+        let err = match e.dial("1.2.3.4:443") {
+            Err(err) => err,
+            Ok(_) => panic!("overlong username refused"),
+        };
+        assert!(err.contains("255"), "{err}");
+        assert_eq!(
+            got_frame.load(Ordering::SeqCst),
+            0,
+            "no sub-negotiation frame may be sent for over-long credentials"
+        );
+    }
+
+    #[test]
+    fn socks5_password_over_255_is_refused() {
+        use std::sync::atomic::Ordering;
+        let pass = "p".repeat(256);
+        let (addr, got_frame) = auth_demanding_socks5();
+        let e = loopback_egress(
+            &format!("u:{pass}@{addr}"),
+            "https://1.1.1.1/dns-query".to_string(),
+        );
+        let err = match e.dial("1.2.3.4:443") {
+            Err(err) => err,
+            Ok(_) => panic!("overlong password refused"),
+        };
+        assert!(err.contains("255"), "{err}");
+        assert_eq!(got_frame.load(Ordering::SeqCst), 0);
     }
 
     #[test]
