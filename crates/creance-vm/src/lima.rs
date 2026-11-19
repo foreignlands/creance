@@ -146,9 +146,14 @@ hostnamectl set-hostname {hostname} 2>/dev/null || true
 export DEBIAN_FRONTEND=noninteractive
 locale-gen {locale} >/dev/null 2>&1 || true
 update-locale LANG={locale} >/dev/null 2>&1 || true
-apt-get update -qq
-apt-get install -y -qq curl git ca-certificates xz-utils >/dev/null
-curl -fsSL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-$([[ $(uname -m) = aarch64 ]] && echo arm64 || echo x64)/bin/node -o /usr/local/bin/node 2>/dev/null || apt-get install -y -qq nodejs npm >/dev/null
+# Toolchain installs are best-effort (F-031): a dead mirror or a flaky
+# first-boot network must never abort this script via `set -e` — the
+# topology lockdown and privilege retirement below are the containment
+# contract, and skipping them on an apt failure would ship the guest with
+# raw network access AND passwordless sudo.
+apt-get update -qq || true
+apt-get install -y -qq curl git ca-certificates xz-utils >/dev/null || true
+curl -fsSL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-$([[ $(uname -m) = aarch64 ]] && echo arm64 || echo x64)/bin/node -o /usr/local/bin/node 2>/dev/null || apt-get install -y -qq nodejs npm >/dev/null || true
 curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1 || true
 
 # 0.3 TOPOLOGY LOCKDOWN — the guest's only wire out is the ssh -R tunnel to
@@ -248,6 +253,12 @@ mod tests {
         assert!(
             script.contains("hostnamectl set-hostname cage-"),
             "identity must land via provision"
+        );
+        // F-031: installation failures must not abort the script before the
+        // lockdown and privilege retirement land.
+        assert!(
+            script.contains("apt-get update -qq || true"),
+            "installs are best-effort, containment is mandatory"
         );
         assert!(
             script.contains("sed -i '\\#^devabc12345 #d'"),
