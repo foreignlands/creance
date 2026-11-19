@@ -1,0 +1,13 @@
+[package]
+name = "r2-url-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# R2 回归审查探针：004 尾斜杠启发式（8d862d4）双向攻击矩阵。
+# validate_proxy_url 直出自 creance-net（可独立 path-dep）。
+
+[dependencies]
+creance-net = { path = "../../../crates/creance-net" }
+
+[workspace]

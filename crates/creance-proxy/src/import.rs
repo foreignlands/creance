@@ -39,8 +39,32 @@ fn contains_overflow_integer(data: &[u8]) -> bool {
 fn precheck_depth(data: &[u8]) -> Result<(), String> {
     let mut depth: u32 = 0;
     let mut line_start = 0usize;
+    // FINDING-018: brackets inside quoted scalars are data, not structure —
+    // a legitimate `password: "[[[…"` must not trip the depth counter.
+    // YAML flow scalars escape `''` and `\"`; both are handled.
+    let (mut in_single, mut in_double) = (false, false);
+    let mut prev_escape = false;
     for (i, &b) in data.iter().enumerate() {
+        if in_double {
+            if prev_escape {
+                prev_escape = false;
+            } else if b == b'\\' {
+                prev_escape = true;
+            } else if b == b'"' {
+                in_double = false;
+            }
+            continue;
+        }
+        if in_single {
+            if b == b'\'' {
+                // Either closes the scalar or is the first half of ''.
+                in_single = data.get(i + 1) != Some(&b'\'');
+            }
+            continue;
+        }
         match b {
+            b'"' => in_double = true,
+            b'\'' => in_single = true,
             b'[' | b'{' => {
                 depth = depth.saturating_add(1);
                 if depth > 128 {
@@ -921,6 +945,28 @@ mod adversarial_tests {
         long_line.extend(b"]");
         let err = parse_nodes(&long_line, "src").unwrap_err();
         assert!(err.contains("超长单行"), "{err}");
+    }
+
+    #[test]
+    fn quoted_bracket_scalars_do_not_trip_the_depth_guard() {
+        // FINDING-018: 129 literal brackets inside a quoted password are
+        // data; the precheck must look through them.
+        let pw = "[".repeat(129);
+        let y = format!(
+            "proxies:\n  - name: quoted\n    type: ss\n    server: 1.2.3.4\n    port: 8388\n    cipher: aes-128-gcm\n    password: \"{pw}\"\n"
+        );
+        let (nodes, _) = parse_nodes(y.as_bytes(), "src").expect("quoted brackets are data");
+        assert_eq!(nodes.len(), 1);
+        // Single-quoted scalars and the '' escape likewise.
+        let y2 = format!(
+            "proxies:\n  - name: q2\n    type: ss\n    server: 1.2.3.4\n    port: 8388\n    cipher: aes-128-gcm\n    password: '{pw}''x'\n"
+        );
+        assert!(parse_nodes(y2.as_bytes(), "src").is_ok());
+        // And the real (unquoted) bomb is still refused instantly.
+        let mut bomb = b"proxies: ".to_vec();
+        bomb.extend(std::iter::repeat_n(b'[', 100_000));
+        bomb.extend(std::iter::repeat_n(b']', 100_000));
+        assert!(parse_nodes(&bomb, "src").unwrap_err().contains("嵌套过深"));
     }
 
     #[test]

@@ -97,32 +97,19 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
     });
 
     // 4. Only the environment directory is shared: no Lima mounts beyond
-    //    the workspace mount in the staged/instance config. Parse the real
-    //    YAML — a line-prefix counter misses `"-  location:"`, flow
-    //    mappings, and dash-on-its-own-line spellings (FINDING-011).
+    //    the workspace mount in the staged/instance config. FINDING-016:
+    //    this probe fail-closes — anything it cannot count (malformed
+    //    structure, merge keys) is Escaped, never a silent Contained.
     let instance = vm::instance_name(profile, &vm::environment_dir(profile));
     let lima_yaml = paths::join(&vm::lima_home(profile), &format!("{instance}/lima.yaml"));
     out.push(Probe {
         id: "mounts-workspace-only",
         layer: "filesystem",
         outcome: if Path::new(&lima_yaml).exists() {
-            match std::fs::read(&lima_yaml) {
-                Ok(bytes) => match serde_yaml::from_slice::<serde_yaml::Value>(&bytes) {
-                    Ok(value) => {
-                        let mounts = value
-                            .get("mounts")
-                            .and_then(serde_yaml::Value::as_sequence)
-                            .map(|s| s.len())
-                            .unwrap_or(0);
-                        if mounts <= 1 {
-                            Outcome::Contained
-                        } else {
-                            Outcome::Escaped(format!("{mounts} mounts declared"))
-                        }
-                    }
-                    Err(e) => Outcome::Escaped(e.to_string()),
-                },
-                Err(e) => Outcome::Escaped(e.to_string()),
+            match count_declared_mounts(&lima_yaml) {
+                Ok(0) | Ok(1) => Outcome::Contained,
+                Ok(n) => Outcome::Escaped(format!("{n} mounts declared")),
+                Err(why) => Outcome::Escaped(why),
             }
         } else {
             Outcome::NotEnforced
@@ -173,6 +160,48 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
     });
 
     out
+}
+
+/// Counts `mounts` entries in a Lima config. Err = the probe cannot judge
+/// this file: malformed YAML, a non-mapping root, non-sequence `mounts`,
+/// non-mapping entries, or YAML merge keys (`<<`) — Lima (go-yaml) expands
+/// merges while serde_yaml does not, so a merged file cannot be counted
+/// honestly (FINDING-016).
+fn count_declared_mounts(lima_yaml: &str) -> Result<usize, String> {
+    let text =
+        std::fs::read_to_string(lima_yaml).map_err(|e| format!("lima.yaml unreadable: {e}"))?;
+    let root: serde_yaml::Value =
+        serde_yaml::from_str(&text).map_err(|_| "lima.yaml is not valid YAML".to_owned())?;
+    let mapping = root
+        .as_mapping()
+        .ok_or_else(|| "lima.yaml root is not a mapping".to_owned())?;
+    if mapping.contains_key("<<") {
+        return Err("lima.yaml uses merge keys; probe cannot count mounts".to_owned());
+    }
+    let Some(mounts) = mapping.get(serde_yaml::Value::String("mounts".into())) else {
+        return Ok(0);
+    };
+    let entries = mounts
+        .as_sequence()
+        .ok_or_else(|| "mounts is not a sequence".to_owned())?;
+    let mut count = 0;
+    for entry in entries {
+        let m = entry
+            .as_mapping()
+            .ok_or_else(|| "mounts entry is not a mapping".to_owned())?;
+        if m.contains_key("<<") {
+            return Err("mounts entry uses merge keys; probe cannot count".to_owned());
+        }
+        count += m
+            .iter()
+            .filter(|(k, _)| {
+                k.as_str()
+                    .map(|key| key.eq_ignore_ascii_case("location"))
+                    .unwrap_or(false)
+            })
+            .count();
+    }
+    Ok(count)
 }
 
 /// The in-guest probe script: run inside the VM, prints one `PROBE id
@@ -291,6 +320,44 @@ mod tests {
         let code = report(&probes);
         assert_eq!(code, 0);
         std::fs::remove_dir_all(&profile).unwrap();
+    }
+
+    #[test]
+    fn mount_counting_fail_closes_on_anything_it_cannot_judge() {
+        // FINDING-016: malformed structure and merge keys must be Escaped
+        // (via Err), never a silent Contained.
+        let dir = std::env::temp_dir().join(format!(
+            "creance-mnt-{}",
+            creance_vm::token()[..12].to_owned()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = |body: &str| {
+            let path = dir.join(format!("{}.yaml", creance_vm::token()[..6].to_owned()));
+            std::fs::write(&path, body).unwrap();
+            path.to_string_lossy().into_owned()
+        };
+        // Honest single mount counts.
+        let one = file("mounts:\n  - location: /Users/x/ws\n    writable: true\n");
+        assert_eq!(count_declared_mounts(&one).unwrap(), 1);
+        // No mounts at all.
+        let none = file("cpus: 4\n");
+        assert_eq!(count_declared_mounts(&none).unwrap(), 0);
+        // Case-insensitive location, multiple entries.
+        let two = file("mounts:\n  - LOCATION: /a\n  - location: /b\n");
+        assert_eq!(count_declared_mounts(&two).unwrap(), 2);
+        // Structural failures -> Err, not Ok.
+        assert!(count_declared_mounts(&file("- just\n- a\n- list\n")).is_err());
+        assert!(count_declared_mounts(&file("42\n")).is_err());
+        assert!(count_declared_mounts(&file("mounts: {location: /a}\n")).is_err());
+        assert!(count_declared_mounts(&file("mounts:\n  - just-a-string\n")).is_err());
+        // Merge keys — the exact probe-defeating trick.
+        let merged =
+            file("x-base: &base\n  - location: /evil\nmounts:\n  <<: *base\n  - location: /ws\n");
+        assert!(count_declared_mounts(&merged).is_err());
+        let merged_entry =
+            file("defaults: &d\n  writable: true\nmounts:\n  - <<: *d\n    location: /ws\n");
+        assert!(count_declared_mounts(&merged_entry).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

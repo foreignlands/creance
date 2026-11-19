@@ -48,18 +48,32 @@ pub fn validate_proxy_url(s: &str) -> Result<(), String> {
     if !(1..=65535).contains(&port) {
         return Err("proxy requires a valid explicit port".to_owned());
     }
-    // FINDING-004: Go rejects any Path — `/` is a path too. The WHATWG
-    // parser cannot distinguish an absent path from a spelled `/` on special
-    // schemes (it defaults http/https to "/"), so treat a trailing slash in
-    // the input as the spelled one.
-    if (!u.path().is_empty() && u.path() != "/")
-        || (u.path() == "/" && s.ends_with('/'))
-        || u.query().is_some()
-        || u.fragment().is_some()
-    {
+    // FINDING-004/015: Go rejects any Path — `/` is a path too. The WHATWG
+    // parser cannot distinguish an absent path from a spelled `/` (it
+    // defaults special schemes to "/"), so decide structurally on a
+    // normalized copy of the input: the URL has an explicit path iff the
+    // authority is directly followed by '/'. Mirrors WHATWG's trimming of
+    // leading/trailing C0-space and its backslash-is-slash rule, which the
+    // old raw `ends_with('/')` heuristic missed.
+    if explicit_path(s) || u.query().is_some() || u.fragment().is_some() {
         return Err("proxy URL must not contain a path, query or fragment".to_owned());
     }
     Ok(())
+}
+
+/// Whether `raw` spells a path after its authority: WHATWG-normalize
+/// (C0/space trim, `\` as `/`, case-insensitive scheme delimiter), then
+/// look at the first `/ ? #` after `://` — a `/` there is a real path.
+fn explicit_path(raw: &str) -> bool {
+    let normalized: String = raw.trim_matches(|c: char| c <= ' ').replace('\\', "/");
+    let lower = normalized.to_ascii_lowercase();
+    let Some(after_scheme) = lower.split_once("://").map(|(_, rest)| rest) else {
+        return false;
+    };
+    match after_scheme.find(['/', '?', '#']) {
+        Some(i) => after_scheme.as_bytes()[i] == b'/',
+        None => false,
+    }
 }
 
 /// The resolver must be an HTTPS DoH endpoint without credentials.
@@ -721,6 +735,16 @@ pub fn request_bounded(
         crate::wire::read_header_block(&mut channel, MAX_HEADER).map_err(|e| e.to_string())?;
     let status = parse_status(&head).ok_or("invalid HTTP response")?;
     let headers = parse_headers(&head);
+    // FINDING-017: 1xx/204/304 responses have no body by definition — a
+    // peer that legitimately keeps the tunnel open must not stall us until
+    // the deadline (Go's net/http ends the body by status code).
+    if (100..200).contains(&status) || status == 204 || status == 304 {
+        return Ok(HttpResponse {
+            status,
+            headers,
+            body: Vec::new(),
+        });
+    }
     let http_body = read_body(&mut body_stream, &headers, max_body)?;
     Ok(HttpResponse {
         status,
@@ -1066,6 +1090,79 @@ mod tests {
         )
         .unwrap();
         assert_eq!(body, b"abchello");
+    }
+
+    #[test]
+    fn proxy_url_path_detection_is_structural() {
+        // FINDING-015: trailing C0/space and backslash variants must be
+        // rejected like the plain trailing slash (Go url.Parse semantics).
+        for bad in [
+            "socks5://1.2.3.4:1080/ ",
+            "socks5://1.2.3.4:1080/\t",
+            "socks5://1.2.3.4:1080/\r",
+            "http://1.2.3.4:1080\\",
+            "http://1.2.3.4:1080/",
+            "http://1.2.3.4:1080/p",
+            "http://1.2.3.4:1080?q",
+            "http://1.2.3.4:1080#f",
+            " http://1.2.3.4:1080/ ",
+        ] {
+            assert!(validate_proxy_url(bad).is_err(), "{bad:?}");
+        }
+        for good in [
+            "socks5://1.2.3.4:1080",
+            "http://10.0.0.1:8080",
+            "http://1.2.3.4:1080 ",
+            "https://1.2.3.4:1080",
+            "SOCKS5://1.2.3.4:1080",
+        ] {
+            assert!(validate_proxy_url(good).is_ok(), "{good:?}");
+        }
+    }
+
+    #[test]
+    fn bodiless_statuses_return_without_waiting_for_eof() {
+        // FINDING-017: a 304 that legitimately keeps the connection open
+        // must return immediately, not stall until the deadline.
+        use crate::testsupport::MixedProxy;
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut stream = stream;
+                std::thread::spawn(move || {
+                    let mut buf = [0u8; 1024];
+                    let _ = stream.read(&mut buf);
+                    let _ =
+                        stream.write_all(b"HTTP/1.1 304 Not Modified\r\nContent-Length: 0\r\n\r\n");
+                    // Hold the connection open — a perfectly legal peer.
+                    std::thread::sleep(std::time::Duration::from_secs(8));
+                });
+            }
+        });
+        let proxy = MixedProxy::start(vec![]);
+        let egress = Egress {
+            upstream: url::Url::parse(&format!("socks5://{}", proxy.addr)).unwrap(),
+            dns_url: String::new(),
+        };
+        let start = std::time::Instant::now();
+        let response = request(
+            &egress,
+            "GET",
+            &format!("http://{addr}/sub"),
+            None,
+            &[],
+            std::time::Instant::now() + std::time::Duration::from_secs(6),
+        )
+        .expect("304 must return immediately");
+        assert_eq!(response.status, 304);
+        assert!(response.body.is_empty());
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(3),
+            "took {:?}",
+            start.elapsed()
+        );
     }
 
     #[test]
