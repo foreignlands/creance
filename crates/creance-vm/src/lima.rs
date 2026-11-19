@@ -153,7 +153,16 @@ update-locale LANG={locale} >/dev/null 2>&1 || true
 # raw network access AND passwordless sudo.
 apt-get update -qq || true
 apt-get install -y -qq curl git ca-certificates xz-utils >/dev/null || true
-curl -fsSL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-$([[ $(uname -m) = aarch64 ]] && echo arm64 || echo x64)/bin/node -o /usr/local/bin/node 2>/dev/null || apt-get install -y -qq nodejs npm >/dev/null || true
+# F-034: download atomically (tmp + mv). `curl -o` straight at the target
+# leaves a partial binary behind on a mid-transfer failure, and /usr/local
+# bin shadows the apt fallback — the fallback chain defeated by its own
+# first leg's corpse. On failure the corpse never exists and apt fills in.
+if curl -fsSL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-$([[ $(uname -m) = aarch64 ]] && echo arm64 || echo x64)/bin/node -o /usr/local/bin/node.new 2>/dev/null && mv /usr/local/bin/node.new /usr/local/bin/node 2>/dev/null; then
+  chmod +x /usr/local/bin/node 2>/dev/null || true
+else
+  rm -f /usr/local/bin/node.new
+  apt-get install -y -qq nodejs npm >/dev/null || true
+fi
 curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1 || true
 
 # 0.3 TOPOLOGY LOCKDOWN — the guest's only wire out is the ssh -R tunnel to
@@ -259,6 +268,13 @@ mod tests {
         assert!(
             script.contains("apt-get update -qq || true"),
             "installs are best-effort, containment is mandatory"
+        );
+        // F-034: the node download is atomic — no partial corpse can shadow
+        // the apt fallback.
+        assert!(
+            script.contains("-o /usr/local/bin/node.new")
+                && script.contains("rm -f /usr/local/bin/node.new"),
+            "downloads land on a temp name and clean up on failure"
         );
         assert!(
             script.contains("sed -i '\\#^devabc12345 #d'"),
