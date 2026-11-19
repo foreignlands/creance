@@ -295,9 +295,14 @@ impl Gate {
             // tunnel must be down; Open/Checking → it must be up. Healing is
             // one-way (we cut, we do not silently re-raise). Reaping backs
             // the stop with a signature sweep so the cut holds even when the
-            // pid file was lost (F-026).
+            // pid file was lost (F-026). Only the canonical daemon moves the
+            // wire (F-028): a renamed-over loser must neither cut nor raise
+            // what the winner owns — its main loop retires it within a tick.
             let closed = inner.state == GateState::Closed;
             drop(inner);
+            if !watchdog.still_owner() {
+                continue;
+            }
             if closed {
                 let _ = creance_vm::tunnel::stop(&watchdog.profile_dir);
                 creance_vm::tunnel::reap_orphans(
@@ -381,6 +386,16 @@ impl Gate {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .status(&self.run_id)
+    }
+
+    /// Whether the published record still names THIS gate (F-028). A daemon
+    /// renamed over by a successor must not touch the wire; when in doubt
+    /// (unreadable record), it also holds back — the main loop decides.
+    fn still_owner(&self) -> bool {
+        std::fs::read(&self.record_path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<GateRecord>(&bytes).ok())
+            .is_some_and(|record| record.run_id == self.run_id)
     }
 
     fn handle(&self, mut stream: std::os::unix::net::UnixStream) {
@@ -756,6 +771,15 @@ fn retire_stale_record(instance_dir: &str) -> bool {
 /// The `creance gate-daemon` body: hold the gate until its record vanishes
 /// (host-side close/removal — `close_and_remove` and `close_gates` both
 /// remove it, which retires the daemon) or the process is signaled.
+///
+/// F-028: the loop also binds to the record's *identity*. Two daemons can
+/// coexist for a moment (a spawn race, a concurrent `up`, or a direct
+/// `gate-daemon` invocation); the record's rename is atomic, so the last
+/// writer wins and every loser must notice that the record's run_id is no
+/// longer theirs — and leave WITHOUT touching the wire, which the winner
+/// now owns. Before this, a loser lived forever on "a record exists" while
+/// its Closed-state watchdog murdered the winner's tunnel every 500ms:
+/// gate=closed with an intermittently live wire, forever.
 pub fn run_daemon(
     profile_dir: &str,
     instance: &str,
@@ -770,15 +794,36 @@ pub fn run_daemon(
             return 1;
         }
     };
+    let mine = handle.record.run_id.clone();
     let record = creance_vm::paths::join(instance_dir, "cage-gate.json");
+    let mut replaced = false;
     loop {
         std::thread::sleep(Duration::from_millis(500));
-        if !Path::new(&record).exists() {
-            break;
+        match std::fs::read(&record) {
+            Ok(bytes) => {
+                match serde_json::from_slice::<GateRecord>(&bytes) {
+                    Ok(canonical) if canonical.run_id == mine => {}
+                    // Someone else's record: we were renamed over. Retire
+                    // quietly — no tunnel stop, no reap; the wire belongs
+                    // to the canonical daemon now.
+                    Ok(_) => {
+                        replaced = true;
+                        break;
+                    }
+                    // Unreadable for now: do not act on one bad read (a
+                    // concurrent rename can be observed mid-flight).
+                    Err(_) => continue,
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => break, // retired
+            Err(_) => continue, // transient — retry next tick
         }
     }
     handle.gate.shutdown();
     drop(handle);
+    if replaced {
+        return 0;
+    }
     let _ = creance_vm::tunnel::stop(profile_dir);
     creance_vm::tunnel::reap_orphans(profile_dir, instance, proxy_port);
     0
@@ -1097,6 +1142,40 @@ mod tests {
         .unwrap();
         assert!(!retire_stale_record(&instance_dir), "served record stays");
         assert!(Path::new(&record_path).exists());
+        drop(handle);
+        fs::remove_dir_all(&profile).unwrap();
+    }
+
+    #[test]
+    fn still_owner_flips_when_the_record_is_renamed_over() {
+        // F-028 regression: a daemon renamed over by a successor must see
+        // itself as disowned and never touch the winner's wire.
+        let (profile, config_path) = prepare_profile();
+        let instance_dir = creance_vm::paths::join(&profile, "lima/test-vm");
+        fs::create_dir_all(&instance_dir).unwrap();
+        let handle = Gate::start(
+            &instance_dir,
+            &config_path,
+            &profile,
+            "gate-test-inst",
+            17896,
+        )
+        .unwrap();
+        assert!(handle.gate.still_owner(), "fresh gate owns its record");
+
+        // A successor's record: same shape, different run_id.
+        let successor = serde_json::json!({
+            "socket": handle.record.socket,
+            "token": handle.record.token,
+            "run_id": creance_proxy::token()[..32].to_owned(),
+        });
+        let record_path = creance_vm::paths::join(&instance_dir, "cage-gate.json");
+        fs::write(&record_path, serde_json::to_vec(&successor).unwrap()).unwrap();
+        assert!(!handle.gate.still_owner(), "renamed-over gate is disowned");
+
+        // And an unreadable record also means "do not touch the wire".
+        fs::write(&record_path, b"not json").unwrap();
+        assert!(!handle.gate.still_owner(), "garbage record: hold back");
         drop(handle);
         fs::remove_dir_all(&profile).unwrap();
     }
