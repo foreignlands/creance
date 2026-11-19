@@ -27,6 +27,10 @@ with an automated escape-probe suite. Rust, layer-decoupled, no black magic.
   proxy means no traffic, never a direct connection.
 - **Exit anchoring**: static IP / country / region / city, with a mandatory
   mainland-IPv4 deny list (6,204 prefixes embedded).
+- **No privilege path in the guest**: the guest user is a generated
+  identity (never the host account's name) with the cloud-init sudoers
+  grant stripped and its password locked — nothing inside the VM can lift
+  the OUTPUT DROP firewall (the R3 escape, closed in 0.4.1).
 - **Provable containment**: `creance escape-test` runs host + in-guest
   probes; layers not yet enforced are reported as such — nothing fakes a pass.
 

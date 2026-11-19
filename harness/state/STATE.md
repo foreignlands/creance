@@ -1,55 +1,40 @@
-# STATE — 2026-11-19T07:20:00Z（R3 第三轮审查 s01 · 终稿）
+# STATE — 2026-11-19T06:40:00Z（night-05 修复会话 · 终稿）
 
-## 已覆盖（R3 全部优先级完成，5 findings：019-023）
+## 已完成（R3 全部 5 findings + 修复中发现 3 个新 findings = 8 个，全部修复+实机验证）
 
-### P1 0.3/0.4 新面回归审查
+- **F-020（S2 逃逸，最高优先）✅ 4a62e79 + 实机复验**：lima `user:` 块（生成用户名+中性 comment；uid 保持宿主镜像——vz virtiofs 无 uid 重映射，这是可写挂载的功能前提，纯数字非身份泄漏）；provision 末尾删 cloud-init sudoers 条目 + `passwd -l` + 清 `~/password`（lima 的 `passwordlessSudo: false` 要求 plain 模式且会把随机密码写进 guest，不可用——provision 清理才是真机制）。实测：`id`=dev39f9e161、`sudo -n` 拒绝（"a password is required" + 密码锁定 L）、sudoers 无条目、直连 000、R3 攻击重放失败。新探针 guest-identity/guest-privilege。
+- **F-019 ✅ 2df45da + 实机复验**：spawn_daemon 活性校验（retire_stale_record：record→socket status，死即清理+respawn）；close_and_remove 断线立即 cut；cmd_stop 走退役链；escape gate 探针要求活 daemon、"VM 无 record" 改按 limactl 实际 Running 状态判定（停机实例不再误报）。实测：kill -9 → 探针翻红（"gate record without a live daemon"）→ up 自愈 → 回绿且直连仍 000。
+- **F-021 ✅ 9b6e4e1**：pidfile 模块（JSON {pid, started}，legacy 裸 pid 兼容；process_start_token 从 running.rs 提升）；tunnel/gate 全接入。伪造 start-time 的 pid 文件对无辜进程零杀伤（实测回归）。
+- **F-022 ✅ 4a62e79 + f544599**：①username 接线（tunnel ssh User=生成名，vsock_user 宿主镜像删除）；②load_or_create 只在 NotFound 生成，读失败拒绝重置身份（目录占位回归测试）；③credentials 探针=profile 目录全量 48-hex 扫描比对已发集合（session token/store auth/gate token），guest 新增 env-hex-tokens 探针。
+- **F-023 ✅ b11b543 + 实机验证**：socket_budget 暴露原始预算（可为负），setup 预检 <10 字节即报"路径过深+移浅目录"（mktemp 深路径实测）。
+- **F-024 ✅ 6452854**：v0.4.0 终稿漏跑 fmt+ci（11 处 fmt + lima 测试断言过期字段）——基线修复；R3 审查者的"CI 基线绿"结论不实（只跑了部分包）。教训：**实机绿≠CI 绿，任何"最后一笔"编辑后必须重跑完整 ci.sh**。
+- **F-025 ✅ b06fb73 + 实机复现**：处女 profile 的 up 误报失败（proxy/ 缺失→gate.pid/log ENOENT，守护实际已 spawn）。pidfile::write 建父目录；spawn_daemon 先 ensure_private_dir。附带：workbench 测试不再假设宿主 17896 端口死寂（limactl 转发 socket 的 CLOSE_WAIT 会把瞬间拒绝变 5s 挂死）。
+- **F-026 ✅ 521b58d + dc569a9 修正 + 实机复验**：孤儿 ssh -R（pid 文件管辖外）按特征收割——**特征必须 HostKeyAlias+`-R port:127.0.0.1:port` 双段**（第一版只匹配 alias，实机立即暴露误杀 limactl shell 的每次 ssh 客户端——lima 同样用该 alias 约定，>500ms 的会话被 watchdog 掐死 rc=255）。closed=wire down 不再依赖单文件存活。
 
-- **guest 防火墙绕过 → F-020 (S2) 实测逃逸**：lima 默认 guest 用户（宿主同名 uid=501 镜像）持 passwordless sudo；guest 内 `sudo -n iptables -P OUTPUT ACCEPT && -F` 一条命令撤防，撤防前 curl 直连 BLOCKED、撤防后直连 https://1.1.1.1 得真实 301——gate/mihomo/审计全部绕过。escape-test 如实翻转（net-direct-egress/dns → ESCAPE）——探针有效，**强制层可被 guest root 一键撤销**。根因=generate_lima_yaml 无 user:/sudoers 定制。修法：lima `user: {name: <profile.username>, sudo: false}`（与 F-022①username 接线联动）。
-- **gate-daemon → F-019 (S4) 实测全链**：SIGKILL daemon → record 残留（唯一删除点在 GateHandle::drop）→ 后续每次 `creance up` 被 spawn_daemon 的 record 去重短路（无 daemon/无 watchdog/Err-才-fallback 不触发）→ 孤儿 ssh -R 持续供网且 gate-close CLI socket 不可达 → **wire 无法关闭（违反 closed=wire down 契约，fail-open）**；escape gate 探针只查 record 文件存在 → Contained 假 PASS。cmd_stop 注释声称 "removes cage-gate.json → daemon retires" 实际无人删（run_daemon 只在 record 消失后 break——**循环依赖**，注释与实现不符）。修法：record 存在时先 socket 活性检查；close_gates 文件级 fallback；探针 record 存在+socket 死 → Escaped。
-- **tunnel.rs → F-021 (S4) 实测误杀**：stop() 按 pid 文件盲杀——伪造 tunnel.pid 指向 victim sleep 进程 → `creance stop` SIGTERM 杀死 victim（实测）。running.rs 对同类问题有 kinfo_proc start-time 校验而 tunnel.rs/gate.rs 没有——0.3 新代码重现旧缺陷模式。修法：提公共 start-token 助手，pid 文件记 {pid, started}。
-- **guestprofile → F-022 (S4)**：①username 死字段——生成/校验/持久化齐全但 provision 不创建用户，guest 实际身份=宿主用户名镜像（id 实测 uid=501(shenyiyu)；tunnel.rs User=$USER 同）——与 "generated identity" 声明冲突，宿主真实用户名进 guest；②load_or_create 读失败（权限损坏）与不存在不可区分 → 身份静默重置（违背自身 never-overwrites 注释）；③credentials-are-session-only 探针只 validate 单文件（声明扫描 profile 目录的 token 形状——store.auth/gate token 同形状秘密未扫，假 PASS）。
-- **gate watchdog 阻塞**：ensure/stop 在 drop(inner) 后跑 ✓ 不拖主循环（只是轮询退化为 1s+）；check_id 并发窗口 fail-closed ✓（Mutex 串行）——无新 finding。
-- **spawn_daemon pid 复用**：与 F-021 同修（gate.pid 同样无 start-time）。
+## 版本
 
-### P2 上轮受限项
+v0.4.1（tag 待打）：night-05 hardening。测试 148 绿（含 6 个新对抗回归）。CHANGELOG/RELEASES/README（containment contract 新增"No privilege path in the guest"条目）已更新。RELEASES 0.5 主题改为 exit-policy evidence chain（0.4 会话既定方向），multi-env 顺延 0.6。
 
-- B5 DoH（rustls webpki 硬编码）/C3 gate 并发（gate 未接线，0.4 后 gate-daemon 已接线！**下轮可用 gate-daemon 运行实例做并发黑盒**）/E3（R2 已闭环）——B5 仍受限记档；C3 状态更新为"已有运行实例可测（本轮 gate-daemon 实测即是部分 C3）"。
+## 下一步（按序）
 
-### P3 新攻击面快扫
-
-- root 跑 install.sh：R2 引号审查仍适用；root+本地 .toolchain 投毒=同 uid 已控面，无新面。
-- lima.yaml workspace 注入：R2 已审（结构化 serde_yaml）✓。
-- tunnel ssh 参数注入：instance 名 vmname 折叠 ✓；USER env 未校验已并入 F-022①（修 username 接线时一起消）。
-- **深路径 setup → F-023 (S5) 实测**：macOS /var/folders 深路径 profile 撞 UNIX_PATH_MAX，limactl fatal 原样抛出（预算 clamp 下限仍不够）；浅路径 /tmp/p1 正常。creance 侧需预检+可行动报错。
-
-## 进行中
-
-无。R3 任务单全部完成。
-
-## 下一步（按序 3 条）
-
-1. **night-05 修复会话**：019/020/021/022/023 五项（修法建议在各自文件）。**020 最高优先**（S2 逃逸）——lima user 块 + sudo:false + username 接线是一个原子修复。
-2. 修复后 **R4 验证**：新 guest 用户态下重跑 sudo 撤防测试（应失败）+ daemon SIGKILL 恢复路径 + escape 全绿；C3 正式并发黑盒（gate-daemon 现有运行实例）。
-3. **F-020 关联**：RELEASES/README 的 containment 声明应注明边界（"guest 内非特权进程" vs root）直到修复落地。
+1. **R4 回归审查**（用户贴 OPERATOR-PROMPT 给 GLM）：重点=0.4.1 修复面回归（reap 特征绕过/误杀、pidfile start-time 语义、sudoers 摘除的旁路——reboot 后 cloud-init 重放？、scan_unknown_tokens 的绕过形状）、C3 gate 并发黑盒（现有运行实例可用）。
+2. **0.5 exit-policy 证据链**（无需用户输入）：gate-open 的 grant 从五项自检升级为出口 IP 实测证据（trace→大陆网段库+国家锚定→Checking 窗口内完成）。
+3. 模型驱动逃逸演练（用户接入 GLM 到 VM；ESCAPE-BRIEF.md 就绪）+ Devin 时机（docs/CLOUD-DEVIN.md 就绪）。
 
 ## 关键记忆（≤10 条）
 
-1. **R3 全部 5 findings 都有实测/可复现探针**——VM 全链实测（/tmp/p1 实例）是本轮核心方法：sudo 撤防、daemon kill、pid 盲杀均一次跑通。
-2. 020 的本质：**provision 用 root 设防，但 guest 日常用户是准 root**（lima 默认 sudoers）——强制面强度=最弱特权路径。0.4 的 guestprofile.username 本来就是解药，差最后一步接线。
-3. 019 的模式：**文件存在≠进程存活**——record/pid 文件都是"曾经活着"的证据；spawn/探针一律需要活性验证（socket ping / start-time token）。
-4. 循环依赖：run_daemon 等 record 消失、record 只被自己的 Drop 删——daemon 实际服务到进程死亡；cmd_stop 注释与实现不符（作者以为 close_gates 删文件）。
-5. macOS /var/folders 深路径（~92 字符 canonicalize）+ lima socket 27 字符 → UNIX_PATH_MAX 104 必超——临时目录做 profile 在 macOS 上不可用（F-023）；浅路径 /tmp/p1 可用。
-6. escape-test 探针体系两处假 PASS（credentials-are-session-only 单文件 validate；gate-record-private 文件存在性）——探针质量=F-011/016 同族问题的 0.4 新增面。
-7. VM 实测耗时参考：镜像缓存命中时 setup+up ≈3 分钟；apt provision 在防火墙设置前 ✓（provision 脚本顺序正确）。
-8. tunnel.rs `ControlMaster=no/ControlPath=none/StrictHostKeyChecking=yes/ExitOnForwardFailure=yes` 全部正确 ✓；-R 绑 loopback ✓。
-9. guest 的 apt/DNS：provision 在 iptables 前完成出网操作 ✓；运行期 guest 无 DNS（nameserver 流量被 DROP）——远程解析走 mihomo socks5 ✓ 设计自洽。
-10. pgrep -f "gate-daemon" 会匹配审查者自己的 shell（命令行含该词）——判活用 pgrep -lf 看全命令行。
+1. lima 2.3 的 `passwordlessSudo: false` **要求 plain: true** 且 false 时生成随机密码存 guest `~/password`——非 plain 实例想无 sudo 只能在 provision 里删 sudoers（cloud-init 无条件写 per-user 条目，这是唯一入口）。
+2. vz virtiofs 无 uid 重映射：lima 用户 uid=宿主镜像是可写挂载的功能前提——**身份生成只到 name/comment，uid 不动**（数字非身份泄漏）。
+3. reap/收割类特征匹配必须验证"唯一性假设"：`HostKeyAlias=lima-<inst>` 是 lima 全家共用的约定（limactl shell 每次客户端都带）——命令行特征要用我们自己拼接的独有段。
+4. 测试对"默认端口死寂"的假设会被宿主环境破坏（limactl 持有 17896 CLOSE_WAIT）——测试要么用 port 0 要么显式指向必死端口。
+5. R3 的"CI 基线绿"是不可复述结论——审查者的基线必须=完整 scripts/ci.sh 输出。
+6. 处女路径（init→setup→up 直通）是 QUICKSTART 首条路径，以后每轮验证都要跑一遍（0.4.1 之前从未直通验证过）。
+7. limactl shell 的 mux master 会改名（`ssh: <sock> [mux]`），pgrep -f 匹配不到——判定"是否还有 shell 会话"别依赖 master 匹配。
+8. stop 全链（close_and_remove 退役+reap 清扫+limactl stop+delete）实机通过；F-021 新 pid 文件格式实机工作。
 
 ## 会话统计
 
-- R3-s01 发现数：5（019 S4、020 S2、021 S4、022 S4、023 S5）
-- 累计：23 findings（R1 14 + R2 4 + R3 5）
-- 实测证据：019/020/021/023 全部 VM/进程级复现；020 为 S2 级实测逃逸
-- 工具/环境：/tmp/p1 临时 profile 已 stop 并删除；无宿主残留（唯一遗留=lima 镜像缓存，无害）
-- CI 基线：R3 开工时全绿；仓库只读保持
-- **建议**：020 需要设计决策（sudo 移除 vs 锁 iptables）——修复会话前建议用户确认 workload 是否依赖 guest root。
+- night-05 修复：8/8（019–026），7 个 commit（6452854→dc569a9），每 commit CI 全绿
+- 实机验证：深路径报错、F-020 全链（身份/sudo 拒绝/防火墙/攻击重放）、F-019 kill-自愈链、F-025 复现、F-026 孤儿收割+误杀修正、escape-test 全绿（proxy-path ESCAPE 系无 core 的预期态）
+- 累计：26 findings，全修复
+- 环境：/tmp/creance-n5 已 stop+delete+清理；无宿主残留（daemon/tunnel 均 0）

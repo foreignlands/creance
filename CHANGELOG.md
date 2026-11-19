@@ -4,6 +4,54 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.4.1] — 2026-11-19
+
+### Fixed — night-05: R3 findings 019–023 + three found while fixing (024–026)
+
+- **F-020 (S2, live-verified escape closed)**: the guest user now is the
+  generated identity (lima `user:` block: name + neutral comment; uid
+  stays host-mirrored — vz virtiofs passes uid numbers through, and that
+  mirror is what keeps the writable workspace writable). The cloud-init
+  sudoers grant is stripped in provision, the password locked, lima's
+  `~/password` file removed: `sudo -n iptables -P OUTPUT ACCEPT` now
+  fails — the one-command firewall lift R3 demonstrated is gone. escape
+  -test gained `guest-identity` and `guest-privilege` probes. Recreate
+  existing environments (`creance stop && creance setup`) to get the new
+  guest user.
+- **F-019**: a gate record now must prove a serving daemon. spawn_daemon
+  pings the record's socket and retires stale records (plus their pid
+  file and orphan tunnels) after SIGKILL/reboots; `stop` retires the gate
+  via close_and_remove (record removal + immediate tunnel cut); the
+  escape gate probe reports "gate record without a live daemon" as an
+  ESCAPE instead of blessing the corpse. Live-verified: kill -9 → probe
+  flips red → `up` self-heals → probe green, wire still down.
+- **F-021**: pid files carry the process start-time token (`pidfile`
+  module, shared with running.rs); tunnel/gate stop never signals a
+  process the file cannot prove is theirs. A forged pid file against an
+  innocent process kills no one.
+- **F-022**: username wired end-to-end (ssh tunnel logs in as the
+  generated user); load_or_create refuses to reset an unreadable profile
+  instead of regenerating identity; the credentials probe scans the whole
+  profile directory for token-shaped values against the issued set
+  (session token, core auth, gate tokens) — stray secret files are
+  escapes; in-guest `env-hex-tokens` probe makes the session token the
+  only hex secret in the environment.
+- **F-023**: profiles whose physical Lima home cannot fit the socket
+  budget fail at setup with an actionable error instead of limactl's raw
+  UNIX_PATH_MAX fatal.
+- **F-024**: v0.4.0 shipped without its own CI passing (11 fmt diffs, a
+  test asserting a removed YAML field) — baseline restored; the release
+  gate is a full `scripts/ci.sh` run, always.
+- **F-025**: a virgin profile's `up` misread the missing `proxy/`
+  directory as daemon failure (spawn succeeded; pid/log writes ENOENT).
+  Directories are now created before use; the workbench test no longer
+  assumes port 17896 is dead on the host.
+- **F-026**: orphan `ssh -R` forwards beyond the pid file's reach are
+  reaped by signature (HostKeyAlias + the reverse-forward spec — the
+  alias alone also lives in every `limactl shell` client, as the live
+  machine demonstrated); "closed = wire down" no longer depends on one
+  file's survival.
+
 ## [0.4.0] — 2026-11-19
 
 ### Added — gate daemon + guest identities (ROADMAP 0.4)
