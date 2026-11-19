@@ -6,10 +6,20 @@
 //! Region/city have no honest source in this response (`colo` is a
 //! Cloudflare datacenter, not the exit's region), so a region- or
 //! city-scoped anchor evaluates Unknown — closed, with the reason —
-//! rather than guessing. A second, independent trace source for
-//! cross-checking is future work; until then the evidence trusts the
-//! proxy path to reach 1.1.1.1, which is the same trust the wire itself
-//! rests on.
+//! rather than guessing.
+//!
+//! Trust boundary (F-038, stated honestly): this is a SINGLE-DESTINATION
+//! sample. TLS (webpki-roots) proves the connection genuinely terminated
+//! at Cloudflare, and the managed core's single-group config keeps the
+//! evidence path and the wire on the same node — but nothing can prove
+//! the NODE routes all destinations the same way. An exit that forwards
+//! 1.1.1.1 through a US relay while sending everything else out a
+//! mainland interface launders the anchor; the mandatory mainland deny
+//! silently fails against such a subscription. The evidence keys below
+//! are therefore a 1.1.1.1-path sample, not a whole-egress guarantee. A
+//! second independent source narrows (cannot close) this; until then the
+//! anchor's guarantee is: "the exit reaches Cloudflare from <ip> —
+//! everything else rests on the subscription's routing honesty."
 
 use creance_vm::config::Config;
 use creance_vm::exit_policy::Location;
@@ -84,9 +94,11 @@ pub fn grant_checks(location: &Location) -> std::collections::BTreeMap<String, S
     checks.insert("ipv6_policy".to_owned(), "passed".to_owned());
     checks.insert("exit_consistency".to_owned(), "passed".to_owned());
     // Evidence keys are inert to the gate's REQUIRED set; they make the
-    // observation itself part of the record.
+    // observation itself part of the record. F-038: these describe the
+    // 1.1.1.1 path sample, not the whole egress.
     checks.insert("exit_ip".to_owned(), location.ip.clone());
     checks.insert("exit_country".to_owned(), location.country_code.clone());
+    checks.insert("exit_sample".to_owned(), "1.1.1.1-path".to_owned());
     checks
 }
 
