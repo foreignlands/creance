@@ -273,12 +273,11 @@ fn cmd_check() -> i32 {
 fn cmd_gate(open: bool) -> i32 {
     let profile = profile();
     let instance = instance();
-    let instance_dir =
-        creance_vm::paths::join(&creance_vm::vm::lima_home(&profile), &instance);
+    let instance_dir = creance_vm::paths::join(&creance_vm::vm::lima_home(&profile), &instance);
     let outcome = if open {
-        gate::open(&profile, &instance_dir).map(|s| format!("open (epoch {})", s.epoch))
+        gate::open(&instance_dir).map(|s| format!("open (epoch {})", s.epoch))
     } else {
-        gate::close_and_remove(&profile, &instance_dir).map(|_| "closed".to_owned())
+        gate::close_and_remove(&instance_dir).map(|_| "closed".to_owned())
     };
     match outcome {
         Ok(msg) => {
@@ -568,7 +567,9 @@ fn cmd_up() -> i32 {
         // 0.4: the gate owns the wire now — Closed gate = tunnel down. Raising
         // the daemon raises the tunnel with it; only on daemon failure do we
         // fall back to the unconditional tunnel so the VM stays usable.
-        let port = creance_proxy::load(&profile).map(|s| s.port).unwrap_or(17896);
+        let port = creance_proxy::load(&profile)
+            .map(|s| s.port)
+            .unwrap_or(17896);
         let instance_dir = creance_vm::paths::join(&creance_vm::vm::lima_home(&profile), &instance);
         if let Err(e) = gate::spawn_daemon(&profile, &instance, &path, &instance_dir, port) {
             eprintln!("warning: gate daemon not raised: {e}");

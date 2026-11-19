@@ -697,10 +697,7 @@ pub fn spawn_daemon(
         .to_string_lossy()
         .into_owned();
     use std::process::{Command, Stdio};
-    let log = creance_vm::paths::join(
-        &creance_vm::proxy_dir(profile_dir),
-        "gate-daemon.log",
-    );
+    let log = creance_vm::paths::join(&creance_vm::proxy_dir(profile_dir), "gate-daemon.log");
     let log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -755,7 +752,7 @@ pub fn run_daemon(
 }
 
 /// Convenience: opens the gate (check window + grant) over the record.
-pub fn open(profile: &str, instance_dir: &str) -> Result<GateStatus, String> {
+pub fn open(instance_dir: &str) -> Result<GateStatus, String> {
     let client = GateClient::open(instance_dir)?;
     client.begin_check()?;
     // The full exit-policy evidence chain lands in 0.5; this grant carries
@@ -774,7 +771,7 @@ pub fn open(profile: &str, instance_dir: &str) -> Result<GateStatus, String> {
 }
 
 /// Convenience: closes the gate and removes its record (daemon retires).
-pub fn close_and_remove(profile: &str, instance_dir: &str) -> Result<(), String> {
+pub fn close_and_remove(instance_dir: &str) -> Result<(), String> {
     if let Ok(client) = GateClient::open(instance_dir) {
         let _ = client.close("宿主请求关闭");
     }
@@ -941,7 +938,14 @@ mod tests {
         let (profile, config_path) = prepare_profile();
         let instance_dir = creance_vm::paths::join(&profile, "lima/test-vm");
         fs::create_dir_all(&instance_dir).unwrap();
-        let handle = Gate::start(&instance_dir, &config_path, &profile, "gate-test-inst", 17896).unwrap();
+        let handle = Gate::start(
+            &instance_dir,
+            &config_path,
+            &profile,
+            "gate-test-inst",
+            17896,
+        )
+        .unwrap();
         let record = handle.record.clone();
         let client = GateClient::open(&instance_dir).unwrap();
 
@@ -1030,7 +1034,14 @@ mod tests {
         let (profile, config_path) = prepare_profile();
         let instance_dir = creance_vm::paths::join(&profile, "lima/test-vm");
         fs::create_dir_all(&instance_dir).unwrap();
-        let handle = Gate::start(&instance_dir, &config_path, &profile, "gate-test-inst", 17896).unwrap();
+        let handle = Gate::start(
+            &instance_dir,
+            &config_path,
+            &profile,
+            "gate-test-inst",
+            17896,
+        )
+        .unwrap();
         let record = handle.record.clone();
         use std::io::{Read, Write};
         use std::os::unix::net::UnixStream;
@@ -1081,7 +1092,14 @@ mod tests {
         let (profile, config_path) = prepare_profile();
         let instance_dir = creance_vm::paths::join(&profile, "lima/test-vm");
         fs::create_dir_all(&instance_dir).unwrap();
-        let handle = Gate::start(&instance_dir, &config_path, &profile, "gate-test-inst", 17896).unwrap();
+        let handle = Gate::start(
+            &instance_dir,
+            &config_path,
+            &profile,
+            "gate-test-inst",
+            17896,
+        )
+        .unwrap();
         let _record = handle.record.clone();
         let client = GateClient::open(&instance_dir).unwrap();
 
@@ -1113,7 +1131,14 @@ mod tests {
         let (profile, config_path) = prepare_profile();
         let instance_dir = creance_vm::paths::join(&profile, "lima/test-vm");
         fs::create_dir_all(&instance_dir).unwrap();
-        let handle = Gate::start(&instance_dir, &config_path, &profile, "gate-test-inst", 17896).unwrap();
+        let handle = Gate::start(
+            &instance_dir,
+            &config_path,
+            &profile,
+            "gate-test-inst",
+            17896,
+        )
+        .unwrap();
         let _record = handle.record.clone();
         let client = GateClient::open(&instance_dir).unwrap();
 

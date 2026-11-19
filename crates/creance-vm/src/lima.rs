@@ -187,9 +187,18 @@ mod tests {
         let yaml = String::from_utf8(generate_lima_yaml(&options()).unwrap()).unwrap();
         let v: Yaml = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(v["vmType"], "vz");
-        assert!(v["hostname"].as_str().unwrap_or_default().starts_with("cage-"));
+        // FINDING-024: lima rejects a `hostname` field — the identity lands
+        // via provision's hostnamectl instead, so the field must stay absent.
+        assert!(v["hostname"].is_null(), "{yaml}");
         let script = v["provision"][0]["script"].as_str().unwrap_or_default();
-        assert!(script.contains("CREANCE_SESSION_TOKEN="), "credential handed off");
+        assert!(
+            script.contains("hostnamectl set-hostname cage-"),
+            "identity must land via provision"
+        );
+        assert!(
+            script.contains("CREANCE_SESSION_TOKEN="),
+            "credential handed off"
+        );
         assert_eq!(v["cpus"], 4);
         assert_eq!(v["memory"], "8GiB");
         assert_eq!(v["disk"], "24GiB");

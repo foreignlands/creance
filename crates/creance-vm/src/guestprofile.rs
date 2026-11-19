@@ -38,14 +38,17 @@ impl Profile {
         }
         let host_ok = !self.hostname.is_empty()
             && self.hostname.len() <= 15
-            && self.hostname.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
+            && self
+                .hostname
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || c == b'-')
             && self.hostname.as_bytes()[0].is_ascii_alphabetic();
         if !host_ok {
             return Err("主机名须为 1–15 位 ASCII 字母/数字/连字符，字母开头".to_owned());
         }
         const RESERVED: &[&str] = &[
-            "root", "daemon", "bin", "sys", "sync", "games", "man", "lp", "mail", "news",
-            "uucp", "proxy", "www-data", "backup", "list", "irc", "gnats", "nobody",
+            "root", "daemon", "bin", "sys", "sync", "games", "man", "lp", "mail", "news", "uucp",
+            "proxy", "www-data", "backup", "list", "irc", "gnats", "nobody",
         ];
         if RESERVED.contains(&self.username.as_str()) {
             return Err("用户名不能使用系统保留账户".to_owned());
@@ -99,7 +102,10 @@ impl Profile {
 /// session token, delivered through the tunnel at provision time. The
 /// host's own credentials (API keys, OAuth tokens) never enter the VM.
 pub fn credential_env(guest: &Profile) -> Vec<(String, String)> {
-    vec![("CREANCE_SESSION_TOKEN".to_owned(), guest.session_token.clone())]
+    vec![(
+        "CREANCE_SESSION_TOKEN".to_owned(),
+        guest.session_token.clone(),
+    )]
 }
 
 #[cfg(test)]
