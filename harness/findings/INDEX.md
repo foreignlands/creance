@@ -6,7 +6,7 @@
 | 018 | S5 | precheck_depth 把字符串字面量括号计入深度：密码含 129 个 [ 的合法订阅被拒（Go 接受） | R2→001+A1 | 已修复（night-04） |
 | 017 | S4 | 204/304 无 body 挂满 deadline（refresh+304 场景 60s 失败）；Go 按状态码立即完成 | R2→night-02/B2 | 已修复（night-04） |
 | 016 | S4 | 011 残留：结构错 YAML 假 PASS + merge key 骗术（serde_yaml 不展开 lima 展开，探针被骗） | R2→011+E1 | 已修复（night-04） |
-| 015 | S5 | 004 尾斜杠启发式被尾随空白/反斜杠绕过（4 变体误放行）| R2→004 | 待修复 |
+| 015 | S5 | 004 尾斜杠启发式被尾随空白/反斜杠绕过（4 变体误放行） | R2→004 | 已修复（night-04） |
 | 014 | S4 | 并发 import 丢失更新（双成功单存活）+ select_and_apply 非原子残留不一致 | C1 | 已修复（night-03） |
 | 013 | S4 | SOCKS5 凭据 as u8 截断（ULEN=44 实测），target 有校验凭据没有 | B1 | 已修复（night-03） |
 | 012 | S5 | 非字符串键节点整拒（Go map[any]any 显式接受），issue.name 丢失 | G2 | 已修复（night-03） |
