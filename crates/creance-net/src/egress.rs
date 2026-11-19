@@ -525,6 +525,13 @@ fn user_tls_failure() -> String {
 }
 
 fn split_addr(addr: &str) -> Result<(&str, u16), String> {
+    // F-030: the target lands verbatim in `CONNECT {target}` — C0 controls
+    // (CR/LF especially) would inject request headers. Production callers
+    // only hand over WHATWG-normalized hosts, but this is a public API;
+    // reject the whole shape here, not just the header-splits.
+    if addr.bytes().any(|b| b <= 0x20 || b == 0x7f) {
+        return Err(format!("invalid target address {addr:?}"));
+    }
     let (host, port) = addr
         .rsplit_once(':')
         .ok_or_else(|| format!("invalid target address {addr}"))?;
@@ -939,6 +946,17 @@ mod tests {
         assert!(split_addr("no-port").is_err());
         assert_eq!(join_addr("::1", 80), "[::1]:80");
         assert_eq!(join_addr("1.2.3.4", 80), "1.2.3.4:80");
+        // F-030: the target is spliced verbatim into `CONNECT {target}` —
+        // controls (R4's M2 injected headers via a trailing numeric port)
+        // and spaces are refused before any request is built.
+        for hostile in [
+            "1.2.3.4\r\nX-Injected: yes\r\nHost: x:99",
+            "1.2.3.4\nX-Injected: yes:99",
+            "host with space:99",
+            "ho\x7ft:99",
+        ] {
+            assert!(split_addr(hostile).is_err(), "must refuse {hostile:?}");
+        }
     }
 
     #[test]
