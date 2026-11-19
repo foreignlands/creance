@@ -317,14 +317,24 @@ fn yaml_object(item: serde_yaml::Value) -> Result<Map<String, Value>, String> {
         serde_yaml::Value::Mapping(m) => {
             let mut out = Map::new();
             for (k, v) in m {
-                let Some(key) = k.as_str().map(str::to_owned) else {
-                    return Err("节点字段使用了非字符串键".to_owned());
-                };
-                out.insert(key, yaml_to_json(v)?);
+                out.insert(yaml_key_string(k), yaml_to_json(v)?);
             }
             Ok(out)
         }
         _ => Err("proxies 中的节点必须是映射".to_owned()),
+    }
+}
+
+/// FINDING-012: YAML maps with non-string keys still carry core option
+/// values — stringify the key (Go's map[any]any semantics, where a non-string
+/// key just stops matching option names) instead of rejecting the whole node.
+fn yaml_key_string(k: serde_yaml::Value) -> String {
+    match k {
+        serde_yaml::Value::String(s) => s,
+        serde_yaml::Value::Number(n) => n.to_string(),
+        serde_yaml::Value::Bool(b) => b.to_string(),
+        serde_yaml::Value::Tagged(t) => yaml_key_string(t.value),
+        _ => String::new(),
     }
 }
 
@@ -355,10 +365,7 @@ fn yaml_to_json(v: serde_yaml::Value) -> Result<Value, String> {
         serde_yaml::Value::Mapping(m) => {
             let mut out = Map::new();
             for (k, v) in m {
-                let Some(key) = k.as_str().map(str::to_owned) else {
-                    return Err("节点字段使用了非字符串键".to_owned());
-                };
-                out.insert(key, yaml_to_json(v)?);
+                out.insert(yaml_key_string(k), yaml_to_json(v)?);
             }
             Value::Object(out)
         }
@@ -968,5 +975,33 @@ mod adversarial_tests {
             err.contains("冲突") || err.contains("没有可导入的节点"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn non_string_keys_stringify_instead_of_rejecting() {
+        // FINDING-012: Go's map[any]any branch keeps values under non-string
+        // keys; the node imports with the keys stringified.
+        let y = "proxies:\n  - name: IK\n    type: ss\n    server: 1.2.3.4\n    port: 1\n    cipher: aes-128-gcm\n    password: x\n    123: junk-value\n    true: junk\n";
+        let (nodes, skipped) = parse_nodes(y.as_bytes(), "src").unwrap();
+        assert_eq!(skipped.len(), 0, "{skipped:?}");
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(
+            nodes[0].config.get("123").and_then(Value::as_str),
+            Some("junk-value")
+        );
+        assert_eq!(
+            nodes[0].config.get("true").and_then(Value::as_str),
+            Some("junk")
+        );
+    }
+
+    #[test]
+    fn non_string_key_nodes_keep_their_name_when_skipped() {
+        // The issue line stays user-locatable: name is read even when the
+        // node carries non-string keys and is refused for another reason.
+        let y = "proxies:\n  - name: NK\n    type: quantum-tunnel\n    server: 1.2.3.4\n    port: 1\n    123: x\n";
+        let err = parse_nodes(y.as_bytes(), "src").unwrap_err();
+        assert!(err.contains("NK"), "{err}");
+        assert!(err.contains("协议暂不支持"), "{err}");
     }
 }

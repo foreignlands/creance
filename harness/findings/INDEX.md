@@ -5,7 +5,7 @@
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
 | 014 | S4 | 并发 import 丢失更新（双成功单存活）+ select_and_apply 非原子残留不一致 | C1 | 已修复（night-03） |
 | 013 | S4 | SOCKS5 凭据 as u8 截断（ULEN=44 实测），target 有校验凭据没有 | B1 | 已修复（night-03） |
-| 012 | S5 | 非字符串键节点整拒（Go map[any]any 显式接受），issue.name 丢失 | G2 | 待修复 |
+| 012 | S5 | 非字符串键节点整拒（Go map[any]any 显式接受），issue.name 丢失 | G2 | 已修复（night-03） |
 | 011 | S4 | 探针质量：mounts 计数 3 种 YAML 骗术/sock-abstract 硬编码 PASS/env-credentials 恒误报 | E1+E2 | 已修复（night-03；误报项即 grep 模式对齐 STRIPPED 未动，属共同窄设计） |
 | 010 | S2 | limactl() 自删 LIMA_HOME→全部 VM 操作落全局 ~/.lima，profile 隔离失效+探针脱节 | D2+E1 | 已修复（见 FIX-NIGHT-01 提交） |
 | 009 | S2 | fetch.rs 缺 https 策略：明文订阅/userinfo/5 跳全被接受（Go 全拒）→订阅凭据对出口明文 | B4 | 已修复（见 FIX-NIGHT-01 提交） |
