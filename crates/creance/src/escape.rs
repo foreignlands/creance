@@ -143,23 +143,28 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
         },
     });
 
-    // 6. The session credential is cage-issued and the ONLY token shaped
-    //    like a secret in the profile directory.
-    let instance_yaml = paths::join(&vm::lima_home(profile), &format!("{instance}/lima.yaml"));
-    let vm_exists = Path::new(&instance_yaml).exists();
+    // 6. Every token-shaped value in the profile directory belongs to the
+    //    issued set (F-022: validating one JSON file claimed far more than
+    //    it checked — stray credential files passed as containment).
     let guest_json = paths::join(profile, "guest-profile.json");
     out.push(Probe {
         id: "credentials-are-session-only",
         layer: "credentials",
         outcome: if Path::new(&guest_json).exists() {
-            match creance_vm::guestprofile::Profile::load_or_create(profile) {
-                Ok(_) => Outcome::Contained,
+            match scan_unknown_tokens(profile) {
+                Ok(unknown) if unknown.is_empty() => Outcome::Contained,
+                Ok(unknown) => Outcome::Escaped(format!(
+                    "token-shaped secret outside the issued set: {}",
+                    unknown
+                        .iter()
+                        .map(|(f, t)| format!("{f}:{}…", &t[..8]))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )),
                 Err(e) => Outcome::Escaped(e),
             }
-        } else if vm_exists {
-            Outcome::NotEnforced
         } else {
-            Outcome::Contained
+            Outcome::NotEnforced
         },
     });
 
@@ -207,6 +212,88 @@ fn instance_running(profile: &str, instance: &str) -> bool {
             .map(|v| v["name"] == instance && v["status"] == "Running")
             .unwrap_or(false)
     })
+}
+
+/// One token-shaped run: exactly 48 lowercase hex bytes with non-hex on
+/// both sides (longer hex runs — hashes — are not tokens).
+fn hex48_runs(bytes: &[u8], out: &mut Vec<String>) {
+    let hex = |c: u8| c.is_ascii_digit() || (b'a'..=b'f').contains(&c);
+    let mut i = 0;
+    while i + 48 <= bytes.len() {
+        let slice = &bytes[i..i + 48];
+        if slice.iter().all(|&c| hex(c))
+            && (i == 0 || !hex(bytes[i - 1]))
+            && (i + 48 == bytes.len() || !hex(bytes[i + 48]))
+        {
+            out.push(String::from_utf8_lossy(slice).into_owned());
+            i += 48;
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// Scans the profile directory (bounded: ≤1 MiB text files, depth ≤8) for
+/// token-shaped values that are not part of the issued set — the guest
+/// session token, the store's core auth, and gate record tokens.
+fn scan_unknown_tokens(profile: &str) -> Result<Vec<(String, String)>, String> {
+    let mut expected = std::collections::HashSet::new();
+    if let Ok(guest) = creance_vm::guestprofile::Profile::load_or_create(profile) {
+        expected.insert(guest.session_token);
+    }
+    if let Ok(store) = creance_proxy::load(profile) {
+        expected.insert(store.auth);
+    }
+    let lima = vm::lima_home(profile);
+    if let Ok(entries) = std::fs::read_dir(&lima) {
+        for entry in entries.flatten() {
+            let record = entry.path().join("cage-gate.json");
+            if let Ok(text) = std::fs::read_to_string(&record) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if let Some(token) = v["token"].as_str() {
+                        expected.insert(token.to_owned());
+                    }
+                }
+            }
+        }
+    }
+    let mut unknown = Vec::new();
+    let mut queue: Vec<(std::path::PathBuf, usize)> = vec![(Path::new(profile).to_owned(), 0)];
+    while let Some((dir, depth)) = queue.pop() {
+        if depth > 8 {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            if meta.is_dir() {
+                queue.push((path, depth + 1));
+            } else if meta.is_file() && meta.len() <= 1024 * 1024 {
+                let Ok(bytes) = std::fs::read(&path) else {
+                    continue;
+                };
+                let mut tokens = Vec::new();
+                hex48_runs(&bytes, &mut tokens);
+                for token in tokens {
+                    if !expected.contains(&token) {
+                        let name = path
+                            .strip_prefix(profile)
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .unwrap_or_else(|_| path.to_string_lossy().into_owned());
+                        unknown.push((name, token));
+                    }
+                }
+            }
+        }
+    }
+    unknown.sort();
+    unknown.dedup();
+    Ok(unknown)
 }
 
 /// Counts `mounts` entries in a Lima config. Err = the probe cannot judge
@@ -291,6 +378,13 @@ if /usr/bin/env | /usr/bin/grep -qE 'ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|_
   echo "PROBE env-credentials ESCAPE"
 else
   echo "PROBE env-credentials PASS"
+fi
+# Credentials, token shape (F-022): the session token is the ONLY 48-hex
+# secret the environment may carry.
+if /usr/bin/env | /usr/bin/grep -v '^CREANCE_SESSION_TOKEN=' | /usr/bin/grep -qE '[0-9a-f]{{48}}'; then
+  echo "PROBE env-hex-tokens ESCAPE"
+else
+  echo "PROBE env-hex-tokens PASS"
 fi
 # SSH: no agent socket, no host keys carried in.
 if [ -n "$SSH_AUTH_SOCK" ] || /usr/bin/ls ~/.ssh/id_* >/dev/null 2>&1; then
@@ -435,6 +529,58 @@ mod tests {
     }
 
     #[test]
+    fn hex48_scanner_matches_exact_token_shapes_only() {
+        let mut out = Vec::new();
+        let token = "a".repeat(48);
+        // Exact token with boundaries.
+        hex48_runs(format!("x{token}y").as_bytes(), &mut out);
+        // Embedded in a longer hex run (a hash): not a token.
+        hex48_runs("f".repeat(96).as_bytes(), &mut out);
+        // Uppercase: tokens are lowercase hex.
+        hex48_runs("A".repeat(48).as_bytes(), &mut out);
+        // 47 hex: no.
+        hex48_runs("a".repeat(47).as_bytes(), &mut out);
+        assert_eq!(out, vec![token]);
+    }
+
+    #[test]
+    fn stray_token_shaped_secrets_are_escaped() {
+        // F-022 regression: a credential-shaped file in the profile
+        // directory must break containment, not pass it.
+        let (profile, config_path) = fresh_profile();
+        // Issued set: guest profile + a store with its auth.
+        let guest = creance_vm::guestprofile::Profile::load_or_create(&profile).unwrap();
+        let store = creance_proxy::load(&profile).unwrap();
+        creance_proxy::save(&profile, &store).unwrap();
+        let probes = host_probes(&profile, &config_path);
+        let creds = probes
+            .iter()
+            .find(|p| p.id == "credentials-are-session-only")
+            .unwrap();
+        assert_eq!(creds.outcome, Outcome::Contained, "issued set is clean");
+
+        // A stray 48-hex secret nobody issued.
+        std::fs::write(
+            paths::join(&profile, "stray-notes.txt"),
+            format!("token={}", "0123456789abcdef".repeat(3)),
+        )
+        .unwrap();
+        let probes = host_probes(&profile, &config_path);
+        let creds = probes
+            .iter()
+            .find(|p| p.id == "credentials-are-session-only")
+            .unwrap();
+        match &creds.outcome {
+            Outcome::Escaped(why) => {
+                assert!(why.contains("stray-notes.txt"), "{why}");
+                assert!(!why.contains(&guest.session_token), "no token bleed");
+            }
+            other => panic!("expected Escaped, got {other:?}"),
+        }
+        std::fs::remove_dir_all(&profile).unwrap();
+    }
+
+    #[test]
     fn mount_counting_fail_closes_on_anything_it_cannot_judge() {
         // FINDING-016: malformed structure and merge keys must be Escaped
         // (via Err), never a silent Contained.
@@ -479,6 +625,7 @@ mod tests {
         for required in [
             "probe fs-flag-readable",
             "PROBE env-credentials",
+            "PROBE env-hex-tokens ESCAPE",
             "PROBE net-direct-egress ESCAPE",
             // F-020/F-022: identity and privilege probes.
             "/usr/bin/id -un)\" != \"devabc12345\"",

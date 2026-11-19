@@ -72,19 +72,27 @@ impl Profile {
     }
 
     /// Loads the profile of a profile directory; generates and persists one
-    /// when absent (never overwrites — a failed install keeps its identity).
+    /// when absent. Never overwrites: a file that exists but cannot be read
+    /// or parsed (F-022) is an error, not a reason to reset the identity.
     pub fn load_or_create(profile_dir: &str) -> Result<Profile, String> {
         let path = crate::paths::join(profile_dir, FILENAME);
-        if let Ok(bytes) = std::fs::read(&path) {
-            let p: Profile =
-                serde_json::from_slice(&bytes).map_err(|_| "客机配置格式无效".to_owned())?;
-            p.validate()?;
-            return Ok(p);
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                let p: Profile =
+                    serde_json::from_slice(&bytes).map_err(|_| "客机配置格式无效".to_owned())?;
+                p.validate()?;
+                Ok(p)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let fresh = Profile::generate();
+                fresh.validate()?;
+                crate::write_private_atomic(&path, &serde_json::to_vec_pretty(&fresh).unwrap())?;
+                Ok(fresh)
+            }
+            Err(e) => Err(format!(
+                "客机配置不可读（{e}），拒绝重置身份；请修复权限或手动轮换"
+            )),
         }
-        let fresh = Profile::generate();
-        fresh.validate()?;
-        crate::write_private_atomic(&path, &serde_json::to_vec_pretty(&fresh).unwrap())?;
-        Ok(fresh)
     }
 
     /// Rotates the session token (revocation): the old token dies with the
@@ -134,6 +142,24 @@ mod tests {
         let rotated = Profile::rotate_token(&dir).unwrap();
         assert_ne!(rotated.session_token, first.session_token);
         assert_eq!(rotated.hostname, first.hostname);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn unreadable_profile_refuses_to_reset_identity() {
+        // F-022: a read failure must never fall through to regeneration —
+        // a directory in the slot is unreadable on every platform, root
+        // included, and must stay untouched.
+        let dir = std::env::temp_dir()
+            .join(format!("creance-gp-{}", crate::token()[..12].to_owned()))
+            .to_string_lossy()
+            .into_owned();
+        std::fs::create_dir_all(&dir).unwrap();
+        let slot = crate::paths::join(&dir, FILENAME);
+        std::fs::create_dir(&slot).unwrap();
+        let err = Profile::load_or_create(&dir).expect_err("must refuse");
+        assert!(err.contains("拒绝重置身份"), "{err}");
+        assert!(std::path::Path::new(&slot).is_dir(), "slot untouched");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -5,7 +5,7 @@
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
 | 024 | S3 | v0.4.0 终稿未过 CI：fmt 11 处红 + lima 测试断言引用已删除的 hostname 字段恒失败（R3"基线绿"不实） | night-05 基线核验 | 已修复（night-05） |
 | 023 | S5 | 深路径 profile setup 撞 UNIX_PATH_MAX：limactl fatal 原样抛出，creance 无预检 | R3→0.3+D1 | 待修复 |
-| 022 | S4 | 0.4 身份声明差距：username 未接线（宿主用户名镜像进 guest）/load_or_create 读失败重置身份/credentials 探针假 PASS | R3→0.4+E1 | ①已修复（night-05，实机复验）②③见后续提交 |
+| 022 | S4 | 0.4 身份声明差距：username 未接线（宿主用户名镜像进 guest）/load_or_create 读失败重置身份/credentials 探针假 PASS | R3→0.4+E1 | 已修复（night-05，①实机复验） |
 | 021 | S4 | tunnel stop() 盲杀 pid 文件进程：pid 复用窗口误杀同 uid 任意进程（实测 sleep 被杀） | R3→0.3+C6 | 已修复（night-05） |
 | 020 | S2 | guest 内一条无密码 sudo 撤销 0.3 拓扑强制：OUTPUT ACCEPT 后直连 1.1.1.1 得 301（实测逃逸） | R3→0.3+D/E | 已修复（night-05，实机复验） |
 | 019 | S4 | gate-daemon SIGKILL 后 record 残留：up 全部短路+孤儿隧道 wire 无法关（fail-open）+escape 探针假 PASS（实测全链） | R3→0.4+C3 | 已修复（night-05，实机复验） |
