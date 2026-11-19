@@ -673,8 +673,16 @@ impl Gate {
                 == old_config.exit_policy.normalized().scope
             && !new_config.exit_policy.needs_binding();
         if !revision_changed && !binding_completed {
-            // Nothing to adopt: the gate keeps its state.
-            if strip_config(&old_config) == strip_config(&new_config) {
+            // Nothing to adopt: the gate keeps its state. F-041: the
+            // anchor is part of "nothing" — strip_config removes
+            // exit_policy, so an anchor change with a still revision
+            // used to sail through here as Unchanged while the open gate
+            // kept evidence judged against the OLD anchor. Only a
+            // bitwise-identical anchor counts as unchanged; anything
+            // else demands a restart.
+            if strip_config(&old_config) == strip_config(&new_config)
+                && old_config.exit_policy.normalized() == new_config.exit_policy.normalized()
+            {
                 return Ok(SyncOutcome::Unchanged);
             }
             return Err("出口地址或环境设置变化需要重启环境".to_owned());
@@ -1639,6 +1647,66 @@ mod tests {
             Err(e) => panic!("SYNC-DEBUG err: {e}"),
         }
         let _ = store;
+        fs::remove_dir_all(&profile).unwrap();
+    }
+
+    #[test]
+    fn unchanged_sync_is_blind_to_nothing_anchor_drift_closes() {
+        // F-041 regression: an anchor change with an unmoved revision used
+        // to take the idempotent Unchanged path (strip_config removes
+        // exit_policy) and the OPEN gate survived against the old anchor's
+        // evidence. Both drift shapes must now demand a restart.
+        let (profile, config_path) = prepare_profile();
+        let instance_dir = creance_vm::paths::join(&profile, "lima/test-vm");
+        fs::create_dir_all(&instance_dir).unwrap();
+        let handle = Gate::start(
+            &instance_dir,
+            &config_path,
+            &profile,
+            "gate-test-inst",
+            17896,
+        )
+        .unwrap();
+        let client = GateClient::open(&instance_dir).unwrap();
+
+        // bound→bound anchor swap, revision untouched.
+        let mut changed = config::load(&config_path).unwrap();
+        changed.exit_policy = crate::exit_policy::Policy {
+            mode: "static".to_owned(),
+            scope: "country".to_owned(),
+            ip: "203.0.113.7".to_owned(),
+            ..Default::default()
+        };
+        config::write_private_config(&config_path, &changed).unwrap();
+        let err = client.sync_proxy_revision().unwrap_err();
+        assert!(
+            err.contains("需要重启") || err.contains("HTTP 409"),
+            "anchor swap: {err}"
+        );
+
+        // mode migration (dynamic/any → static), revision untouched.
+        let mut changed = config::load(&config_path).unwrap();
+        changed.exit_policy = crate::exit_policy::Policy {
+            mode: "static".to_owned(),
+            scope: "any".to_owned(),
+            ip: "198.51.100.9".to_owned(),
+            ..Default::default()
+        };
+        config::write_private_config(&config_path, &changed).unwrap();
+        let err = client.sync_proxy_revision().unwrap_err();
+        assert!(
+            err.contains("需要重启") || err.contains("HTTP 409"),
+            "mode migration: {err}"
+        );
+
+        // And the truly unchanged config (the one the gate recorded at
+        // start) still syncs clean through the idempotent path.
+        let original = config::load(&config_path).unwrap();
+        let mut restored = original.clone();
+        restored.exit_policy = Default::default();
+        config::write_private_config(&config_path, &restored).unwrap();
+        client.sync_proxy_revision().unwrap();
+        drop(handle);
         fs::remove_dir_all(&profile).unwrap();
     }
 
