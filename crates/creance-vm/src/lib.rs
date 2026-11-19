@@ -14,8 +14,14 @@ pub mod paths;
 pub mod private;
 pub mod running;
 pub mod state;
+pub mod tunnel;
 pub mod vm;
 pub mod vmname;
+
+/// The managed-proxy directory of a profile (tunnel pid lives there).
+pub fn proxy_dir(profile: &str) -> String {
+    paths::join(profile, "proxy")
+}
 
 /// A random hex token (48 hex digits) from the OS CSPRNG.
 pub fn token() -> String {

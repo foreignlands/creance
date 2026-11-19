@@ -93,6 +93,7 @@ fn precheck_depth(data: &[u8]) -> Result<(), String> {
 const CANONICAL_KEYS: &[&str] = &["name", "type", "server", "udp", "dialer-proxy"];
 
 const SUPPORTED_TYPES: &[&str] = &[
+    "direct",
     "http",
     "socks5",
     "ss",
@@ -198,7 +199,9 @@ pub fn parse_nodes(data: &[u8], source_id: &str) -> Result<(Vec<Node>, Vec<NodeI
             "节点名称重复，无法确定代理链引用".to_owned()
         } else if !SUPPORTED_TYPES.contains(&typ.as_str()) {
             "节点协议暂不支持".to_owned()
-        } else if server.is_empty() || server.len() > 253 {
+        } else if typ != "direct" && (server.is_empty() || server.len() > 253) {
+            // direct nodes carry no server: their "endpoint" is the exit
+            // itself and the user owns that choice.
             "节点服务器缺失或过长".to_owned()
         } else if let Err(e) = normalize_websocket(map) {
             e

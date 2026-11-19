@@ -4,6 +4,28 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.3.0] — 2026-11-19
+
+### Added — the guest network enforcement plane (ROADMAP 0.3)
+- Topological containment: provisioned guests get `OUTPUT DROP` by default
+  (lo/established/DHCP/ICMP allowed), external DNS and IPv6 disabled —
+  direct egress is physically dropped, not merely discouraged. Verified
+  live: `net-direct-egress` / `net-dns-external` / `net-ipv6` probes PASS.
+- The guest's single wire out: an ssh reverse tunnel (raised by `creance up`,
+  torn down by `creance stop`) carrying guest `127.0.0.1:<port>` to the
+  host-side core's loopback — the core never leaves host loopback, no LAN
+  exposure. Lima's NAT refusing RFC1918 targets and vz rejecting reverse
+  portForwards were established experimentally; ssh -R survives both.
+- `escape-test` network probes are ENFORCED now (no more SKIP), with a
+  positive control (`proxy-path`) proving the only route works; in-guest
+  ESCAPE lines fail the run (exit 1).
+- `direct`-type nodes importable (explicit DIRECT exit, user-owned choice).
+
+### Fixed
+- Instance names budget their length on the PHYSICAL Lima home (deep
+  profiles used to blow UNIX_PATH_MAX), restoring isolation after the
+  F-010 LIMA_HOME fix exposed real paths.
+
 ## [0.2.0] — 2026-11-18
 
 ### Added

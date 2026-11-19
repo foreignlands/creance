@@ -25,6 +25,8 @@ pub struct SetupOptions {
     /// Guest fingerprint settings, taken from the profile config.
     pub timezone: String,
     pub locale: String,
+    /// Host-side managed-core port; the guest loopback forwards back to it.
+    pub proxy_port: u16,
 }
 
 impl Default for SetupOptions {
@@ -36,6 +38,7 @@ impl Default for SetupOptions {
             workspace: String::new(),
             timezone: "Etc/UTC".to_owned(),
             locale: "en_US.UTF-8".to_owned(),
+            proxy_port: 17896,
         }
     }
 }
@@ -123,6 +126,18 @@ apt-get update -qq
 apt-get install -y -qq curl git ca-certificates xz-utils >/dev/null
 curl -fsSL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-$([[ $(uname -m) = aarch64 ]] && echo arm64 || echo x64)/bin/node -o /usr/local/bin/node 2>/dev/null || apt-get install -y -qq nodejs npm >/dev/null
 curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1 || true
+
+# 0.3 TOPOLOGY LOCKDOWN — the guest's only wire out is the ssh -R tunnel to
+# the host-side core on this machine's own loopback (managed from the host
+# after boot). Everything else, including DNS and IPv6, is dropped.
+sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null
+printf 'net.ipv6.conf.all.disable_ipv6=1\n' > /etc/sysctl.d/99-creance-noipv6.conf
+iptables -A OUTPUT -o lo -j ACCEPT
+iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+iptables -A OUTPUT -p udp --dport 67 -j ACCEPT
+iptables -A OUTPUT -p icmp -j ACCEPT
+iptables -P OUTPUT DROP
+iptables-save > /etc/iptables/rules.v4 2>/dev/null || iptables-save > /etc/iptables.up.rules
 "#
     )
 }

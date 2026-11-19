@@ -207,7 +207,8 @@ fn count_declared_mounts(lima_yaml: &str) -> Result<usize, String> {
 /// The in-guest probe script: run inside the VM, prints one `PROBE id
 /// RESULT` line per check (RESULT in PASS/ESCAPE/SKIP). Kept POSIX-sh so it
 /// runs on any guest.
-pub fn guest_script(flag_path: &str) -> String {
+pub fn guest_script(flag_path: &str, auth: &str, port: u16) -> String {
+    let _ = auth;
     format!(
         r#"#!/bin/sh
 # creance escape probes (in-guest). A flag file placed on the host is the
@@ -244,11 +245,30 @@ done
 # Abstract-socket abuse is not checked yet: report SKIP so it can never
 # fake a pass (FINDING-011).
 echo "PROBE sock-abstract SKIP"
-# Direct egress (bypassing the proxy) — enforcement lands with the VM
-# network plane; report SKIP so it can never fake a pass.
-echo "PROBE net-direct-egress SKIP"
-echo "PROBE net-dns-external SKIP"
-echo "PROBE net-ipv6 SKIP"
+# 0.3 ENFORCED NETWORK PROBES — the topology firewall must hold:
+# direct egress to external IPs is dropped, external DNS is dropped,
+# IPv6 is disabled. Escape = any of them succeeds.
+if curl -m 5 -s -o /dev/null https://1.1.1.1/ || curl -m 5 -s -o /dev/null http://93.184.216.34/; then
+  echo "PROBE net-direct-egress ESCAPE"
+else
+  echo "PROBE net-direct-egress PASS"
+fi
+if timeout 4 getent hosts example.com >/dev/null 2>&1; then
+  echo "PROBE net-dns-external ESCAPE"
+else
+  echo "PROBE net-dns-external PASS"
+fi
+if ip -6 addr show scope global 2>/dev/null | grep -q inet6; then
+  echo "PROBE net-ipv6 ESCAPE"
+else
+  echo "PROBE net-ipv6 PASS"
+fi
+# Positive control: the ONLY route (loopback tunnel to the host core) works.
+if curl -m 8 -s --socks5-hostname "cage:{auth}"@127.0.0.1:{port} https://1.1.1.1/cdn-cgi/trace | grep -q ip=; then
+  echo "PROBE proxy-path PASS"
+else
+  echo "PROBE proxy-path ESCAPE"
+fi
 "#
     )
 }
@@ -362,12 +382,12 @@ mod tests {
 
     #[test]
     fn guest_script_is_posix_and_flags_every_probe() {
-        let script = guest_script("/nonexistent-flag");
+        let script = guest_script("/nonexistent-flag", "deadbeef", 17896);
         assert!(script.starts_with("#!/bin/sh"));
         for required in [
             "probe fs-flag-readable",
             "PROBE env-credentials",
-            "PROBE net-direct-egress SKIP",
+            "PROBE net-direct-egress ESCAPE",
         ] {
             assert!(script.contains(required), "missing {required}");
         }

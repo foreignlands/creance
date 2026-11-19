@@ -263,25 +263,35 @@ fn cmd_escape_test() -> i32 {
     );
     if std::path::Path::new(&instance_yaml).exists() {
         let flag = format!("{}.escape-flag", creance_vm::vm::environment_dir(&profile));
-        let script = escape::guest_script(&flag);
-        let mut child = std::process::Command::new("limactl")
+        let store = creance_proxy::load(&profile).ok();
+        let script = escape::guest_script(
+            &flag,
+            &store.as_ref().map(|s| s.auth.clone()).unwrap_or_default(),
+            store.as_ref().map(|s| s.port).unwrap_or(17896),
+        );
+        let child = std::process::Command::new("limactl")
             .env("LIMA_HOME", creance_vm::vm::lima_home(&profile))
             .arg("shell")
             .arg(&instance)
             .arg("sh")
             .arg("-s")
             .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::inherit())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
             .spawn();
-        if let Ok(child) = &mut child {
+        if let Ok(mut child) = child {
             use std::io::Write;
             if let Some(stdin) = child.stdin.as_mut() {
                 let _ = stdin.write_all(script.as_bytes());
             }
             drop(child.stdin.take());
-            match child.wait() {
-                Ok(status) if !status.success() => code = 1,
-                _ => {}
+            if let Ok(output) = child.wait_with_output() {
+                for line in String::from_utf8_lossy(&output.stdout).lines() {
+                    println!("{line}");
+                    if line.contains(" ESCAPE") {
+                        code = 1;
+                    }
+                }
             }
         } else {
             eprintln!("cannot run in-guest probes (limactl unavailable)");
@@ -438,6 +448,14 @@ fn cmd_proxy_refresh() -> i32 {
     }
 }
 
+/// The managed-core port of this profile (store); the default when no
+/// store exists yet.
+fn proxy_store_port(profile: &str) -> u16 {
+    creance_proxy::load(profile)
+        .map(|s| s.port)
+        .unwrap_or(17896)
+}
+
 fn cmd_setup(memory: u32, cpus: u32) -> i32 {
     let path = config::config_path();
     let cfg = match config::load(&path) {
@@ -453,6 +471,7 @@ fn cmd_setup(memory: u32, cpus: u32) -> i32 {
         workspace: creance_vm::vm::environment_dir(&profile),
         timezone: cfg.timezone.clone(),
         locale: cfg.locale.clone(),
+        proxy_port: proxy_store_port(&profile),
     };
     if let Err(e) = creance_vm::lima::setup_instance(&profile, &instance, &options) {
         return fail(e);
@@ -475,6 +494,7 @@ fn cmd_proxy_select(node: String) -> i32 {
 fn cmd_stop(keep_proxy: bool) -> i32 {
     let profile = profile();
     let code = creance_vm::vm::stop_vm(&profile, &instance());
+    let _ = creance_vm::tunnel::stop(&profile);
     if code == 0 && !keep_proxy {
         let _ = gate::close_gates(&profile);
         return cmd_simple(|| creance_proxy::service::stop(&profile));
@@ -495,9 +515,19 @@ fn cmd_up() -> i32 {
     let instance = instance();
     let code = creance_vm::vm::up(&profile, &instance);
     if code == 0 {
+        // 0.3: raise the guest's only route out (loopback -> host core).
+        if let Err(e) = creance_vm::tunnel::ensure(
+            &profile,
+            &instance,
+            creance_proxy::load(&profile)
+                .map(|s| s.port)
+                .unwrap_or(17896),
+        ) {
+            eprintln!("warning: guest tunnel not established: {e}");
+        }
         let instance_dir = creance_vm::paths::join(&creance_vm::vm::lima_home(&profile), &instance);
         let _ = running::record_running(&instance_dir, &cfg);
-        println!("Environment is up. External networking stays closed until the proxy core is applied and started (`creance proxy-select` + `creance proxy-start`).");
+        println!("Environment is up. The guest's only route out is the managed core (`creance escape-test` proves it).");
     }
     code
 }

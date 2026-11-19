@@ -50,9 +50,14 @@ fn users_uid() -> u32 {
 /// under an earlier (smaller) budget.
 pub fn instance_name(profile: &str, workspace: &str) -> String {
     let home = lima_home(profile);
-    // The home is the short link: the budget is computed on its literal
-    // spelling, which is what Lima's socket paths use.
-    let limit = crate::vmname::Limit(crate::vmname::home_limit(&home, true).0);
+    // Lima budgets socket paths on the PHYSICAL home directory (it resolves
+    // the short link), so the name limit must be derived from the real
+    // path, not the link spelling. Deep profiles simply get shorter names.
+    let physical = std::path::Path::new(&home)
+        .canonicalize()
+        .map(|c| c.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| home.clone());
+    let limit = crate::vmname::Limit(crate::vmname::home_limit(&physical, true).0);
     let expected = limit.name(workspace);
     if Path::new(&paths::join(&home, &format!("{expected}/lima.yaml"))).exists() {
         return expected;
