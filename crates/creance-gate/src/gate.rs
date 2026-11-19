@@ -725,12 +725,26 @@ pub fn spawn_daemon(
         let _ = std::fs::remove_file(&pid_file);
         let _ = creance_vm::tunnel::stop(profile_dir);
         creance_vm::tunnel::reap_orphans(profile_dir, instance, proxy_port);
-    } else if Path::new(&creance_vm::paths::join(instance_dir, "cage-gate.json")).exists()
-        || creance_vm::pidfile::alive(&pid_file)
-    {
-        // Live record, or a daemon still in flight (F-021: pid files prove
-        // liveness only with their start-time token).
+    } else if Path::new(&creance_vm::paths::join(instance_dir, "cage-gate.json")).exists() {
+        // A record that survived the retire check has a serving daemon.
         return Ok(());
+    } else if creance_vm::pidfile::alive(&pid_file) {
+        // F-035: a live pid with no record means the daemon is either just
+        // starting (its record is a rename away) or already dying (its
+        // record was removed, the exit tick is pending). Deduping here
+        // reported success while the end state had no daemon and no
+        // record. Waiting one tick separates them: the fresh one publishes
+        // its record, the dying one exits and its pid file dies with it.
+        for _ in 0..3 {
+            std::thread::sleep(Duration::from_millis(400));
+            if Path::new(&creance_vm::paths::join(instance_dir, "cage-gate.json")).exists()
+                && daemon_serving(instance_dir)
+            {
+                return Ok(());
+            }
+        }
+        // Fall through to a fresh spawn; if the old daemon is somehow still
+        // retiring, the run_id ownership handoff (F-028) sorts the overlap.
     }
     let exe = std::env::current_exe()
         .map_err(|e| e.to_string())?
@@ -1329,6 +1343,52 @@ mod tests {
             Path::new(&record_path).exists(),
             "a disowned drop must not delete the winner's record"
         );
+        fs::remove_dir_all(&profile).unwrap();
+    }
+
+    #[test]
+    fn spawn_daemon_waits_out_a_pid_without_a_record() {
+        // F-035: a live pid file whose daemon owns no record must not be
+        // deduped on — spawn_daemon waits the window out (fresh daemons
+        // publish a record; dying ones exit) and then spawns regardless.
+        // The test binary standing in as the daemon exits immediately;
+        // what matters is the wait happened and the call did not
+        // short-circuit into a success with nothing running.
+        let (profile, config_path) = prepare_profile();
+        let instance_dir = creance_vm::paths::join(&profile, "lima/test-vm");
+        fs::create_dir_all(&instance_dir).unwrap();
+        fs::create_dir_all(creance_vm::proxy_dir(&profile)).unwrap();
+        let mut bystander = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        // Legacy bare-pid shape: alive semantics without a record.
+        fs::write(
+            creance_vm::pidfile::proxy_pid_file(&profile, "gate.pid"),
+            format!("{}\n", bystander.id()),
+        )
+        .unwrap();
+
+        let started = std::time::Instant::now();
+        spawn_daemon(
+            &profile,
+            "gate-test-inst",
+            &config_path,
+            &instance_dir,
+            17896,
+        )
+        .unwrap();
+        assert!(
+            started.elapsed() >= Duration::from_millis(1100),
+            "the in-flight/dying window must be waited out"
+        );
+        assert!(
+            !Path::new(&creance_vm::paths::join(&instance_dir, "cage-gate.json")).exists(),
+            "no record appeared (nothing serves) — spawn proceeded"
+        );
+        let _ = std::fs::remove_file(creance_vm::pidfile::proxy_pid_file(&profile, "gate.pid"));
+        let _ = bystander.kill();
+        let _ = bystander.wait();
         fs::remove_dir_all(&profile).unwrap();
     }
 
