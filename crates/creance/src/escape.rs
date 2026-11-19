@@ -146,6 +146,8 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
     // 6. Every token-shaped value in the profile directory belongs to the
     //    issued set (F-022: validating one JSON file claimed far more than
     //    it checked — stray credential files passed as containment).
+    //    Subscription content (proxy/sources.json) is out of scope: it is
+    //    remote, attacker-chosen, and never reaches the guest (F-032).
     let guest_json = paths::join(profile, "guest-profile.json");
     out.push(Probe {
         id: "credentials-are-session-only",
@@ -278,6 +280,20 @@ fn scan_unknown_tokens(profile: &str) -> Result<Vec<(String, String)>, String> {
             if meta.is_dir() {
                 queue.push((path, depth + 1));
             } else if meta.is_file() && meta.len() <= 1024 * 1024 {
+                // F-032: proxy/sources.json is where REMOTE subscription
+                // content lands — it never reaches the guest, and treating
+                // its attacker-chosen fields as issued secrets let a
+                // subscription forge escape verdicts (a 48-hex password
+                // turned the probe red). Whitelisting its contents instead
+                // would be worse: it would launder arbitrary hex. It is
+                // simply out of the probe's scope.
+                let rel = path
+                    .strip_prefix(profile)
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                if rel == "proxy/sources.json" {
+                    continue;
+                }
                 let Ok(bytes) = std::fs::read(&path) else {
                     continue;
                 };
@@ -545,6 +561,31 @@ mod tests {
         // 47 hex: no.
         hex48_runs("a".repeat(47).as_bytes(), &mut out);
         assert_eq!(out, vec![token]);
+    }
+
+    #[test]
+    fn subscription_content_cannot_forge_the_verdict() {
+        // F-032 regression: a 48-hex password inside imported subscription
+        // data is attacker-chosen remote content that never reaches the
+        // guest — the probe must stay Contained, and must not start
+        // treating arbitrary subscription fields as issued secrets either.
+        let (profile, config_path) = fresh_profile();
+        creance_vm::guestprofile::Profile::load_or_create(&profile).unwrap();
+        let sub = "proxies:\n  - name: exit\n    type: ss\n    server: 192.0.2.1\n    port: 8388\n    cipher: aes-128-gcm\n    password: deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n";
+        let dir = std::path::PathBuf::from(paths::join(&profile, "proxy"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("sources.json"), sub).unwrap();
+        let probes = host_probes(&profile, &config_path);
+        let creds = probes
+            .iter()
+            .find(|p| p.id == "credentials-are-session-only")
+            .unwrap();
+        assert_eq!(
+            creds.outcome,
+            Outcome::Contained,
+            "subscription content is out of the probe's scope"
+        );
+        std::fs::remove_dir_all(&profile).unwrap();
     }
 
     #[test]
