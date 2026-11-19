@@ -103,7 +103,12 @@ impl Message {
             out.extend_from_slice(&a.rtype.to_be_bytes());
             out.extend_from_slice(&a.class.to_be_bytes());
             out.extend_from_slice(&a.ttl.to_be_bytes());
-            out.extend_from_slice(&(a.data.len() as u16).to_be_bytes());
+            // FINDING-005: `as u16` silently wrapped oversized rdata
+            // (65536 became 30720); refuse instead of emitting a broken
+            // message.
+            let rdlen = u16::try_from(a.data.len())
+                .map_err(|_| "DNS rdata exceeds 65535 bytes".to_owned())?;
+            out.extend_from_slice(&rdlen.to_be_bytes());
             out.extend_from_slice(&a.data);
         }
         Ok(out)
@@ -217,6 +222,12 @@ fn skip_or_take_name(buf: &[u8], at: usize, take: bool) -> Result<(String, usize
                 }
                 cur = target;
             }
+            // FINDING-005: 0x40/0x80 are reserved label types (RFC 2673
+            // bitstring labels among them) and a plain label tops out at
+            // 63 bytes — miekg/dns refuses both, never reads them as
+            // lengths.
+            n if n & 0xc0 != 0 => return Err("invalid DNS label type".to_owned()),
+            n if n > 63 => return Err("invalid DNS label length".to_owned()),
             n => {
                 let label_at = cur + 1;
                 if label_at + n as usize > buf.len() {
@@ -298,5 +309,62 @@ mod tests {
         let q = Message::query(9, "a.co", TYPE_A);
         let wire = q.pack().unwrap();
         assert!(Message::unpack(&wire[..7]).is_err());
+    }
+
+    fn header_with(qd: u16) -> Vec<u8> {
+        let mut w = vec![0u8; 12];
+        w[2] = 0x80; // response
+        w[4..6].copy_from_slice(&qd.to_be_bytes());
+        w
+    }
+
+    /// FINDING-005: the 0x40/0x80 prefixes are reserved label types
+    /// (RFC 2673 bitstring labels); miekg/dns rejects them and so must we —
+    /// the old fallback branch read the byte as a plain length, accepting a
+    /// 128-byte "label".
+    #[test]
+    fn reserved_prefix_labels_are_rejected() {
+        let mut w = header_with(1);
+        w.push(0x80);
+        w.extend_from_slice(&[0x41u8; 128]);
+        w.push(0);
+        w.extend_from_slice(&[0, 1, 0, 1]);
+        assert!(Message::unpack(&w).is_err(), "0x80 prefix must be rejected");
+        let mut w = header_with(1);
+        w.push(0x40);
+        w.extend_from_slice(&[0x41u8; 64]);
+        w.push(0);
+        w.extend_from_slice(&[0, 1, 0, 1]);
+        assert!(Message::unpack(&w).is_err(), "0x40 prefix must be rejected");
+    }
+
+    /// A plain label longer than 63 bytes is invalid wire format.
+    #[test]
+    fn over_long_labels_are_rejected() {
+        let mut w = header_with(1);
+        w.push(64);
+        w.extend_from_slice(&[0x41u8; 64]);
+        w.push(0);
+        w.extend_from_slice(&[0, 1, 0, 1]);
+        assert!(Message::unpack(&w).is_err());
+    }
+
+    /// FINDING-005: `len as u16` silently wrapped oversized rdata
+    /// (65536 became 30720); pack must refuse instead.
+    #[test]
+    fn pack_refuses_oversized_rdata() {
+        let q = Message::query(1, "x", TYPE_A);
+        let r = Message::reply(
+            &q,
+            0,
+            vec![Resource {
+                name: "x".to_owned(),
+                rtype: TYPE_A,
+                class: CLASS_INET,
+                ttl: 1,
+                data: vec![0u8; 65536],
+            }],
+        );
+        assert!(r.pack().is_err(), "rdata over 65535 bytes must be refused");
     }
 }

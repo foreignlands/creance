@@ -12,7 +12,7 @@
 | 008 | S4 | gate 四处漂移：grant 无 Checking 前置/reason 200B 上限对 CJK 失效/token 非恒时比较/exit_policy 变化不重开 | C3+C4 | 已修复（FIX-NIGHT-02） |
 | 007 | S2 | SSRF 守卫漏 IPv4-mapped IPv6：::ffff:127.0.0.1 绕过检查，真实 mihomo 规范化后拨号本机 | B4 | 已修复（见 FIX-NIGHT-01 提交） |
 | 006 | S4 | egress 五类宽容接受：chunked EOF/CRLF 重同步/双 CL/垃圾 CL/半截头均当成功（Go 严格拒绝） | A7+A8+B2+B3 | 已修复（FIX-NIGHT-02） |
-| 005 | S5 | DNS unpack 接受 0x40/0x80 保留前缀标签（>63），miekg 拒绝；pack rdlen 截断地雷 | A6 | 待修复 |
+| 005 | S5 | DNS unpack 接受 0x40/0x80 保留前缀标签（>63），miekg 拒绝；pack rdlen 截断地雷 | A6 | 已修复（night-03） |
 | 004 | S5 | config 校验三处 Go 漂移：时区目录名/IPv6 括号/尾斜杠 | A5 | 已修复（night-03） |
 | 003 | S4 | 数字 mport 被拒、Go case int 明确支持（yaml_to_json 丢整数性） | A4 | 已修复（FIX-NIGHT-02） |
 | 001 | S3 | 订阅 YAML 深嵌套 O(n²) CPU：1MiB 烧 406s，8MiB 外推约 7 小时 | A1 | 已修复（见 FIX-NIGHT-01 提交） |
