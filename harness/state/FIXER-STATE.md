@@ -10,7 +10,7 @@
 
 ## 下一步
 
-1. **push 结果确认**：本会话已执行 `git push`（结果见下"会话统计"）；若远端拒绝（PAT 权限 403 的历史问题），按协议在此写"待人工推送"。
+1. ~~push 结果确认~~ **已推送成功**：`9f2b10b..f894a37 main -> main`（2026-11-19，PAT 权限正常，历史 403 问题未复现）。
 2. 建议人工 review 的两个非显然实现决策：
    - **014 尾斜杠检测**：WHATWG 解析器对 http(s) 默认 path="/"，无法与显式 `/` 区分——用"原始输入以 / 结尾"启发式等价 Go 语义（egress.rs validate_proxy_url）。info：带 userinfo 的 http URL 依赖此豁免（Go url.Parse Path="" 而 WHATWG 强制 "/"），集成测试 http_connect_* 覆盖。
    - **005 保留前缀拒绝文案**："invalid DNS label type"/"invalid DNS label length" 两个新错误串，egress 层统一映射为 "invalid DNS upstream response"，用户不可见（不影响文案契约）。
@@ -34,4 +34,4 @@
   - 005 DNS 保留前缀拒绝/rdlen try_from → 93806a2
 - INDEX：14 findings 全部"已修复"（8 上游 FIX-NIGHT-01/02 + 6 本会话 night-03）。
 - 最终全量 CI：OK（exit=0，005 提交前验证；amend 均为 fmt-only 或提交信息修正，无代码差异遗漏）。
-- push 状态：见下方 push 执行记录。
+- push 状态：**已推送**（9f2b10b..f894a37），远端 github.com/foreignlands/creance main 同步。
