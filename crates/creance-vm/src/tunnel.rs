@@ -8,6 +8,8 @@
 //! the core's loopback listener. Everything else in the guest is firewalled
 //! off (see the provision script), making this tunnel the only wire out.
 
+#![allow(unsafe_code)] // libc::kill orphan reaping — audited, pgrep-matched pids
+
 use crate::paths;
 use crate::pidfile;
 use std::process::{Command, Stdio};
@@ -90,4 +92,76 @@ pub fn ensure(profile: &str, instance: &str, guest_port: u16) -> Result<(), Stri
 pub fn stop(profile: &str) -> Result<(), String> {
     pidfile::stop(&pidfile::proxy_pid_file(profile, "tunnel.pid"));
     Ok(())
+}
+
+/// Kills `ssh -R` forwards for `instance` that no pid file owns (F-026:
+/// "closed = wire down" must not depend on one file's survival — a pid
+/// write that failed, or a deleted file, would leave an orphan serving the
+/// guest forever). The match is `HostKeyAlias=lima-<instance>`, a string
+/// unique to this instance's tunnel command line, so it cannot hit an
+/// unrelated process; the pid the file does own is spared.
+pub fn reap_orphans(profile: &str, instance: &str) {
+    let Ok(out) = Command::new("pgrep")
+        .arg("-f")
+        .arg(format!("HostKeyAlias=lima-{instance}"))
+        .output()
+    else {
+        return;
+    };
+    let owned = pidfile::load(&pidfile::proxy_pid_file(profile, "tunnel.pid"))
+        .map(|entry| entry.pid)
+        .unwrap_or(-1);
+    for pid in String::from_utf8_lossy(&out.stdout).split_whitespace() {
+        if let Ok(pid) = pid.parse::<i32>() {
+            if pid != owned && pid > 1 {
+                unsafe { libc::kill(pid, libc::SIGTERM) };
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// F-026 regression: an orphan carrying the instance signature dies, a
+    /// process the pid file owns survives. `tail -f /dev/null <signature>`
+    /// keeps the signature visible in its command line the way ssh -o
+    /// args do, without needing a real forward.
+    #[test]
+    fn reap_kills_orphans_but_not_the_owned_tunnel() {
+        let profile = std::env::temp_dir()
+            .join(format!("creance-tun-{}", crate::token()[..10].to_owned()))
+            .to_string_lossy()
+            .into_owned();
+        std::fs::create_dir_all(crate::proxy_dir(&profile)).unwrap();
+        let instance = format!("test-inst-{}", crate::token()[..6].to_owned());
+        let signature = format!("HostKeyAlias=lima-{instance}");
+
+        let mut owned = Command::new("tail")
+            .args(["-f", "/dev/null", &signature])
+            .spawn()
+            .unwrap();
+        pidfile::write(
+            &pidfile::proxy_pid_file(&profile, "tunnel.pid"),
+            owned.id() as i32,
+        )
+        .unwrap();
+        let mut orphan = Command::new("tail")
+            .args(["-f", "/dev/null", &signature])
+            .spawn()
+            .unwrap();
+
+        reap_orphans(&profile, &instance);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        let orphan_dead = orphan.try_wait().unwrap().is_some();
+        let owned_alive = owned.try_wait().unwrap().is_none();
+        let _ = owned.kill();
+        let _ = owned.wait();
+        let _ = orphan.wait();
+        assert!(orphan_dead, "orphan must be reaped");
+        assert!(owned_alive, "the owned tunnel must survive the sweep");
+        std::fs::remove_dir_all(&profile).unwrap();
+    }
 }

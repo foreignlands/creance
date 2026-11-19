@@ -3,6 +3,7 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 026 | S4 | 孤儿 ssh -R 超出 pid 文件管辖即无人能切（closed=wire down 依赖单文件存活；F-025 现场实测遗留） | night-05 实机验证 | 已修复（night-05，实机复验） |
 | 025 | S4 | 处女 profile 的 up 误报失败：proxy/ 目录缺失使 gate.pid/log 写入 ENOENT（守护已 spawn 但 CLI 走回退且回退同败） | night-05 实机验证 | 已修复（night-05） |
 | 024 | S3 | v0.4.0 终稿未过 CI：fmt 11 处红 + lima 测试断言引用已删除的 hostname 字段恒失败（R3"基线绿"不实） | night-05 基线核验 | 已修复（night-05） |
 | 023 | S5 | 深路径 profile setup 撞 UNIX_PATH_MAX：limactl fatal 原样抛出，creance 无预检 | R3→0.3+D1 | 已修复（night-05） |

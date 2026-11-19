@@ -293,11 +293,14 @@ impl Gate {
             }
             // 0.4: the VM's wire follows the gate. Closed gate → the ssh -R
             // tunnel must be down; Open/Checking → it must be up. Healing is
-            // one-way (we cut, we do not silently re-raise).
+            // one-way (we cut, we do not silently re-raise). Reaping backs
+            // the stop with a signature sweep so the cut holds even when the
+            // pid file was lost (F-026).
             let closed = inner.state == GateState::Closed;
             drop(inner);
             if closed {
                 let _ = creance_vm::tunnel::stop(&watchdog.profile_dir);
+                creance_vm::tunnel::reap_orphans(&watchdog.profile_dir, &watchdog.instance);
             } else {
                 let _ = creance_vm::tunnel::ensure(
                     &watchdog.profile_dir,
@@ -685,6 +688,7 @@ pub fn spawn_daemon(
         // dead watchdog can no longer cut — and raise a fresh daemon below.
         let _ = std::fs::remove_file(&pid_file);
         let _ = creance_vm::tunnel::stop(profile_dir);
+        creance_vm::tunnel::reap_orphans(profile_dir, instance);
     } else if Path::new(&creance_vm::paths::join(instance_dir, "cage-gate.json")).exists()
         || creance_vm::pidfile::alive(&pid_file)
     {
@@ -772,6 +776,7 @@ pub fn run_daemon(
     handle.gate.shutdown();
     drop(handle);
     let _ = creance_vm::tunnel::stop(profile_dir);
+    creance_vm::tunnel::reap_orphans(profile_dir, instance);
     0
 }
 
@@ -796,13 +801,19 @@ pub fn open(instance_dir: &str) -> Result<GateStatus, String> {
 
 /// Convenience: closes the gate and removes its record (the daemon then
 /// retires on its own), and cuts the tunnel right away — the closed wire
-/// must not depend on a daemon that may already be gone (F-019).
+/// must not depend on a daemon that may already be gone (F-019), nor on
+/// the pid file's survival (F-026's signature reaping).
 pub fn close_and_remove(profile: &str, instance_dir: &str) -> Result<(), String> {
     if let Ok(client) = GateClient::open(instance_dir) {
         let _ = client.close("宿主请求关闭");
     }
     let _ = std::fs::remove_file(creance_vm::paths::join(instance_dir, "cage-gate.json"));
     let _ = creance_vm::tunnel::stop(profile);
+    let instance = Path::new(instance_dir)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    creance_vm::tunnel::reap_orphans(profile, &instance);
     Ok(())
 }
 
