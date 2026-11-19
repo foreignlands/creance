@@ -27,6 +27,8 @@ pub struct SetupOptions {
     pub locale: String,
     /// Host-side managed-core port; the guest loopback forwards back to it.
     pub proxy_port: u16,
+    /// Generated guest identity (hostname/username/session token).
+    pub guest: crate::guestprofile::Profile,
 }
 
 impl Default for SetupOptions {
@@ -39,6 +41,7 @@ impl Default for SetupOptions {
             timezone: "Etc/UTC".to_owned(),
             locale: "en_US.UTF-8".to_owned(),
             proxy_port: 17896,
+            guest: crate::guestprofile::Profile::generate(),
         }
     }
 }
@@ -70,7 +73,11 @@ pub fn generate_lima_yaml(options: &SetupOptions) -> Result<Vec<u8>, String> {
     provision.insert("mode".into(), Yaml::from("system"));
     provision.insert(
         "script".into(),
-        Yaml::from(provision_script(&options.locale)),
+        Yaml::from(provision_script(
+            &options.locale,
+            &options.guest.session_token,
+            &options.guest.hostname,
+        )),
     );
 
     let mut containerd = Mapping::new();
@@ -114,11 +121,13 @@ pub fn generate_lima_yaml(options: &SetupOptions) -> Result<Vec<u8>, String> {
 /// The guest bootstrap: fingerprint (timezone/locale) first, then the tool
 /// chain. Guest networking is not yet gated (see ROADMAP); the apt step
 /// runs on the VM's NAT until the cage network layer is in place.
-fn provision_script(locale: &str) -> String {
+fn provision_script(locale: &str, session_token: &str, hostname: &str) -> String {
     format!(
         r#"#!/bin/sh
 set -e
 export CLAUDE_CAGE=1
+export CREANCE_SESSION_TOKEN={session_token}
+hostnamectl set-hostname {hostname} 2>/dev/null || true
 export DEBIAN_FRONTEND=noninteractive
 locale-gen {locale} >/dev/null 2>&1 || true
 update-locale LANG={locale} >/dev/null 2>&1 || true
@@ -178,6 +187,9 @@ mod tests {
         let yaml = String::from_utf8(generate_lima_yaml(&options()).unwrap()).unwrap();
         let v: Yaml = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(v["vmType"], "vz");
+        assert!(v["hostname"].as_str().unwrap_or_default().starts_with("cage-"));
+        let script = v["provision"][0]["script"].as_str().unwrap_or_default();
+        assert!(script.contains("CREANCE_SESSION_TOKEN="), "credential handed off");
         assert_eq!(v["cpus"], 4);
         assert_eq!(v["memory"], "8GiB");
         assert_eq!(v["disk"], "24GiB");

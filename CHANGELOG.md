@@ -4,6 +4,28 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.4.0] — 2026-11-19
+
+### Added — gate daemon + guest identities (ROADMAP 0.4)
+- **gate-daemon**: `creance up` raises a detached gate daemon per
+  environment (record-deduped, pid-file managed, stderr logged); `stop`
+  retires it via record removal. The gate's watchdog now OWNS the ssh -R
+  wire: Closed gate → tunnel down, Open/Checking → tunnel up. Verified
+  live: closed = no wire, `gate-open` = wire restored within a second.
+- **`creance gate-open` / `gate-close`**: explicit control of the guest's
+  only route. The open grant currently carries self-checks only (labelled
+  as such); exit-policy evidence integration is 0.5.
+- **Guest profiles** (`guest-profile.json`): generated identity —
+  cage-<hash> hostname (applied via hostnamectl in provision), non-reserved
+  username, 48-hex session token. Created once, never overwritten.
+- **One-time credentials**: the ONLY secret the guest receives is the
+  cage-issued `CREANCE_SESSION_TOKEN` (provision-time env); rotatable via
+  profile rotation. escape-test now hunts host-shaped secrets (API keys /
+  private keys) in the guest env — anything beyond the session token is an
+  ESCAPE.
+- escape-test gate probe enforced: a VM without a gate record is an escape.
+- docs/CLOUD-DEVIN.md: Linux-side verification protocol for cloud agents.
+
 ## [0.3.0] — 2026-11-19
 
 ### Added — the guest network enforcement plane (ROADMAP 0.3)

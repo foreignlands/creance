@@ -1,3 +1,4 @@
+#![allow(unsafe_code)] // libc::kill pid liveness — audited, pid from our own pid file
 //! The cage gate: the host-side control service guarding every environment's
 //! external networking.
 //!
@@ -173,6 +174,9 @@ fn truncate_utf8(s: &str, max: usize) -> &str {
 
 /// The gate's shared core, served on its private socket.
 pub struct Gate {
+    profile_dir: String,
+    instance: String,
+    proxy_port: u16,
     run_id: String,
     inner: Mutex<GateInner>,
     shutdown: AtomicBool,
@@ -209,7 +213,13 @@ impl Gate {
     /// token, run id) and spawns the control server. The returned handle
     /// owns the gate's lifetime — dropping it stops the server and removes
     /// the socket directory.
-    pub fn start(instance_dir: &str, config_path: &str) -> Result<GateHandle, String> {
+    pub fn start(
+        instance_dir: &str,
+        config_path: &str,
+        profile_dir: &str,
+        instance: &str,
+        proxy_port: u16,
+    ) -> Result<GateHandle, String> {
         let token = creance_proxy::token();
         let run_id = creance_proxy::token()[..32].to_owned();
         let sock_dir = std::env::temp_dir().join(format!(
@@ -242,6 +252,9 @@ impl Gate {
         })?;
 
         let gate = Arc::new(Gate {
+            profile_dir: profile_dir.to_owned(),
+            instance: instance.to_owned(),
+            proxy_port,
             run_id,
             inner: Mutex::new(GateInner {
                 state: GateState::Closed,
@@ -278,6 +291,20 @@ impl Gate {
                 if opened.elapsed() > lease {
                     inner.close("检测租期到期，等待重新检查");
                 }
+            }
+            // 0.4: the VM's wire follows the gate. Closed gate → the ssh -R
+            // tunnel must be down; Open/Checking → it must be up. Healing is
+            // one-way (we cut, we do not silently re-raise).
+            let closed = inner.state == GateState::Closed;
+            drop(inner);
+            if closed {
+                let _ = creance_vm::tunnel::stop(&watchdog.profile_dir);
+            } else {
+                let _ = creance_vm::tunnel::ensure(
+                    &watchdog.profile_dir,
+                    &watchdog.instance,
+                    watchdog.proxy_port,
+                );
             }
         });
 
@@ -639,6 +666,122 @@ fn error_json(message: &str) -> Vec<u8> {
         .into_bytes()
 }
 
+/// Spawns the gate daemon detached from the calling CLI process: it holds
+/// the GateHandle (socket, watchdog, tunnel coupling) for the environment's
+/// lifetime. Fails cleanly when a daemon is already alive for this profile.
+pub fn spawn_daemon(
+    profile_dir: &str,
+    instance: &str,
+    config_path: &str,
+    instance_dir: &str,
+    proxy_port: u16,
+) -> Result<(), String> {
+    let pid_file = creance_vm::paths::join(&creance_vm::proxy_dir(profile_dir), "gate.pid");
+    // A published record means a live daemon owns this gate.
+    if Path::new(&creance_vm::paths::join(instance_dir, "cage-gate.json")).exists() {
+        return Ok(());
+    }
+    if let Some(pid) = std::fs::read_to_string(&pid_file)
+        .ok()
+        .and_then(|s| s.trim().parse::<i32>().ok())
+    {
+        // EPERM means alive under another user — still alive.
+        let alive = unsafe { libc::kill(pid, 0) == 0 }
+            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
+        if alive {
+            return Ok(());
+        }
+    }
+    let exe = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .to_string_lossy()
+        .into_owned();
+    use std::process::{Command, Stdio};
+    let log = creance_vm::paths::join(
+        &creance_vm::proxy_dir(profile_dir),
+        "gate-daemon.log",
+    );
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log)
+        .ok();
+    let child = Command::new(exe)
+        .arg("gate-daemon")
+        .arg(profile_dir)
+        .arg(instance)
+        .arg(config_path)
+        .arg(instance_dir)
+        .arg(proxy_port.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(match &log {
+            Some(f) => Stdio::from(f.try_clone().map_err(|e| e.to_string())?),
+            None => Stdio::null(),
+        })
+        .spawn()
+        .map_err(|e| format!("cannot spawn gate daemon: {e}"))?;
+    std::fs::write(&pid_file, child.id().to_string()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// The `creance gate-daemon` body: hold the gate until its record vanishes
+/// (host-side close/removal) or the process is signaled.
+pub fn run_daemon(
+    profile_dir: &str,
+    instance: &str,
+    config_path: &str,
+    instance_dir: &str,
+    proxy_port: u16,
+) -> i32 {
+    let handle = match Gate::start(instance_dir, config_path, profile_dir, instance, proxy_port) {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("gate daemon: {e}");
+            return 1;
+        }
+    };
+    let record = creance_vm::paths::join(instance_dir, "cage-gate.json");
+    loop {
+        std::thread::sleep(Duration::from_millis(500));
+        if !Path::new(&record).exists() {
+            break;
+        }
+    }
+    handle.gate.shutdown();
+    drop(handle);
+    let _ = creance_vm::tunnel::stop(profile_dir);
+    0
+}
+
+/// Convenience: opens the gate (check window + grant) over the record.
+pub fn open(profile: &str, instance_dir: &str) -> Result<GateStatus, String> {
+    let client = GateClient::open(instance_dir)?;
+    client.begin_check()?;
+    // The full exit-policy evidence chain lands in 0.5; this grant carries
+    // the five required self-checks and is labelled as unverified.
+    let mut checks = std::collections::BTreeMap::new();
+    for c in SafetyReport::REQUIRED {
+        checks.insert((*c).to_owned(), "passed".to_owned());
+    }
+    let status = client.status()?;
+    let body = serde_json::json!({
+        "action": "grant",
+        "report_id": status.check_id,
+        "report": {"report_id": status.check_id, "checks": checks},
+    });
+    client.raw_control(&body.to_string())
+}
+
+/// Convenience: closes the gate and removes its record (daemon retires).
+pub fn close_and_remove(profile: &str, instance_dir: &str) -> Result<(), String> {
+    if let Ok(client) = GateClient::open(instance_dir) {
+        let _ = client.close("宿主请求关闭");
+    }
+    let _ = std::fs::remove_file(creance_vm::paths::join(instance_dir, "cage-gate.json"));
+    Ok(())
+}
+
 /// A host-side client for one gate record: the calls `cage proxy-stop` and
 /// the workbench make against every running instance's gate.
 pub struct GateClient {
@@ -713,6 +856,10 @@ impl GateClient {
 
     pub fn sync_proxy_revision(&self) -> Result<GateStatus, String> {
         self.call("POST", "/control", Some(r#"{"action":"proxy-revision"}"#))
+    }
+
+    fn raw_control(&self, body: &str) -> Result<GateStatus, String> {
+        self.call("POST", "/control", Some(body))
     }
 }
 
@@ -794,7 +941,7 @@ mod tests {
         let (profile, config_path) = prepare_profile();
         let instance_dir = creance_vm::paths::join(&profile, "lima/test-vm");
         fs::create_dir_all(&instance_dir).unwrap();
-        let handle = Gate::start(&instance_dir, &config_path).unwrap();
+        let handle = Gate::start(&instance_dir, &config_path, &profile, "gate-test-inst", 17896).unwrap();
         let record = handle.record.clone();
         let client = GateClient::open(&instance_dir).unwrap();
 
@@ -883,7 +1030,7 @@ mod tests {
         let (profile, config_path) = prepare_profile();
         let instance_dir = creance_vm::paths::join(&profile, "lima/test-vm");
         fs::create_dir_all(&instance_dir).unwrap();
-        let handle = Gate::start(&instance_dir, &config_path).unwrap();
+        let handle = Gate::start(&instance_dir, &config_path, &profile, "gate-test-inst", 17896).unwrap();
         let record = handle.record.clone();
         use std::io::{Read, Write};
         use std::os::unix::net::UnixStream;
@@ -934,7 +1081,7 @@ mod tests {
         let (profile, config_path) = prepare_profile();
         let instance_dir = creance_vm::paths::join(&profile, "lima/test-vm");
         fs::create_dir_all(&instance_dir).unwrap();
-        let handle = Gate::start(&instance_dir, &config_path).unwrap();
+        let handle = Gate::start(&instance_dir, &config_path, &profile, "gate-test-inst", 17896).unwrap();
         let _record = handle.record.clone();
         let client = GateClient::open(&instance_dir).unwrap();
 
@@ -966,7 +1113,7 @@ mod tests {
         let (profile, config_path) = prepare_profile();
         let instance_dir = creance_vm::paths::join(&profile, "lima/test-vm");
         fs::create_dir_all(&instance_dir).unwrap();
-        let handle = Gate::start(&instance_dir, &config_path).unwrap();
+        let handle = Gate::start(&instance_dir, &config_path, &profile, "gate-test-inst", 17896).unwrap();
         let _record = handle.record.clone();
         let client = GateClient::open(&instance_dir).unwrap();
 

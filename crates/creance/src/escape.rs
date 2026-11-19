@@ -121,6 +121,8 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
         &vm::lima_home(profile),
         &format!("{instance}/cage-gate.json"),
     );
+    let instance_yaml = paths::join(&vm::lima_home(profile), &format!("{instance}/lima.yaml"));
+    let vm_exists = Path::new(&instance_yaml).exists();
     out.push(Probe {
         id: "gate-record-private",
         layer: "gate",
@@ -129,8 +131,28 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
                 Ok(()) => Outcome::Contained,
                 Err(e) => Outcome::Escaped(e.to_string()),
             }
+        } else if vm_exists {
+            Outcome::Escaped("VM present without a gate record".to_owned())
         } else {
             Outcome::NotEnforced
+        },
+    });
+
+    // 6. The session credential is cage-issued and the ONLY token shaped
+    //    like a secret in the profile directory.
+    let guest_json = paths::join(profile, "guest-profile.json");
+    out.push(Probe {
+        id: "credentials-are-session-only",
+        layer: "credentials",
+        outcome: if Path::new(&guest_json).exists() {
+            match creance_vm::guestprofile::Profile::load_or_create(profile) {
+                Ok(_) => Outcome::Contained,
+                Err(e) => Outcome::Escaped(e),
+            }
+        } else if vm_exists {
+            Outcome::NotEnforced
+        } else {
+            Outcome::Contained
         },
     });
 

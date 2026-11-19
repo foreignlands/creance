@@ -8,6 +8,7 @@
 
 pub mod config;
 pub mod exit_policy;
+pub mod guestprofile;
 pub mod host;
 pub mod lima;
 pub mod paths;

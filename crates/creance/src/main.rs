@@ -53,6 +53,8 @@ fn main() {
         Commands::Shell { command } => cmd_shell(command),
         Commands::Claude => cmd_shell(vec!["claude".to_owned()]),
         Commands::EscapeTest => cmd_escape_test(),
+        Commands::GateOpen => cmd_gate(true),
+        Commands::GateClose => cmd_gate(false),
         Commands::Doctor => {
             let report = diagnose::diagnose(&profile(), &config::config_path());
             print!("{}", diagnose::render(&report));
@@ -70,6 +72,13 @@ fn main() {
             println!("creance {}", env!("CARGO_PKG_VERSION"));
             0
         }
+        Commands::GateDaemon {
+            profile,
+            instance,
+            config_path,
+            instance_dir,
+            port,
+        } => creance_gate::gate::run_daemon(&profile, &instance, &config_path, &instance_dir, port),
         Commands::LogRelay { kind } => {
             if kind != "proxy" {
                 eprintln!("log-relay owns only the proxy core");
@@ -150,6 +159,10 @@ enum Commands {
     /// Diagnose the environment VM.
     /// Run the containment probe suite (host checks + in-guest probes).
     EscapeTest,
+    /// Open the environment gate (check window + grant). The wire follows.
+    GateOpen,
+    /// Close the environment gate: the guest loses its only route out.
+    GateClose,
     Doctor,
     /// Serve the lean workbench (loopback HTTP + single-page UI).
     Serve {
@@ -162,6 +175,15 @@ enum Commands {
     #[command(hide = true)]
     LogRelay {
         kind: String,
+    },
+    /// Internal: hold the environment gate until its record is removed.
+    #[command(hide = true)]
+    GateDaemon {
+        profile: String,
+        instance: String,
+        config_path: String,
+        instance_dir: String,
+        port: u16,
     },
 }
 
@@ -245,6 +267,28 @@ fn cmd_check() -> i32 {
         }
         Ok(r) => fail(format!("proxy check returned HTTP {}", r.status)),
         Err(_) => fail("proxy transport check failed (no direct fallback)".to_owned()),
+    }
+}
+
+fn cmd_gate(open: bool) -> i32 {
+    let profile = profile();
+    let instance = instance();
+    let instance_dir =
+        creance_vm::paths::join(&creance_vm::vm::lima_home(&profile), &instance);
+    let outcome = if open {
+        gate::open(&profile, &instance_dir).map(|s| format!("open (epoch {})", s.epoch))
+    } else {
+        gate::close_and_remove(&profile, &instance_dir).map(|_| "closed".to_owned())
+    };
+    match outcome {
+        Ok(msg) => {
+            println!("gate: {msg}");
+            if open {
+                println!("note: grant carries self-checks only; exit-policy evidence lands in 0.5");
+            }
+            0
+        }
+        Err(e) => fail(e),
     }
 }
 
@@ -464,6 +508,10 @@ fn cmd_setup(memory: u32, cpus: u32) -> i32 {
     };
     let profile = profile();
     let instance = instance();
+    let guest = match creance_vm::guestprofile::Profile::load_or_create(&profile) {
+        Ok(g) => g,
+        Err(e) => return fail(e),
+    };
     let options = creance_vm::lima::SetupOptions {
         memory_gib: memory,
         cpus,
@@ -472,6 +520,7 @@ fn cmd_setup(memory: u32, cpus: u32) -> i32 {
         timezone: cfg.timezone.clone(),
         locale: cfg.locale.clone(),
         proxy_port: proxy_store_port(&profile),
+        guest,
     };
     if let Err(e) = creance_vm::lima::setup_instance(&profile, &instance, &options) {
         return fail(e);
@@ -494,6 +543,7 @@ fn cmd_proxy_select(node: String) -> i32 {
 fn cmd_stop(keep_proxy: bool) -> i32 {
     let profile = profile();
     let code = creance_vm::vm::stop_vm(&profile, &instance());
+    let _ = gate::close_gates(&profile); // removes cage-gate.json → daemon retires
     let _ = creance_vm::tunnel::stop(&profile);
     if code == 0 && !keep_proxy {
         let _ = gate::close_gates(&profile);
@@ -515,17 +565,17 @@ fn cmd_up() -> i32 {
     let instance = instance();
     let code = creance_vm::vm::up(&profile, &instance);
     if code == 0 {
-        // 0.3: raise the guest's only route out (loopback -> host core).
-        if let Err(e) = creance_vm::tunnel::ensure(
-            &profile,
-            &instance,
-            creance_proxy::load(&profile)
-                .map(|s| s.port)
-                .unwrap_or(17896),
-        ) {
-            eprintln!("warning: guest tunnel not established: {e}");
-        }
+        // 0.4: the gate owns the wire now — Closed gate = tunnel down. Raising
+        // the daemon raises the tunnel with it; only on daemon failure do we
+        // fall back to the unconditional tunnel so the VM stays usable.
+        let port = creance_proxy::load(&profile).map(|s| s.port).unwrap_or(17896);
         let instance_dir = creance_vm::paths::join(&creance_vm::vm::lima_home(&profile), &instance);
+        if let Err(e) = gate::spawn_daemon(&profile, &instance, &path, &instance_dir, port) {
+            eprintln!("warning: gate daemon not raised: {e}");
+            if let Err(e) = creance_vm::tunnel::ensure(&profile, &instance, port) {
+                eprintln!("warning: guest tunnel not established: {e}");
+            }
+        }
         let _ = running::record_running(&instance_dir, &cfg);
         println!("Environment is up. The guest's only route out is the managed core (`creance escape-test` proves it).");
     }
