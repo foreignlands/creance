@@ -4,6 +4,32 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.5.1] — 2026-11-19
+
+### Fixed — night-07: R5 findings 032–035
+
+- **F-032**: subscription content can no longer forge the escape verdict.
+  A 48-hex password inside imported subscription data (remote,
+  attacker-chosen, never reaching the guest) tripped the credentials
+  scan into a false escape and exit 1 — a subscription provider could
+  weaponize the trust oracle. proxy/sources.json is now explicitly out
+  of the probe's scope (whitelisting its fields would be worse: it
+  would launder arbitrary hex into the issued set). Live-replayed via
+  the poisoning CLI flow: contained, exit 0.
+- **F-035**: spawn_daemon no longer dedups on a dying daemon. A live
+  pid with no record meant "just starting" or "already exiting";
+  deduping there reported up-success with nothing running. The branch
+  waits one tick — a fresh daemon publishes its record, a dying one
+  exits — then spawns; the run_id handoff absorbs any overlap.
+- **F-033**: the fingerprint-consistent probe is alive. Setup pins the
+  fingerprint the VM was promised at creation; the probe enforces
+  agreement (fresh stamp → contained, drifted config → escape with
+  re-pin guidance). Also fixes an intermittent test flake (parallel
+  temp-name collisions on subsec-nanos alone).
+- **F-034**: the provision node download is atomic (temp + move): a
+  mid-transfer curl corpse can no longer sit in /usr/local/bin and
+  shadow the apt fallback's working /usr/bin/node.
+
 ## [0.5.0] — 2026-11-19
 
 ### Added — exit-policy evidence chain (ROADMAP 0.5)

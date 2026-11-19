@@ -3,6 +3,10 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 035 | S4 | spawn_daemon 的 pidfile-alive 去重命中垂死守护（确定性探针复现）：up 返回 Ok 而终态无守护无 record；对称风险=stop 的 close_and_remove 可刺杀并发 up 的年轻 record | R5-1 F-028 修复面回归 | 已修复（night-07：等待一拍分离在途/垂死） |
+| 034 | S4 | provision curl -o 失败残留半截 /usr/local/bin/node 遮蔽 apt 兜底的 /usr/bin/node（PATH 先序）→ 兜底链被尸体击败；containment 不受影响 | R5-4 F-031 修复面回归 | 已修复（night-07：tmp+mv 原子下载） |
+| 033 | S5 | fingerprint-consistent 探针死代码：fingerprint.txt 全仓库无写入者，恒 NotEnforced（"layer not implemented yet"）；漂移检测实际由 running.rs 承担 | R5-6 C7 | 已修复（night-07：setup 写戳，探针激活） |
+| 032 | S4 | 订阅内容恰 48-hex 字符串（password 等）经 sources.json 被 scan_unknown_tokens 判 unknown → escape-test 误报 Escaped exit 1（实测；64-hex/干净订阅对照不触发）——远程内容可操纵信任预言机 | R5-5 期望集回归 | 已修复（night-07，实机重放） |
 | 031 | S4 | provision 的 set -e 使安装失败=部署 fail-open：apt/curl 失败中断脚本，拓扑锁定与特权摘除全部不执行 | R4 F-020 回归残留（night-06 核实） | 已修复（night-06） |
 | 030 | S5 | Egress::dial 目标含 CRLF（尾冒号数字端口形状）可向 HTTP 代理 CONNECT 请求注入任意头部（实测成立）；生产不可达（fetch 走 WHATWG 规范化）——API 加固 | B1/B2 | 已修复（night-06） |
 | 029 | S4 | retire_stale_record `!is_ok()` 把 5s 读超时当守护已死：冻结/慢守护即被 `creance up` 删活 record+切隧道+更替守护+gate 静默跌落 Closed（实机复现）；与 close_gates 的 "unreachable" 字符串判定双标 | night-05 修复面回归（C3） | 已修复（night-06，实机复验冻结 no-op） |

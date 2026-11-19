@@ -32,11 +32,11 @@
 |---|---|---|---|
 | C1 | store 并发写：两进程同时 import/save（原子性） | creance-proxy/src/store.rs | 已穷尽：**FINDING-014 S4** 丢失更新+非原子 select 实测；write_private 单写原子 ✓；三个入口（CLI/workbench/refresh）均无互斥 |
 | C2 | applied 一致性矩阵：revision/endpoint/selected/chain 全组合枚举 | store.rs `applied/route` | 未覆盖 |
-| C3 | gate 状态机：并发 control 命令、租期到期瞬间 grant、close 后 renew | creance-gate/src/gate.rs | 已覆盖（R4 实机黑盒：hammer 12 轮+确定性双守护——**FINDING-028 S2** 守护战争（败者永生、closed 期间 wire 间歇可用）、**FINDING-029 S4** retire_stale_record 误删活 record、**FINDING-027 S4** 僵尸 ssh 骗过 pidfile；单守护下 closed=wire down、forged renew/grant 拒绝、drain 无残留隧道全部正确；record/config 原子写核验） |
+| C3 | gate 状态机：并发 control 命令、租期到期瞬间 grant、close 后 renew | creance-gate/src/gate.rs | 已覆盖（R4 实机黑盒：hammer 12 轮+确定性双守护——**FINDING-028 S2** 守护战争（败者永生、closed 期间 wire 间歇可用）、**FINDING-029 S4** retire_stale_record 误删活 record、**FINDING-027 S4** 僵尸 ssh 骗过 pidfile；单守护下 closed=wire down、forged renew/grant 拒绝、drain 无残留隧道全部正确；record/config 原子写核验）。**R5 night-06 修复面回归**：run_id 绑定边角（rename 原子无撕裂；`Err=>continue` 持续损坏 record → 守护永生+control 全 403 砖化+watchdog 持线不动，同 uid 自伤面记档，CLI touch 即愈）；disown×stop 并发收敛 ✓；双 up 收敛 ✓；still_owner 消失拍 → 不动 wire ✓；**spawn_daemon 去重命中垂死守护 → FINDING-035 S4**（确定性探针）；r4 对照证 F-028 disown 机制在损坏 record 重生面成立 ✓；daemon_serving 非 socket 路径 ENOTSOCK→保守当活（方向正确，自伤面记档） |
 | C4 | gate 鉴权：token 时序、错 Host/Origin 组合、超大 body、chunked | gate.rs `handle` | 进行中（Host!=cage/Origin 存在/错 token 全 403 ✓；body 64KiB 上限+parse 失败落 0 ✓；bearer 非恒时比较 vs Go ConstantTimeCompare→FINDING-008；双 CL 后值覆盖 S5 记录；chunked body 未测——handle 不解析 TE，read_exact(CL) 恒等） |
 | C5 | sync_proxy_revision：构造"恰好可采纳"的边界变更组合 | gate.rs | 已覆盖（R4 源码审查：采纳路径=revision 变更或 exit_policy 完成+strip_config 相等+only-completed 校验+新 revision 非空，全部与 Go SyncProxyRevision 对齐；注意点：`!revision_changed && !binding_completed` 分支对 exit_policy 变更**静默忽略**（strip_config 剔除 exit_policy → 判等 → Ok 不采纳不报重启）——0.4 无 exit_policy 变更输入面（无 CLI），0.5 evidence chain 落地时须重审此分支） |
 | C6 | running 记录：PID 复用模拟、启动时间戳伪造 | creance-vm/src/running.rs | 已穷尽：kinfo_proc 断言验证正确（proc.h:91-98 union 重叠 p_starttime）；start token 机制健全；伪造 record（pid=1 真实 token）可致 config 变更永久受阻——同 uid 自伤面 S4 记档未单列；C2 applied 矩阵 15 变体全部正确 |
-| C7 | fingerprint 稳定性：归一化等价但字节不同的配置 | config.rs `fingerprint` | 未覆盖 |
+| C7 | fingerprint 稳定性：归一化等价但字节不同的配置 | config.rs `fingerprint` | 已穷尽（R5）：结构体序列化 sha256（字段序固定 → 文件字节序/空白无关）；exit_policy 先 normalized 再哈希 → 等价策略同指纹 ✓；proxy_revision 有意入指纹（select/refresh 即漂移，由 running.rs 拦 `up`，保守方向）。**fingerprint-consistent 探针死代码 → FINDING-033 S5**（fingerprint.txt 全仓库无写入者，恒 NotEnforced） |
 
 ## D. 路径与编排
 
@@ -52,9 +52,9 @@
 
 | # | 条目 | 入口 | 状态 |
 |---|---|---|---|
-| E1 | mounts-workspace-only 骗术：lima.yaml 注入额外挂载后探针能否发现 | creance/src/escape.rs | 进行中：**计数骗术 3 变体成立**（`-  location:` 双空格/flow 形式/折行——YAML 合法但 starts_with("- location:") 不命中）；且 FINDING-010 使探针读的 lima.yaml 与真实实例脱节；sock-abstract 探针硬编码 PASS（违背 NotEnforced 哲学）——合并待写 finding |
-| E2 | guest_script oracle：PATH 劫持 sh、只读 flag、宿主 flag 在挂载内 | escape.rs `guest_script` | 进行中：env/grep/ls 为外部命令可被 guest 内 PATH 污染欺骗（hostagent 的 sanitized_env 不过滤 PATH）；`_API_KEY=` grep 比 STRIPPED 宽——宿主设 OPENAI_API_KEY 等会**误报 ESCAPE**（清单为共同窄设计，探针质量缺陷）；flag_path 注入面取决于 CLI 调用（未查） |
-| E3 | workbench CSRF/权限：Origin 大小写、端口直觉、GET 触发变更 | creance/src/serve.rs | 未覆盖 |
+| E1 | mounts-workspace-only 骗术：lima.yaml 注入额外挂载后探针能否发现 | creance/src/escape.rs | 已覆盖（并入 FINDING-011，night-03 已修复——本行"合并待写"状态系过期标记，R5 核实：count_declared_mounts 现为真 YAML 解析+merge key fail-close（F-016），sock-abstract 现报 SKIP 不谎 PASS） |
+| E2 | guest_script oracle：PATH 劫持 sh、只读 flag、宿主 flag 在挂载内 | escape.rs `guest_script` | 已覆盖（F-011/F-022 修复面 + R5 复核）：探针命令全用绝对路径（/usr/bin/id、/usr/bin/sudo）抗 PATH 污染；`_API_KEY=` grep 误报项=共同窄设计记档不变；flag 路径由 CLI 从 environment_dir 推导（D3 已覆盖伪造面）；escape-test 的宿主侧探针（credentials/mounts/fingerprint）R5 已分别回归（F-032/F-033） |
+| E3 | workbench CSRF/权限：Origin 大小写、端口直觉、GET 触发变更 | creance/src/serve.rs | 已覆盖（R5 审查）：CSRF=POST 且非空 Origin 必须精确等于 `http://127.0.0.1:{bound port}`（大小写不折叠、端口绑实值）；GET 仅读（/,/api/status,/api/nodes）✓；DNS rebinding 场景 Origin=attacker 域→403；无 Origin 本地客户端=文档化信任边界（loopback+同 uid）；/api/proxy/import 的任意 url 经 fetch_subscription 继承 B4 全套守卫（SSRF 不逃逸）；/api/check 固定 URL 无参数注入；chunked 无空格绕过无危害（body 解析 400）已 F2 记档 |
 | E4 | 环境剥离完整性：vm.rs STRIPPED 清单 vs Go main.go:537 清单 diff | vm.rs `sanitized_env` | 已穷尽：Rust=Go 12 项+5 个 cage 自有传递变量（多剥更保守）；但那 5 个含 LIMA_HOME 在 limactl 路径自删→FINDING-010；非 Anthropic *_API_KEY 两边共同不剥（探针误报项） |
 
 ## F. 资源与健壮性
