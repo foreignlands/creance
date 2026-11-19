@@ -277,7 +277,7 @@ fn cmd_gate(open: bool) -> i32 {
     let outcome = if open {
         gate::open(&instance_dir).map(|s| format!("open (epoch {})", s.epoch))
     } else {
-        gate::close_and_remove(&instance_dir).map(|_| "closed".to_owned())
+        gate::close_and_remove(&profile, &instance_dir).map(|_| "closed".to_owned())
     };
     match outcome {
         Ok(msg) => {
@@ -544,8 +544,10 @@ fn cmd_proxy_select(node: String) -> i32 {
 fn cmd_stop(keep_proxy: bool) -> i32 {
     let profile = profile();
     let code = creance_vm::vm::stop_vm(&profile, &instance());
-    let _ = gate::close_gates(&profile); // removes cage-gate.json → daemon retires
-    let _ = creance_vm::tunnel::stop(&profile);
+    // F-019: the gate retires by its record going away — close over the
+    // socket if a daemon still serves, remove the record either way, and
+    // cut the tunnel now (close_and_remove does all three).
+    let _ = gate::close_and_remove(&profile, &gate_instance_dir());
     if code == 0 && !keep_proxy {
         let _ = gate::close_gates(&profile);
         return cmd_simple(|| creance_proxy::service::stop(&profile));

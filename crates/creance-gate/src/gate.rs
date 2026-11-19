@@ -676,13 +676,20 @@ pub fn spawn_daemon(
     proxy_port: u16,
 ) -> Result<(), String> {
     let pid_file = creance_vm::pidfile::proxy_pid_file(profile_dir, "gate.pid");
-    // A published record means a live daemon owns this gate.
-    if Path::new(&creance_vm::paths::join(instance_dir, "cage-gate.json")).exists() {
-        return Ok(());
-    }
-    // FINDING-021: the pid file proves liveness only with its start-time
-    // token — a reused PID must never pass for our daemon.
-    if creance_vm::pidfile::alive(&pid_file) {
+    // A record proves a daemon only while that daemon still serves its
+    // socket (F-019: after SIGKILL or a reboot the record outlives the
+    // process, and dedup-on-existence silently disabled every later `up`
+    // while an orphan tunnel kept the wire open).
+    if retire_stale_record(instance_dir) {
+        // Stale: retire the leftovers — pid file and any orphan ssh -R the
+        // dead watchdog can no longer cut — and raise a fresh daemon below.
+        let _ = std::fs::remove_file(&pid_file);
+        let _ = creance_vm::tunnel::stop(profile_dir);
+    } else if Path::new(&creance_vm::paths::join(instance_dir, "cage-gate.json")).exists()
+        || creance_vm::pidfile::alive(&pid_file)
+    {
+        // Live record, or a daemon still in flight (F-021: pid files prove
+        // liveness only with their start-time token).
         return Ok(());
     }
     let exe = std::env::current_exe()
@@ -715,8 +722,27 @@ pub fn spawn_daemon(
     Ok(())
 }
 
+/// Removes a record whose daemon no longer serves it (F-019: SIGKILL and
+/// reboots leave records behind; existence alone must never pass for a
+/// working gate). True when a stale record was retired.
+fn retire_stale_record(instance_dir: &str) -> bool {
+    let record = creance_vm::paths::join(instance_dir, "cage-gate.json");
+    if !Path::new(&record).exists() {
+        return false;
+    }
+    if GateClient::open(instance_dir)
+        .and_then(|client| client.status())
+        .is_ok()
+    {
+        return false;
+    }
+    let _ = std::fs::remove_file(&record);
+    true
+}
+
 /// The `creance gate-daemon` body: hold the gate until its record vanishes
-/// (host-side close/removal) or the process is signaled.
+/// (host-side close/removal — `close_and_remove` and `close_gates` both
+/// remove it, which retires the daemon) or the process is signaled.
 pub fn run_daemon(
     profile_dir: &str,
     instance: &str,
@@ -763,12 +789,15 @@ pub fn open(instance_dir: &str) -> Result<GateStatus, String> {
     client.raw_control(&body.to_string())
 }
 
-/// Convenience: closes the gate and removes its record (daemon retires).
-pub fn close_and_remove(instance_dir: &str) -> Result<(), String> {
+/// Convenience: closes the gate and removes its record (the daemon then
+/// retires on its own), and cuts the tunnel right away — the closed wire
+/// must not depend on a daemon that may already be gone (F-019).
+pub fn close_and_remove(profile: &str, instance_dir: &str) -> Result<(), String> {
     if let Ok(client) = GateClient::open(instance_dir) {
         let _ = client.close("宿主请求关闭");
     }
     let _ = std::fs::remove_file(creance_vm::paths::join(instance_dir, "cage-gate.json"));
+    let _ = creance_vm::tunnel::stop(profile);
     Ok(())
 }
 
@@ -853,21 +882,27 @@ impl GateClient {
     }
 }
 
-/// Closes every gate recorded under `state_dir`'s Lima instances — the
-/// `cage proxy-stop` companion so VMs drop their networking the moment the
-/// core goes away.
+/// Closes every gate recorded under the profile's Lima instances — the
+/// `creance proxy-stop` companion so VMs drop their networking the moment
+/// the core goes away. A record whose socket no longer answers is stale
+/// (F-019): its daemon is gone, so the record goes too — nothing else
+/// would clean it, and a live-looking corpse would mask a missing gate.
 pub fn close_gates(profile: &str) -> Result<(), String> {
     let lima = creance_vm::vm::lima_home(profile);
     let mut last = None;
     if let Ok(entries) = std::fs::read_dir(&lima) {
         for entry in entries.flatten() {
             let instance_dir = entry.path().to_string_lossy().into_owned();
-            if Path::new(&instance_dir).join("cage-gate.json").exists() {
-                if let Ok(client) = GateClient::open(&instance_dir) {
-                    if let Err(e) = client.close("代理核心停止或重启，等待重新检测")
-                    {
-                        last = Some(e);
+            let record = Path::new(&instance_dir).join("cage-gate.json");
+            if record.exists() {
+                match GateClient::open(&instance_dir)
+                    .and_then(|c| c.close("代理核心停止或重启，等待重新检测").map(|_| ()))
+                {
+                    Ok(()) => {}
+                    Err(e) if e.contains("unreachable") => {
+                        let _ = std::fs::remove_file(&record);
                     }
+                    Err(e) => last = Some(e),
                 }
             }
         }
@@ -1008,6 +1043,41 @@ mod tests {
         let raw = call_raw(&record, &stale.to_string()).unwrap();
         assert!(raw.0.starts_with("409"), "{raw:?}");
         assert_eq!(client.status().unwrap().state, GateState::Closed);
+        fs::remove_dir_all(&profile).unwrap();
+    }
+
+    #[test]
+    fn stale_records_retire_but_served_ones_stay() {
+        // F-019 regression: a record whose socket no longer answers must be
+        // removed, never treated as a working gate; a served record survives.
+        let (profile, config_path) = prepare_profile();
+        let instance_dir = creance_vm::paths::join(&profile, "lima/test-vm");
+        fs::create_dir_all(&instance_dir).unwrap();
+
+        // Stale: a valid, private record pointing at a socket nobody serves.
+        let record_path = creance_vm::paths::join(&instance_dir, "cage-gate.json");
+        let stale = serde_json::json!({
+            "socket": creance_vm::paths::join(&profile, "no-such-sock.sock"),
+            "token": creance_proxy::token(),
+            "run_id": creance_proxy::token()[..32].to_owned(),
+        });
+        fs::write(&record_path, serde_json::to_vec(&stale).unwrap()).unwrap();
+        creance_vm::private::protect_file(&record_path).unwrap();
+        assert!(retire_stale_record(&instance_dir), "dead record retires");
+        assert!(!Path::new(&record_path).exists(), "record removed");
+
+        // Live: a started gate keeps its record.
+        let handle = Gate::start(
+            &instance_dir,
+            &config_path,
+            &profile,
+            "gate-test-inst",
+            17896,
+        )
+        .unwrap();
+        assert!(!retire_stale_record(&instance_dir), "served record stays");
+        assert!(Path::new(&record_path).exists());
+        drop(handle);
         fs::remove_dir_all(&profile).unwrap();
     }
 

@@ -116,22 +116,27 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
         },
     });
 
-    // 5. The gate record (if any) is private and its state machine intact.
-    let gate_json = paths::join(
-        &vm::lima_home(profile),
-        &format!("{instance}/cage-gate.json"),
-    );
-    let instance_yaml = paths::join(&vm::lima_home(profile), &format!("{instance}/lima.yaml"));
-    let vm_exists = Path::new(&instance_yaml).exists();
+    // 5. The gate record (if any) is private, and its daemon actually
+    //    serves (F-019: a record left by a SIGKILLed daemon used to pass
+    //    as containment while an orphan tunnel kept the wire open).
+    let instance_dir = paths::join(&vm::lima_home(profile), &instance);
+    let gate_json = paths::join(&instance_dir, "cage-gate.json");
     out.push(Probe {
         id: "gate-record-private",
         layer: "gate",
         outcome: if Path::new(&gate_json).exists() {
             match creance_vm::private::check_private_file(&gate_json) {
-                Ok(()) => Outcome::Contained,
                 Err(e) => Outcome::Escaped(e.to_string()),
+                Ok(()) => {
+                    match creance_gate::gate::GateClient::open(&instance_dir)
+                        .and_then(|client| client.status())
+                    {
+                        Ok(_) => Outcome::Contained,
+                        Err(_) => Outcome::Escaped("gate record without a live daemon".to_owned()),
+                    }
+                }
             }
-        } else if vm_exists {
+        } else if instance_running(profile, &instance) {
             Outcome::Escaped("VM present without a gate record".to_owned())
         } else {
             Outcome::NotEnforced
@@ -140,6 +145,8 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
 
     // 6. The session credential is cage-issued and the ONLY token shaped
     //    like a secret in the profile directory.
+    let instance_yaml = paths::join(&vm::lima_home(profile), &format!("{instance}/lima.yaml"));
+    let vm_exists = Path::new(&instance_yaml).exists();
     let guest_json = paths::join(profile, "guest-profile.json");
     out.push(Probe {
         id: "credentials-are-session-only",
@@ -182,6 +189,24 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
     });
 
     out
+}
+
+/// Whether the profile's Lima instance is actually running (not merely
+/// created) — `limactl list` is the source of truth, absent limactl means
+/// not running.
+fn instance_running(profile: &str, instance: &str) -> bool {
+    let Ok(out) = std::process::Command::new("limactl")
+        .env("LIMA_HOME", vm::lima_home(profile))
+        .args(["list", "--json"])
+        .output()
+    else {
+        return false;
+    };
+    String::from_utf8_lossy(&out.stdout).lines().any(|line| {
+        serde_json::from_str::<serde_json::Value>(line)
+            .map(|v| v["name"] == instance && v["status"] == "Running")
+            .unwrap_or(false)
+    })
 }
 
 /// Counts `mounts` entries in a Lima config. Err = the probe cannot judge
@@ -374,6 +399,38 @@ mod tests {
         }
         let code = report(&probes);
         assert_eq!(code, 0);
+        std::fs::remove_dir_all(&profile).unwrap();
+    }
+
+    #[test]
+    fn gate_probe_demands_a_live_daemon() {
+        // F-019 regression: a private record whose daemon is gone is an
+        // escape, not containment — the orphan-tunnel shape must not pass.
+        let (profile, config_path) = fresh_profile();
+        let instance = vm::instance_name(&profile, &vm::environment_dir(&profile));
+        let dir = paths::join(&vm::lima_home(&profile), &instance);
+        std::fs::create_dir_all(&dir).unwrap();
+        let record = serde_json::json!({
+            "socket": paths::join(&profile, "dead.sock"),
+            "token": creance_vm::token(),
+            "run_id": creance_vm::token()[..32].to_owned(),
+        });
+        let record_path = paths::join(&dir, "cage-gate.json");
+        std::fs::write(&record_path, serde_json::to_vec(&record).unwrap()).unwrap();
+        std::fs::set_permissions(
+            &record_path,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .unwrap();
+        let probes = host_probes(&profile, &config_path);
+        let gate = probes
+            .iter()
+            .find(|p| p.id == "gate-record-private")
+            .expect("gate probe present");
+        match &gate.outcome {
+            Outcome::Escaped(why) => assert!(why.contains("live daemon"), "{why}"),
+            other => panic!("expected Escaped, got {other:?}"),
+        }
         std::fs::remove_dir_all(&profile).unwrap();
     }
 
