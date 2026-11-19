@@ -4,6 +4,34 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.5.2] — 2026-11-20
+
+### Fixed — night-08: R6 findings 036–039
+
+- **F-037 (S2)**: the gate's bearer token lives in memory from start.
+  The per-request re-read of the record degraded to an empty token
+  when the file was unreadable (chmod 000, the close-removal window)
+  and constant_time_eq("", "") passed — a credential-less process
+  drove check → grant → open. Live-probe verified: the whole chain now
+  403s. A renamed-over loser also no longer accepts the winner's token.
+- **F-036**: the exit-drift window is closed. Core restarts (CLI and
+  workbench) sync the gate FIRST — a changed exit closes the gate while
+  the old core still serves; an idempotent no-change sync keeps the
+  gate's state instead of force-retiring it; grants bind to the gate's
+  run and the current instant (run_id + created_at minted by gate::open,
+  enforced inside the check window, inner/outer report ids symmetric).
+  The Go contract's configuration-fingerprint dimension lands with 0.6.
+- **F-038**: the evidence's trust boundary is stated honestly — a
+  single-destination sample (1.1.1.1-path, now an explicit audit key);
+  TLS pins the sample to Cloudflare, single-group core config pins
+  evidence to the wire's node, but per-destination routing by the node
+  itself is undetectable by one source.
+- **F-039**: the ghost workspace manifest at crates/ (a 0.2.0-era
+  leftover) is gone; external path-deps resolve the real workspace.
+- **R6-H4**: `up` re-pins the fingerprint stamp (proxy_revision is part
+  of the fingerprint; a routine proxy-select between runs no longer
+  leaves the escape probe permanently red).
+
 ## [0.5.1] — 2026-11-19
 
 ### Fixed — night-07: R5 findings 032–035

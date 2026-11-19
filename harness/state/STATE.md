@@ -1,48 +1,32 @@
-# STATE — 2026-11-19T16:00:00Z（R6 对抗审查会话 · 终稿）
+# STATE — 2026-11-20T00:30:00Z（night-08 修复会话 · 终稿）
 
-## 已完成（R6 全部三大攻击面覆盖，5 新 findings，探针 27/27 RC=0）
+## 已完成（R6 全部 4 findings + R6-H4 交互残留，全部 CI RC=0；r6 探针实证复验）
 
-基线 HEAD 7368663（v0.5.1）。探针 `harness/tools/r6-evidence-probe/`（真实 path-dep crate，经 /tmp 快照绕幽灵清单 F-039；run.sh 端到端可复现）。
+- **F-037 (S2) ✅ f5695a2**：token 启动时入内存（Go 语义）；record 读失败不再退化空串（chmod 000/关闭窗口的 fail-open 链断）；败者不再接受胜者 token。**r6 探针实证：empty-bearer 全链 403**。
+- **F-039 ✅ cf8f385**：crates/Cargo.toml 幽灵清单删除；外部 path-dep 实证编译通过（探针已切直连仓库）。
+- **F-036 ✅ 4efa224**：①CLI/serve 的 core 重启改为**先 sync 后重启**（换出口时 gate 在旧核心仍在服务时关闭，无"open gate+已换出口"窗口；workbench 原先完全不 sync）；②幂等 sync（无变化）不再无条件关 gate（与注释对齐）；③grant 绑定第一片：SafetyReport 带 run_id+created_at（gate::open 铸造、daemon 在 Checking 窗口内强校验、内外 report_id 对称）——**r6 探针实证：无绑定 grant 409**。Go 的 config 指纹维度=0.6 授权集对齐。
+- **F-038 ✅ 373769d**：单目的地采样边界如实声明（TLS 只证"真到 Cloudflare"、核心单组只证"同节点"、节点对不同目的地差异化路由不可检测）；grant 证据键加 exit_sample=1.1.1.1-path 审计标注。二源交叉=0.6。
+- **R6-H4/F-033 补丁 ✅ eab85aa**：fingerprint 含 proxy_revision→常规 select 后 setup 戳恒漂移（探针恒红）；up 时刷新戳（up=配置生效时刻），真实漂移仍由 check_running 在 up 顶部拦截。回归测试两态。
 
-- **F-036 S4**：exit-anchor 漂移链零绑定。grant 契约=5 键字符串表（gate.rs:99 注释 "mirroring Go" 不实——Go 是 11 项+RunID+Configuration 指纹+CreatedAt+24h 生命期+Renew 重授权，ref safety.go:54）；daemon 逐命令 applied() 对 co-updated revision 结构性失明；workbench `/api/proxy/start` 完全不 sync（90s 漂移窗口主洞）、CLI proxy-start 先重启后 sync 且 `let _` 吞错。探针 H3 实证：换节点后伪造五键静默再 Open。附带复查 attack-surfaces C5 预埋点：action 层对 Ok 也无条件关 gate（静默担忧不落地），但幂等 no-change sync 也关（注释矛盾，每次 proxy-start 强制重取证）。
-- **F-037 S2（边界=同 uid）**：gate 认证 fail-open——record 不可读→`record_token()` 退化空串（每请求重读+unwrap_or_default），空 Bearer 过恒时比较；**无凭证+无证据→check→grant→Open 全链成立**（探针 H2 FULL CHAIN）。Go 用启动时内存 token 恒拒（gate_control.go:99）。guest 不可达（单 workspace 挂载+socket 在 VM 不可达域）；同 uid 进程本可读 token——破坏的是"控制面必须持凭证"不变量本身+close_and_remove 瞬态窗口可在 gate-close 后重开。
-- **F-038 S4**：出口证据信任边界量化。**已封死（验证）**：MITM 伪造不可行（webpki 全量校验，egress.rs:616）、核心内差异化路由不可行（单 MATCH+单选组，runtime.rs:97）、parse_trace 畸形 15 项矩阵全 fail-closed（H1）。**开放路径**：出口节点自身对 1.1.1.1 差异化路由（TLS 只保证"终止于 Cloudflare"，不保证路径=其它流量）→ 大陆出口洗白不可检测；evidence.rs:4-12 注释低估一档（wire 信任≠锚定信任）。
-- **F-039 S5**：幽灵 workspace 清单 crates/Cargo.toml（git tracked，ff286a6 残尸，0.2.0/your-org）阻断一切外部 path-dep（继承绑定旧版+crates/crates/ 双倍路径，实测 build error）。只读铁律未动，探针快照绕行。
-- **F-040 S4**：F-033 回归——fingerprint() 覆盖全 config（含 proxy/revision/exit_policy），任何合法 select/重启使 escape-test 恒报 Escaped（H4 实证前提：select 轮换指纹而 guest 可见字段不变）；running record@up 吸收漂移、setup 戳永久报警——night-07 STATE "双源互补不冲突"结论不成立，实为冲突。
+## 版本
 
-## 已检查未升级（诚实记录）
-
-- **B-1 sources.json 豁免语义成立**：guest 仅 workspace 一个挂载（lima.rs:121，测试断言 mounts.len()==1）；profile 目录（sources.json 落点）不在挂载列表；CREANCE_SESSION_TOKEN 是 guestprofile 发放的唯一 credential_env（guestprofile.rs:111-117），宿主凭据不进 VM；树内无该 token 的宿主消费方（grep 仅 lima/guestprofile/escape 探针排除项）。秘密藏进订阅确实"不可见"，但找不到 guest 路径——豁免语义维持，不升级 S2。
-- **B-2 spawn 等待拍收敛成立**：双 up 双 spawn → run_id 交接收敛（F-028 机制）；等待拍的 record+serving 判定在垂死守护场景（record 已删才死）观察不到残 record；残余 TOCTOU（serving 判定后 µs 级死亡→up 返回 Ok 但终态无 gate）窗口极小、下一次 gate 命令可见失败，不升级。
-- **B-4 F-034 mv 分支固定正确**：残尸名 node.new 不遮蔽 /usr/bin/node（遮蔽需落在 /usr/local/bin/node）；唯一边角=mv 成功后 chmod 失败（`|| true`）留下 0644 node 且无兜底（同 fs rename 失败概率≈0），记档不升级。
-- **serve 面**：无 gate open/grant 端点（只有 import/select/start/stop/check）；POST Origin 校验挡 CSRF；DNS rebinding 拿不到写操作（Origin 必带）。127.0.0.1 绑定不限同 uid（多用户机上他 uid 可调 /api/proxy/*）——单用户 macOS 边界，记档。
+v0.5.2（tag）：night-08 hardening。39/39 findings 六轮全闭环（R1 14+R2 4+R3 5+R4 4+R5 4+R6 4+夜修自发现 4）。
 
 ## 下一步（按序 3 条）
 
-1. **R6 修复轮（night-08）**：按 036→037→040 优先（036 补 Go 三维绑定+workbench sync；037 token 入内存+fail-closed；040 指纹拆承诺面或降级 Drift 分类）；039 一行 git rm；038 改注释+审计标注。全部走 ci.sh 真实 RC。
-2. 0.6 multi-env/snapshots（RELEASES 顺延主题）。
+1. **R7 回归审查**：night-08 修复面（token 内存化的启动窗口、sync 先行的失败分支、幂等判定新语义、grant 绑定的时间源、戳刷新与 check_running 的竞态）+ 未尽项（Go 授权集完整对齐面、二源交叉设计审查、mihomo external-controller-unix 暴露面——R6 未验证想法）。
+2. **0.6 multi-env/snapshots**（RELEASES 顺延主题）或 **Go 授权集完整对齐**（F-036 的 11 项+三维）——按用户节奏。
 3. 模型驱动逃逸演练 + Devin 介入（用户定时）。
 
-## 关键记忆（≤10）
+## 关键记忆（≤8 条）
 
-1. Go SafetyReport.Authorizes 是三维绑定契约（RunID+Configuration+CreatedAt/24h）；Rust 5 键字符串表——"mirroring Go" 注释必须对照 ref 核实，不能信注释。
-2. `sync_proxy_revision_with` 返回 Ok ≠ gate 保持状态：action 层对 Ok/Err 都 close——函数注释与包装层行为矛盾，读 gate.rs 要两层一起读。
-3. 每请求重读安全材料（record_token）引入 fail-open 退化与 token 混淆两面；Go 的"启动时读入内存"是更稳的模式。
-4. TLS 阻断的是内容伪造，不是路径分化：trace 单目的地采样泛化到全流量=未声明的节点同路假设。
-5. 仓库只读铁律下，外部 path-dep 用 /tmp 快照副本（删幽灵清单）；快照基线必须写进探针头部。
-6. 幽灵 crates/Cargo.toml 是 ff286a6 拆分残尸——外部消费者构建失败先查"最近的 [workspace] 清单"而非依赖本身。
-7. 指纹承诺面要拆：guest 可见字段（timezone/locale）vs 宿主侧字段（proxy/revision）——全量哈希把良性操作变成永久逃逸误报。
-8. cargo path-dep 的 workspace 继承解析：外部加载不做成员归属校验，直接绑最近祖先清单。
-9. 探针跑真实 crate（path-dep）而非逻辑复刻——本轮三次"预期错误"全靠真实行为纠正（C5 静默、ENOTDIR、grant body 结构）。
-10. 管道吃 RC：判绿必须 `cmd > file; RC=$?`（run.sh 沿用）。
+1. R6 探针模式（path-dep 真实 crate + /tmp 快照绕幽灵清单）在 F-039 修复后可直连仓库——后续审查探针直接 path-dep。
+2. grant 绑定的时间源：SystemTime now 与 CHECK_LEASE 窗口比对；created_at==0（serde default）天然被拒——旧版调用方（无绑定）自动失效，需同步更新所有 grant 构造方（本次只有 gate::open 一个）。
+3. sync 先行的新语义：sync 失败（409）也照常重启核心——失败意味着"需重启环境"，核心重启无害；gate 已被 close。
+4. `up` 刷新戳的语义边界：check_running 先拦（运行中改配置要求 stop），刷新只发生在"合法 up"路径——两者顺序（check_running 在前）保证了不会把违规漂移洗白。
+5. token 内存化后 record 文件只是"发现凭证"（客户端用），服务端不再依赖它——record 损坏/不可读不影响运行中的 gate（仍可被 close_gates 的 daemon_serving/文件清理处理）。
 
 ## 会话统计
 
-- R6：5 findings（036-040），探针 27 断言全绿 RC=0（run.sh 端到端复验）
-- 覆盖：A1（trace 伪造量化）/A2（时序窗口）/A3（注入面）/A4（绕过面）/B1-B4 全部/C（Go 对比四处语义漂移+attack-surfaces C5 预埋点复查）
-- 仓库零修改（只读铁律）；/tmp 快照与残留临时目录已清理
-- 环境：无残留进程/目录；探针自身临时目录用后即删（run.sh 每次重建快照）
-
-## 停止建议
-
-R6 任务书 A/B/C 三面全覆盖：A 面四方向全部有实证结论（探针+Go 对照），B 面四方向全查（1 个升级为 finding，3 个豁免/记档），C 面 attack-surfaces 可加深点（C5 预埋）已复查。剩余风险清单：①多用户主机上 serve 无鉴权面（记档未升级）；②external-controller-unix 核心控制 socket 的同 uid 暴露面（F-038 未验证想法）；③真实出口节点的差异化路由无法本机复现（设计边界记录）；④F-036 修复若引入 renew 调用方必须同时补绑定字段（否则窗口无界）。建议停止 R6 审查、转入 night-08 修复轮。
+- night-08：5/5（036/037/038/039+H4 补丁），5 commit（f5695a2→eab85aa），每 commit 完整 ci.sh RC=0
+- 累计 39 findings 全修复；环境无残留（daemons=0）
