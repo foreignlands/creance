@@ -1,0 +1,24 @@
+[package]
+name = "r6-evidence-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# R6 探针：走**真实 crate**（path-dep，非逻辑复刻——复刻对修复复验无效的教训见 F-033/STATE）。
+# 三个假设：
+#   H1 parse_trace 畸形 body 全矩阵（期望：除 last-wins 重复键外全部 fail-closed）
+#   H2 record 不可读时 gate 认证退化为空 Bearer（Go 用启动时内存 token，永不空 → 语义漂移）
+#   H3 出口漂移检测缺口：select_and_apply 换节点后 daemon 的逐命令校验仍放行，
+#      伪造五键可再授权 Open；只有显式 proxy-revision 动作能察觉
+[dependencies]
+# 走真实 crate。仓库内 crates/Cargo.toml 是一个幽灵 workspace 清单（git tracked，
+# ff286a6 引入）：外部 path-dep 的继承解析会撞上它并拼出 crates/crates/ 双倍路径，
+# 因此这里 path-dep 指向 /tmp 快照副本（副本内已删幽灵清单）。快照=当前 HEAD 源码，
+# 与仓库可能有漂移——仅用于行为观测，头部注明快照基线。
+creance = { path = "/tmp/r6-snapshot/crates/creance" }
+creance-gate = { path = "/tmp/r6-snapshot/crates/creance-gate" }
+creance-proxy = { path = "/tmp/r6-snapshot/crates/creance-proxy" }
+creance-vm = { path = "/tmp/r6-snapshot/crates/creance-vm" }
+serde_json = "1"
+
+[workspace]

@@ -3,6 +3,11 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 040 | S4 | F-033 回归：setup 指纹戳覆盖全 config（含 proxy/revision/exit_policy），任何合法 select/重启使 escape-test 恒报 Escaped（探针 H4 实证前提）；record 源吸收漂移、戳源永久报警，双源冲突 | R6-B3 | 待修复 |
+| 039 | S5 | 幽灵 workspace 清单 crates/Cargo.toml（git tracked，ff286a6 残尸，0.2.0/your-org）阻断外部 path-dep：继承绑定旧版+crates/crates/ 双倍路径（实测 build error） | R6-C 工具链 | 待修复 |
+| 038 | S4 | 出口证据=单目的地采样被泛化为全流量锚定：出口节点差异化路由可洗白大陆出口（TLS 防 MITM/核心单 MATCH/parse_trace 15 项矩阵均已验证封死，唯一开放路径在节点以外） | R6-A1 | 待修复（文档/注释层） |
+| 037 | S2 | gate 认证 fail-open：record 不可读→token 退化空串，空 Bearer 过恒时比较；无凭证进程 check→grant→Open 全链成立（探针实证）；Go 用启动时内存 token 恒拒——语义漂移。边界=同 uid+close 瞬态窗口，guest 不可达 | R6-A4/A3 | 待修复 |
+| 036 | S4 | exit-anchor 漂移链零绑定：grant 契约 5 键字符串表 vs Go 11 项+RunID+Configuration+CreatedAt+24h+Renew 重授权；daemon 逐命令 applied() 对 co-updated revision 结构性失明；workbench start 不 sync、CLI start 先重启后 sync 且吞错——换节点后伪造五键静默再 Open（探针 H3 实证），90s 租期为唯一硬顶。C5 预埋分支复查：action 对 Ok 也无条件关 gate（静默担忧不落地），但幂等 sync 也关（注释矛盾，proxy-start 强制重取证） | R6-A2/A3 + attack-surfaces C5 | 待修复 |
 | 035 | S4 | spawn_daemon 的 pidfile-alive 去重命中垂死守护（确定性探针复现）：up 返回 Ok 而终态无守护无 record；对称风险=stop 的 close_and_remove 可刺杀并发 up 的年轻 record | R5-1 F-028 修复面回归 | 已修复（night-07：等待一拍分离在途/垂死） |
 | 034 | S4 | provision curl -o 失败残留半截 /usr/local/bin/node 遮蔽 apt 兜底的 /usr/bin/node（PATH 先序）→ 兜底链被尸体击败；containment 不受影响 | R5-4 F-031 修复面回归 | 已修复（night-07：tmp+mv 原子下载） |
 | 033 | S5 | fingerprint-consistent 探针死代码：fingerprint.txt 全仓库无写入者，恒 NotEnforced（"layer not implemented yet"）；漂移检测实际由 running.rs 承担 | R5-6 C7 | 已修复（night-07：setup 写戳，探针激活） |
