@@ -162,7 +162,11 @@ fn route(ctx: &ServeCtx, method: &str, path: &str, body: &[u8]) -> (u16, &'stati
         ("POST", "/api/proxy/select") => json_action(ctx, body, |ctx, v| {
             let node = v["node"].as_str().unwrap_or_default();
             match creance_proxy::select_and_apply(&ctx.profile, &ctx.config_path, node) {
-                Ok(_) => (200, json!({"ok": true})),
+                Ok(_) => {
+                    // F-043: same synchronous gate revocation as the CLI.
+                    let _ = creance_gate::gate::close_gates(&ctx.profile);
+                    (200, json!({"ok": true}))
+                }
                 Err(e) => (409, json!({"error": e})),
             }
         }),

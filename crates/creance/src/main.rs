@@ -283,6 +283,18 @@ fn cmd_gate(open: bool) -> i32 {
             Ok(c) => c,
             Err(e) => return fail(e),
         };
+        // F-042: the core's unix controller ignores the configured secret
+        // (live-verified), so a flipped core (mode=direct, a MATCH,DIRECT
+        // reload) would feed the evidence sample whatever the flipper
+        // wants. Reconcile the running core against its generated config
+        // first — a diverged core may not supply exit evidence.
+        if let Ok(store) = creance_proxy::load(&profile) {
+            if let Err(e) = creance_proxy::service::check_running(&profile, &store) {
+                return fail(format!(
+                    "核心运行态已偏离配置（{e}），拒绝采样出口证据，外网保持关闭"
+                ));
+            }
+        }
         let location = match creance::evidence::observe(&cfg) {
             Ok(l) => l,
             Err(e) => return fail(format!("出口观测失败，外网保持关闭：{e}")),
@@ -567,7 +579,13 @@ fn cmd_setup(memory: u32, cpus: u32) -> i32 {
 
 fn cmd_proxy_select(node: String) -> i32 {
     cmd_simple(|| {
-        creance_proxy::select_and_apply(&profile(), &config::config_path(), &node)?;
+        let profile = profile();
+        creance_proxy::select_and_apply(&profile, &config::config_path(), &node)?;
+        // F-043: the switch is declared the moment select lands — close
+        // the gates synchronously (Go's applyProxy does exactly this).
+        // Until the next proxy-start, an open gate must never coexist
+        // with a config that already declares a different exit.
+        let _ = gate::close_gates(&profile);
         println!("applied {node}; run `creance proxy-start` to launch the core");
         Ok(())
     })

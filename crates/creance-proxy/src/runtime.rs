@@ -90,12 +90,13 @@ pub fn generate(store: &Store, profile: &str) -> Result<Vec<u8>, String> {
         "external-controller-unix".into(),
         Yaml::from(crate::socket(profile)),
     );
-    // F-042: the controller used to be credential-less — a same-uid
-    // process could flip the running egress (mode=direct, a MATCH,DIRECT
-    // reload) with one unauthenticated request and no on-disk trace,
-    // hijacking the exit-evidence oracle. The controller now requires
-    // the store's auth as its bearer secret (same trust domain as the
-    // mixed-port credential, held by exactly the same holders).
+    // F-042: mihomo's UNIX controller is credential-exempt by design
+    // (live-verified on v1.19.34: even a wrong bearer gets 200; unix
+    // sockets authenticate by file permissions). We still set the secret
+    // so any TCP-facing controller path is covered, and the real
+    // enforcement against a flipped core is the readiness reconciliation
+    // (check_running, mode included) that gate-open runs before drawing
+    // exit evidence.
     root.insert("secret".into(), Yaml::from(store.auth.clone()));
     root.insert("tun".into(), Yaml::Mapping(tun));
     root.insert("dns".into(), Yaml::Mapping(dns));
