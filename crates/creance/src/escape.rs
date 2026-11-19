@@ -243,6 +243,10 @@ fn scan_unknown_tokens(profile: &str) -> Result<Vec<(String, String)>, String> {
     }
     if let Ok(store) = creance_proxy::load(profile) {
         expected.insert(store.auth);
+        // The store's revision is a 48-hex VERSION marker, not a secret —
+        // proxy-select copies it into config.json, and the live machine
+        // showed the scan flagging it on a fully provisioned profile.
+        expected.insert(store.revision);
     }
     let lima = vm::lima_home(profile);
     if let Ok(entries) = std::fs::read_dir(&lima) {
@@ -548,10 +552,16 @@ mod tests {
         // F-022 regression: a credential-shaped file in the profile
         // directory must break containment, not pass it.
         let (profile, config_path) = fresh_profile();
-        // Issued set: guest profile + a store with its auth.
+        // Issued set: guest profile + a store with its auth, plus the
+        // applied revision the way proxy-select leaves it (the live
+        // machine flagged the revision until it joined the set).
         let guest = creance_vm::guestprofile::Profile::load_or_create(&profile).unwrap();
-        let store = creance_proxy::load(&profile).unwrap();
+        let mut store = creance_proxy::load(&profile).unwrap();
+        store.revision = creance_vm::token();
         creance_proxy::save(&profile, &store).unwrap();
+        let mut cfg = creance_vm::config::load(&config_path).unwrap();
+        cfg.proxy_revision = store.revision.clone();
+        creance_vm::config::write_private_config(&config_path, &cfg).unwrap();
         let probes = host_probes(&profile, &config_path);
         let creds = probes
             .iter()

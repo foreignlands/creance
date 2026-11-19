@@ -1,40 +1,43 @@
-# STATE — 2026-11-19T06:40:00Z（night-05 修复会话 · 终稿）
+# STATE — 2026-11-19T09:05:00Z（night-06 修复会话 · 终稿）
 
-## 已完成（R3 全部 5 findings + 修复中发现 3 个新 findings = 8 个，全部修复+实机验证）
+## 已完成（R4 全部 4 findings + 修复中再挖 2 个 = 6 项，全部实机验证；累计 31 findings 全闭环）
 
-- **F-020（S2 逃逸，最高优先）✅ 4a62e79 + 实机复验**：lima `user:` 块（生成用户名+中性 comment；uid 保持宿主镜像——vz virtiofs 无 uid 重映射，这是可写挂载的功能前提，纯数字非身份泄漏）；provision 末尾删 cloud-init sudoers 条目 + `passwd -l` + 清 `~/password`（lima 的 `passwordlessSudo: false` 要求 plain 模式且会把随机密码写进 guest，不可用——provision 清理才是真机制）。实测：`id`=dev39f9e161、`sudo -n` 拒绝（"a password is required" + 密码锁定 L）、sudoers 无条目、直连 000、R3 攻击重放失败。新探针 guest-identity/guest-privilege。
-- **F-019 ✅ 2df45da + 实机复验**：spawn_daemon 活性校验（retire_stale_record：record→socket status，死即清理+respawn）；close_and_remove 断线立即 cut；cmd_stop 走退役链；escape gate 探针要求活 daemon、"VM 无 record" 改按 limactl 实际 Running 状态判定（停机实例不再误报）。实测：kill -9 → 探针翻红（"gate record without a live daemon"）→ up 自愈 → 回绿且直连仍 000。
-- **F-021 ✅ 9b6e4e1**：pidfile 模块（JSON {pid, started}，legacy 裸 pid 兼容；process_start_token 从 running.rs 提升）；tunnel/gate 全接入。伪造 start-time 的 pid 文件对无辜进程零杀伤（实测回归）。
-- **F-022 ✅ 4a62e79 + f544599**：①username 接线（tunnel ssh User=生成名，vsock_user 宿主镜像删除）；②load_or_create 只在 NotFound 生成，读失败拒绝重置身份（目录占位回归测试）；③credentials 探针=profile 目录全量 48-hex 扫描比对已发集合（session token/store auth/gate token），guest 新增 env-hex-tokens 探针。
-- **F-023 ✅ b11b543 + 实机验证**：socket_budget 暴露原始预算（可为负），setup 预检 <10 字节即报"路径过深+移浅目录"（mktemp 深路径实测）。
-- **F-024 ✅ 6452854**：v0.4.0 终稿漏跑 fmt+ci（11 处 fmt + lima 测试断言过期字段）——基线修复；R3 审查者的"CI 基线绿"结论不实（只跑了部分包）。教训：**实机绿≠CI 绿，任何"最后一笔"编辑后必须重跑完整 ci.sh**。
-- **F-025 ✅ b06fb73 + 实机复现**：处女 profile 的 up 误报失败（proxy/ 缺失→gate.pid/log ENOENT，守护实际已 spawn）。pidfile::write 建父目录；spawn_daemon 先 ensure_private_dir。附带：workbench 测试不再假设宿主 17896 端口死寂（limactl 转发 socket 的 CLOSE_WAIT 会把瞬间拒绝变 5s 挂死）。
-- **F-026 ✅ 521b58d + dc569a9 修正 + 实机复验**：孤儿 ssh -R（pid 文件管辖外）按特征收割——**特征必须 HostKeyAlias+`-R port:127.0.0.1:port` 双段**（第一版只匹配 alias，实机立即暴露误杀 limactl shell 的每次 ssh 客户端——lima 同样用该 alias 约定，>500ms 的会话被 watchdog 掐死 rc=255）。closed=wire down 不再依赖单文件存活。
+- **F-028（S2 双守护战争）✅ 4b79cc1 + a274a3b（disown 补丁）+ 实机复验**：run_daemon 绑定 record 身份（run_id 比对）——败者 ≤1 tick 退场且 disown（drop 不删胜者 record、不碰 wire）；watchdog 每 tick still_owner 检查（非属主不动 wire）。**实机重演双抛：daemons=1、隧道 pid 稳定、guest wire `UPUPUPUPUPUPUPUP`（R4 颤动消除）、record=closed 期间 wire 稳定 down（fail-closed）**。第一版修复漏了 GateHandle::drop 的无条件删 record——实机重演抓到"败者退场删胜者 record→胜者误判退役→全灭"级联，disown 语义补上（回归测试覆盖）。
+- **F-029（活性判定）✅ 4f7a10f + 实机复验**：daemon_serving（connect 层证据：connect 成功=活（含冻结形态），仅 ECONNREFUSED/ENOENT=死，其余保守当活）；retire_stale_record 与 close_gates 统一用它（"unreachable" 字符串判定废除）。**实机：SIGSTOP 冻结守护后 `up` 纯 no-op（record 在/守护未换/隧道未动）**。UnixStream::connect_timeout 不存在（那是 TcpStream 的）——unix 用 connect_addr（本地 connect 即时完成，R4 filler 200 连接实证不阻塞）。
+- **F-027（僵尸）✅ c8ae970 + 实机复验**：entry_alive 开头 waitpid(pid,WNOHANG)——调用者自己的已退出子进程当场收割+判死（非子进程 ECHILD 不受影响）；ensure settle 窗口后验证（秒退不当 established）；reap_orphans 每次杀前重读 owned（pgrep 快照后的 ensure 认领不再被误杀）。**实机：kill -9 隧道 → t+1s 重生（34773→34910）+ guest wire UP（R4 实测修复前 +4.5s 无重生）**。
+- **F-030（dial CRLF）✅ 618e48f**：split_addr 拒绝 C0 控制/DEL/空格（R4 M2 的注入形状全数入回归）。
+- **F-031（provision fail-open）✅ cfd5733**：R4 在 F-020 回归留的未验证想法，核实成立——set -e 下 apt/curl 失败=防火墙+特权摘除全不执行（guest 裸奔态）。安装步骤全部 || true，锁定+摘除必达（脚本注释写明契约顺序）。
+- **附带修复（实机暴露的误报）**：credentials 探针的期望集漏了 store.revision（48-hex 版本号，proxy-select 写入 config.json/sources.json）——真实 import+select 流程触发 ESCAPE 误报，单测没覆盖该流程；期望集补齐+测试补 store.revision 路径。
+
+## 实机验证总结（/tmp/creance-n6 全新实例，direct 节点 + managed core）
+
+- 双守护收敛（1 只、无颤动、fail-closed 正确）✅；冻结 no-op ✅；僵尸 1s 重生 ✅
+- escape-test 全绿（含 proxy-path PASS）+ 真实出网 trace（经隧道→core→direct，出口 ip=142.249.39.221）✅
+- 首次 proxy-start 偶发未起（第二次成功，core running: true）——launchd 首次注册时序，低优先记档未立 finding
+- guest 探测注意：`/dev/tcp` 是 bash 特性，`limactl shell sh -c` 下必误报全 down——要用 `bash -c`（本会话自伤一次）
 
 ## 版本
 
-v0.4.1（tag 待打）：night-05 hardening。测试 148 绿（含 6 个新对抗回归）。CHANGELOG/RELEASES/README（containment contract 新增"No privilege path in the guest"条目）已更新。RELEASES 0.5 主题改为 exit-policy evidence chain（0.4 会话既定方向），multi-env 顺延 0.6。
+v0.4.2（tag）：night-06 hardening。31/31 findings 闭环。
 
-## 下一步（按序）
+## 下一步（按序 3 条）
 
-1. **R4 回归审查**（用户贴 OPERATOR-PROMPT 给 GLM）：重点=0.4.1 修复面回归（reap 特征绕过/误杀、pidfile start-time 语义、sudoers 摘除的旁路——reboot 后 cloud-init 重放？、scan_unknown_tokens 的绕过形状）、C3 gate 并发黑盒（现有运行实例可用）。
-2. **0.5 exit-policy 证据链**（无需用户输入）：gate-open 的 grant 从五项自检升级为出口 IP 实测证据（trace→大陆网段库+国家锚定→Checking 窗口内完成）。
-3. 模型驱动逃逸演练（用户接入 GLM 到 VM；ESCAPE-BRIEF.md 就绪）+ Devin 时机（docs/CLOUD-DEVIN.md 就绪）。
+1. **R5 回归审查**（重点：night-06 修复面——run_id 绑定的边角（record 留 Old 值的瞬间）、disown 与 stop 并发、waitpid 判定的调用者相关性、daemon_serving 的 connect_addr 语义、provision || true 后的工具链半装态；E3/C7 未覆盖项）
+2. **0.5 exit-policy 证据链**（gate-open grant 从自检升级为出口 IP 实测证据——trace→大陆网段+锚定比对）
+3. 模型驱动逃逸演练 + Devin 云端介入（文档就绪，时机由用户定）
 
 ## 关键记忆（≤10 条）
 
-1. lima 2.3 的 `passwordlessSudo: false` **要求 plain: true** 且 false 时生成随机密码存 guest `~/password`——非 plain 实例想无 sudo 只能在 provision 里删 sudoers（cloud-init 无条件写 per-user 条目，这是唯一入口）。
-2. vz virtiofs 无 uid 重映射：lima 用户 uid=宿主镜像是可写挂载的功能前提——**身份生成只到 name/comment，uid 不动**（数字非身份泄漏）。
-3. reap/收割类特征匹配必须验证"唯一性假设"：`HostKeyAlias=lima-<inst>` 是 lima 全家共用的约定（limactl shell 每次客户端都带）——命令行特征要用我们自己拼接的独有段。
-4. 测试对"默认端口死寂"的假设会被宿主环境破坏（limactl 持有 17896 CLOSE_WAIT）——测试要么用 port 0 要么显式指向必死端口。
-5. R3 的"CI 基线绿"是不可复述结论——审查者的基线必须=完整 scripts/ci.sh 输出。
-6. 处女路径（init→setup→up 直通）是 QUICKSTART 首条路径，以后每轮验证都要跑一遍（0.4.1 之前从未直通验证过）。
-7. limactl shell 的 mux master 会改名（`ssh: <sock> [mux]`），pgrep -f 匹配不到——判定"是否还有 shell 会话"别依赖 master 匹配。
-8. stop 全链（close_and_remove 退役+reap 清扫+limactl stop+delete）实机通过；F-021 新 pid 文件格式实机工作。
+1. **GateHandle::drop 的无条件副作用是多进程所有权场景的地雷**——drop 语义必须与"我是否仍是属主"绑定（disown 模式）。
+2. **UnixStream 没有 connect_timeout**（TcpStream 才有）；本地 unix connect 即时完成/拒绝，connect_addr 即探针。测试"冻结守护"用 bind-不-accept 的 listener 形态（不是普通文件——非 socket 的 connect errno 不同）。
+3. 僵尸的判定只能靠 waitpid（kill(0) 与 start token 都骗过）；调用者相关性是特性不是缺陷：守护视角收割自己的僵尸子进程。
+4. 实机重演是修复的验收标准——F-028 第一版修复被自己的实机重演打回（disown 级联），单测没抓住。
+5. `limactl shell sh -c` 里用 `/dev/tcp` 必误报（dash 无此特性）——guest 连通性探测一律 `bash -c`。
+6. 探针期望集必须跟产品写入的全部 48-hex 形状走（revision 也是 48-hex 版本号）——单测要覆盖真实 CLI 流程（import+select），不是手工拼 store。
+7. R4 的三件套（僵尸/双抛/瞬时超时）都在"单文件单守护的静默世界"之外——并发与异常进程态是修复面的必查项。
 
 ## 会话统计
 
-- night-05 修复：8/8（019–026），7 个 commit（6452854→dc569a9），每 commit CI 全绿
-- 实机验证：深路径报错、F-020 全链（身份/sudo 拒绝/防火墙/攻击重放）、F-019 kill-自愈链、F-025 复现、F-026 孤儿收割+误杀修正、escape-test 全绿（proxy-path ESCAPE 系无 core 的预期态）
-- 累计：26 findings，全修复
-- 环境：/tmp/creance-n5 已 stop+delete+清理；无宿主残留（daemon/tunnel 均 0）
+- night-06 修复：6/6（027/028/029/030/031+revision 误报），6 commit（4b79cc1→cfd5733+a274a3b），每 commit CI 全绿
+- 累计 31 findings（R1 14 + R2 4 + R3 5 + R4 4 + night 自发现 4），全修复
+- 环境：/tmp/creance-n6 已 stop+delete+清理；daemons=0 tunnels=0

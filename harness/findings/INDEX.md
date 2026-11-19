@@ -3,6 +3,11 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 031 | S4 | provision 的 set -e 使安装失败=部署 fail-open：apt/curl 失败中断脚本，拓扑锁定与特权摘除全部不执行 | R4 F-020 回归残留（night-06 核实） | 已修复（night-06） |
+| 030 | S5 | Egress::dial 目标含 CRLF（尾冒号数字端口形状）可向 HTTP 代理 CONNECT 请求注入任意头部（实测成立）；生产不可达（fetch 走 WHATWG 规范化）——API 加固 | B1/B2 | 已修复（night-06） |
+| 029 | S4 | retire_stale_record `!is_ok()` 把 5s 读超时当守护已死：冻结/慢守护即被 `creance up` 删活 record+切隧道+更替守护+gate 静默跌落 Closed（实机复现）；与 close_gates 的 "unreachable" 字符串判定双标 | night-05 修复面回归（C3） | 已修复（night-06，实机复验冻结 no-op） |
+| 028 | S2 | 双守护战争：spawn 竞态/直接双抛 → 败者凭 record 路径存在永生，Closed rogue 每 500ms 杀隧道 → record=closed 期间 wire 间歇可用（guest 实测 UP/死交替），rogue gate 不可达不可管理，状态永不自愈 | night-05 修复面回归（C3） | 已修复（night-06，实机复验双抛收敛+wire 稳定；含 disown 补丁——败者 drop 曾删胜者 record 致全灭） |
+| 027 | S4 | 未收割 ssh 僵尸被 pidfile 判活（kill(pid,0)+start token 双双被僵尸骗过）→ ensure 永久短路，gate Open 但 wire 死（机制探针+实机端到端双验证）；另记 ensure/reap 竞态窗口 | night-05 修复面回归 | 已修复（night-06，实机复验 kill -9 后 1s 重生） |
 | 026 | S4 | 孤儿 ssh -R 超出 pid 文件管辖即无人能切（closed=wire down 依赖单文件存活；F-025 现场实测遗留） | night-05 实机验证 | 已修复（night-05，实机复验） |
 | 025 | S4 | 处女 profile 的 up 误报失败：proxy/ 目录缺失使 gate.pid/log 写入 ENOENT（守护已 spawn 但 CLI 走回退且回退同败） | night-05 实机验证 | 已修复（night-05） |
 | 024 | S3 | v0.4.0 终稿未过 CI：fmt 11 处红 + lima 测试断言引用已删除的 hostname 字段恒失败（R3"基线绿"不实） | night-05 基线核验 | 已修复（night-05） |

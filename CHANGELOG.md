@@ -4,6 +4,46 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.4.2] — 2026-11-19
+
+### Fixed — night-06: R4 findings 027–030 + provision fail-open (031)
+
+- **F-028 (S2, live-verified)**: the dual-daemon war. A spawn race or a
+  direct `gate-daemon` invocation left a loser alive forever on "a record
+  exists", its Closed-state watchdog murdering the winner's tunnel every
+  500ms — gate=closed with an intermittently live wire, unmanageable by
+  gate-close. The daemon loop now binds to the record's run_id: a
+  renamed-over loser retires within a tick, disowned (its drop no longer
+  deletes the winner's record — the first fix's live replay caught that
+  cascade collapsing the whole gate system), and the watchdog refuses to
+  touch the wire it no longer owns. Replay: two daemons converge to one,
+  the tunnel pid is stable, the guest wire is continuously up under open
+  and continuously down under closed.
+- **F-029**: `creance up` mutinied merely slow daemons — any status
+  failure (SIGSTOP, a 5s read timeout) deleted the live record, cut the
+  tunnel, and spawned a replacement. Liveness evidence is now
+  connect-level only (daemon_serving): a frozen daemon still accepts
+  connects and is left alone; only ECONNREFUSED/ENOENT retires. retire
+  and close_gates share the same errno-based helper (the "unreachable"
+  string match is gone). Replay: a frozen daemon makes `up` a pure no-op.
+- **F-027**: a dead tunnel ssh lingered as the gate daemon's zombie, and
+  zombies pass kill(pid,0) AND keep their start token — ensure()
+  short-circuited on the corpse forever (gate Open, wire dead). The
+  pid-file liveness check now harvests the caller's own exited children
+  via waitpid(WNOHANG); ensure() verifies the ssh survived its settle
+  window; reap re-reads ownership before every kill. Replay: kill -9 the
+  tunnel, it respawns in ~1s and the guest wire comes back.
+- **F-030**: dial targets carrying C0 controls (R4 injected headers into
+  an HTTP proxy's CONNECT line via a trailing numeric port) are refused
+  at split_addr.
+- **F-031**: provision's `set -e` meant a failed apt/mirror aborted the
+  script BEFORE the firewall lockdown and sudoers retirement — shipping
+  the guest with raw network and passwordless sudo. Installs are
+  best-effort now; containment steps always run.
+- credentials probe: the store revision (a 48-hex version marker written
+  by proxy-select) joined the issued set — the live import+select flow
+  tripped the scan as a false escape.
+
 ## [0.4.1] — 2026-11-19
 
 ### Fixed — night-05: R3 findings 019–023 + three found while fixing (024–026)

@@ -19,12 +19,12 @@
 
 | # | 条目 | 入口 | 状态 |
 |---|---|---|---|
-| B1 | SOCKS5 握手违反：错版本、方法循环、分片送字节、成功后立刻 RST | egress.rs `socks5_connect` | 未覆盖 |
-| B2 | CONNECT 应答：非 200 状态体、畸形状态行、慢速头（deadline 行为） | egress.rs `http_connect` | 进行中（慢速头/无 CL 挂起 deadline 正确 EAGAIN；状态行畸形拒绝 ✓；request_bounded 错误文案透传 os error 35 记 FINDING-006 附注；CONNECT 非 200 状态体与 userinfo 注入并入 B4 fetch 侧待测） |
+| B1 | SOCKS5 握手违反：错版本、方法循环、分片送字节、成功后立刻 RST | egress.rs `socks5_connect` | 已覆盖（R4 实测 15 变体 harness/tools/b1-socks5-probe：错版本/未提供方法/0xFF/RST/CONNECT 错版本/失败码/未知 atyp/截断/超期慢应答/EOF 全 fail-closed ✓；慢滴答在 deadline 内合法接受；auth 应答版本字节不查（E——x/net proxy 疑似同样只查 status，平价未定证，无安全影响）；**dial 目标 CRLF 注入 CONNECT 头可行（M2）但生产不可达（request_bounded 走 WHATWG 规范化、check 走常量）→ FINDING-030 S5 API 硬化**） |
+| B2 | CONNECT 应答：非 200 状态体、畸形状态行、慢速头（deadline 行为） | egress.rs `http_connect` | 已覆盖（R4：204 拒绝与 Go `!= StatusOK` 逐字对齐 ✓；畸形状态行/慢速头/无 CL 此前已测；userinfo 凭据经 base64 中和 CRLF 无注入面；非 200 状态体语义并入 B4 结论） |
 | B3 | 响应体欺骗：声明 CL 却少发/多发、EOF 中途断、Content-Length 溢出 u64 | egress.rs `read_body` | 已穷尽 7 变体：短发/超上限/溢出 u64 正确拒绝；垃圾 CL 落 EOF 分支宽容→FINDING-006 S4；max_body+1 界全部有效 |
 | B4 | 重定向：11 跳、scheme 切换、userinfo 注入、八进制/十进制 IP 变体 | creance-proxy/src/fetch.rs | 已穷尽 12 变体：mapped IPv6 绕过→FINDING-007 S2；https 策略全缺（明文订阅/userinfo/跳数 5 vs 2）→FINDING-009 S2；十进制等 IP 变体被 WHATWG 规范化挡住非问题；zone-id/join 拒绝；fragment/userinfo-redirect 案例构造受限（302 相对路径循环） |
-| B5 | DoH 应答：id 匹配但垃圾体、rcode 变体、TTL 0、CNAME 深链 | egress.rs `exchange_dns_once` | 未覆盖 |
-| B6 | deadline 语义：代理在边界时刻才响应、TLS 握手挂起 | egress.rs `dial_deadline/set_deadline` | 未覆盖 |
+| B5 | DoH 应答：id 匹配但垃圾体、rcode 变体、TTL 0、CNAME 深链 | egress.rs `exchange_dns_once` | 已覆盖（R4 源码审查：429/5xx 三次有界重试+退避、其他非 200/unpack 失败/id 不匹配/非 response 全 fail-closed 不重试；question 段不比对——但投毒者需先控代理=已是全权 MITM 无新获权，设计注记非 finding；TTL/CNAME 纯透传无客户端追逐；A6 已覆盖 unpack 面垃圾） |
+| B6 | deadline 语义：代理在边界时刻才响应、TLS 握手挂起 | egress.rs `dial_deadline/set_deadline` | 已覆盖（R4：deadline 在 socket 上、握手各步共享同一 deadline（dial_deadline 先 set_deadline 再 socks/http/tls）→ TLS 挂起/边界响应同超时路径；b1 工具变体 K 实证超期拒绝；J 证明 deadline 内慢滴答合法接受） |
 
 ## C. 状态与一致性
 
@@ -32,9 +32,9 @@
 |---|---|---|---|
 | C1 | store 并发写：两进程同时 import/save（原子性） | creance-proxy/src/store.rs | 已穷尽：**FINDING-014 S4** 丢失更新+非原子 select 实测；write_private 单写原子 ✓；三个入口（CLI/workbench/refresh）均无互斥 |
 | C2 | applied 一致性矩阵：revision/endpoint/selected/chain 全组合枚举 | store.rs `applied/route` | 未覆盖 |
-| C3 | gate 状态机：并发 control 命令、租期到期瞬间 grant、close 后 renew | creance-gate/src/gate.rs | 进行中（Mutex+watchdog 竞态审查干净；grant 无 Checking 前置 vs Go CheckID 绑定→FINDING-008 S4；close 后 renew 正确拒绝；并发黑盒待测——gate crate 依赖三兄弟无法独立构建，受限于源码审查） |
+| C3 | gate 状态机：并发 control 命令、租期到期瞬间 grant、close 后 renew | creance-gate/src/gate.rs | 已覆盖（R4 实机黑盒：hammer 12 轮+确定性双守护——**FINDING-028 S2** 守护战争（败者永生、closed 期间 wire 间歇可用）、**FINDING-029 S4** retire_stale_record 误删活 record、**FINDING-027 S4** 僵尸 ssh 骗过 pidfile；单守护下 closed=wire down、forged renew/grant 拒绝、drain 无残留隧道全部正确；record/config 原子写核验） |
 | C4 | gate 鉴权：token 时序、错 Host/Origin 组合、超大 body、chunked | gate.rs `handle` | 进行中（Host!=cage/Origin 存在/错 token 全 403 ✓；body 64KiB 上限+parse 失败落 0 ✓；bearer 非恒时比较 vs Go ConstantTimeCompare→FINDING-008；双 CL 后值覆盖 S5 记录；chunked body 未测——handle 不解析 TE，read_exact(CL) 恒等） |
-| C5 | sync_proxy_revision：构造"恰好可采纳"的边界变更组合 | gate.rs | 未覆盖 |
+| C5 | sync_proxy_revision：构造"恰好可采纳"的边界变更组合 | gate.rs | 已覆盖（R4 源码审查：采纳路径=revision 变更或 exit_policy 完成+strip_config 相等+only-completed 校验+新 revision 非空，全部与 Go SyncProxyRevision 对齐；注意点：`!revision_changed && !binding_completed` 分支对 exit_policy 变更**静默忽略**（strip_config 剔除 exit_policy → 判等 → Ok 不采纳不报重启）——0.4 无 exit_policy 变更输入面（无 CLI），0.5 evidence chain 落地时须重审此分支） |
 | C6 | running 记录：PID 复用模拟、启动时间戳伪造 | creance-vm/src/running.rs | 已穷尽：kinfo_proc 断言验证正确（proc.h:91-98 union 重叠 p_starttime）；start token 机制健全；伪造 record（pid=1 真实 token）可致 config 变更永久受阻——同 uid 自伤面 S4 记档未单列；C2 applied 矩阵 15 变体全部正确 |
 | C7 | fingerprint 稳定性：归一化等价但字节不同的配置 | config.rs `fingerprint` | 未覆盖 |
 
@@ -63,7 +63,7 @@
 |---|---|---|---|
 | F1 | FD/内存：反复 dial 不 drop、超大 MAX_HEADER 攻击、gate 多实例残留 | 全局 | 进行中（审查）：gate accept loop 每连接 spawn 无上限（serve.rs 有 64 上限、gate 无）——同 uid 自伤面记档；MAX_HEADER/1MiB api/take 界均正确 |
 | F2 | 慢速 DoS：半开连接占满 serve 64 槽位后的行为 | serve.rs | 已穷尽（审查）：loopback-only+本机可信进程架构下自伤面；64 槽 TOCTOU 轻微超限一次性；chunked 检测对 "Transfer-Encoding:chunked"（无空格）绕过但无后续危害（S5 记档）；CSRF Origin 精确匹配/GET 只读/1MiB body 上限全部正确 |
-| F3 | mihomo 控制通道：假 core.sock、慢应答、>1MiB 应答 | creance-proxy/src/service.rs `api` | 未覆盖 |
+| F3 | mihomo 控制通道：假 core.sock、慢应答、>1MiB 应答 | creance-proxy/src/service.rs `api` | 已覆盖（R4 审查：应答上限/读界正确（此前记录）；假 core.sock=同 uid 预占=自伤面（api 喂垃圾→解析错误→上层拒绝，无 fail-open）；慢应答受 api 读界与上层预算约束。真核心在环测试留待 0.5 exit-policy 实测时顺带） |
 
 ## G. 与 Go 原版语义对照（只读 /Users/shenyiyu/Documents/zcode/claude-cage-ref）
 

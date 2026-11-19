@@ -1,0 +1,10 @@
+[package]
+name = "b1-socks5-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+creance-net = { path = "../../../crates/creance-net" }
+
+[workspace]
