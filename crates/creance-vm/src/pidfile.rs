@@ -66,10 +66,26 @@ fn signal_alive(pid: i32) -> bool {
     }
 }
 
+/// Whether `pid` is a child of the caller that has exited without being
+/// waited on; the successful WNOHANG probe also reaps it. Non-children
+/// return ECHILD and read as false, leaving the signal check in charge.
+fn reaped_zombie(pid: i32) -> bool {
+    unsafe { libc::waitpid(pid, std::ptr::null_mut(), libc::WNOHANG) == pid }
+}
+
 /// Whether `entry` names a live process with the recorded start time.
 /// Records without a start token (legacy bare-pid files) keep pid-only
 /// semantics; an unreadable start time never fails against ourselves.
+///
+/// F-027: a zombie — an exited child the caller never waited on — passes
+/// kill(pid,0) AND keeps its recorded start token, so both legacy checks
+/// lie. The waitpid probe above catches and harvests exactly that case:
+/// the gate daemon spawned the tunnel ssh and nobody else reaps it, so a
+/// dead tunnel must fall through to "not alive" and let ensure() respawn.
 pub fn entry_alive(entry: &Entry) -> bool {
+    if reaped_zombie(entry.pid) {
+        return false;
+    }
     if !signal_alive(entry.pid) {
         return false;
     }
@@ -161,6 +177,24 @@ mod tests {
             .arg("30")
             .spawn()
             .expect("sleep available")
+    }
+
+    #[test]
+    fn zombie_children_read_as_dead_and_get_reaped() {
+        // F-027: an exited-but-unwaited child passes kill(pid,0) and keeps
+        // its recorded start token — only the waitpid probe catches it,
+        // which is what lets the gate daemon's watchdog respawn a dead
+        // tunnel instead of short-circuiting on a corpse.
+        let file = tmp_file("zomb");
+        let mut child = spawn_sleep();
+        write(&file, child.id() as i32).unwrap();
+        child.kill().unwrap();
+        // No wait yet: the kernel holds the exit status (zombie).
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        assert!(!alive(&file), "zombie must not read as alive");
+        let _ = child.wait();
+        assert!(!alive(&file), "reaped process stays dead");
+        std::fs::remove_file(&file).unwrap();
     }
 
     #[test]

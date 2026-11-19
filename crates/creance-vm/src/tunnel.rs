@@ -84,6 +84,13 @@ pub fn ensure(profile: &str, instance: &str, guest_port: u16) -> Result<(), Stri
     pidfile::write(&pid_file, child.id() as i32)?;
     // Give the forward a moment to bind before callers probe it.
     std::thread::sleep(std::time::Duration::from_millis(500));
+    // F-027: an ssh that died inside the settle window (ExitOnForward-
+    // Failure against a still-bound forward, a failed auth) must not read
+    // as established — the zombie-aware liveness check makes the next
+    // watchdog tick respawn instead of short-circuiting on a corpse.
+    if !pidfile::alive(&pid_file) {
+        return Err("tunnel ssh exited immediately".to_owned());
+    }
     Ok(())
 }
 
@@ -112,11 +119,16 @@ pub fn reap_orphans(profile: &str, instance: &str, port: u16) {
     else {
         return;
     };
-    let owned = pidfile::load(&pidfile::proxy_pid_file(profile, "tunnel.pid"))
-        .map(|entry| entry.pid)
-        .unwrap_or(-1);
+    let pid_file = pidfile::proxy_pid_file(profile, "tunnel.pid");
     for pid in String::from_utf8_lossy(&out.stdout).split_whitespace() {
         if let Ok(pid) = pid.parse::<i32>() {
+            // Re-read before every kill (F-027): an ensure() may have
+            // claimed this pid between the pgrep snapshot and now, and the
+            // snapshot's owned value would have us shoot our own fresh
+            // tunnel in that race window.
+            let owned = pidfile::load(&pid_file)
+                .map(|entry| entry.pid)
+                .unwrap_or(-1);
             if pid != owned && pid > 1 {
                 unsafe { libc::kill(pid, libc::SIGTERM) };
             }
