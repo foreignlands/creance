@@ -614,6 +614,14 @@ fn cmd_up() -> i32 {
             }
         }
         let _ = running::record_running(&instance_dir, &cfg);
+        // F-033/R6-H4: `up` is the moment the current config takes effect —
+        // refresh the fingerprint stamp so a routine proxy-select between
+        // runs doesn't leave the escape probe permanently red. Real drift
+        // (config changed while this VM's record is live) is still caught
+        // by check_running at the top of `up`.
+        if let Err(e) = creance::escape::refresh_fingerprint_stamp(&profile, &cfg) {
+            eprintln!("warning: cannot refresh fingerprint stamp: {e}");
+        }
         println!("Environment is up. The guest's only route out is the managed core (`creance escape-test` proves it).");
     }
     code

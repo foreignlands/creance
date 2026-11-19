@@ -198,6 +198,15 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
     out
 }
 
+/// Re-pins the setup fingerprint stamp (F-033/R6-H4): `up` is the moment
+/// the current config takes effect, so the stamp follows it — a routine
+/// proxy-select between runs must not leave the probe permanently red.
+pub fn refresh_fingerprint_stamp(profile: &str, cfg: &config::Config) -> Result<(), String> {
+    let stamp = paths::join(&vm::state_dir(profile), "fingerprint.txt");
+    std::fs::create_dir_all(vm::state_dir(profile)).map_err(|e| e.to_string())?;
+    std::fs::write(&stamp, cfg.fingerprint()).map_err(|e| e.to_string())
+}
+
 /// Whether the profile's Lima instance is actually running (not merely
 /// created) — `limactl list` is the source of truth, absent limactl means
 /// not running.
@@ -585,6 +594,33 @@ mod tests {
             Outcome::Contained,
             "subscription content is out of the probe's scope"
         );
+        std::fs::remove_dir_all(&profile).unwrap();
+    }
+
+    #[test]
+    fn up_refreshes_a_stale_stamp() {
+        // R6-H4: a routine proxy-select between runs changed the config
+        // fingerprint (proxy_revision is part of it) — the next `up` is
+        // the moment that config takes effect, so the stamp follows.
+        let (profile, config_path) = fresh_profile();
+        let cfg = creance_vm::config::load(&config_path).unwrap();
+        let state = vm::state_dir(&profile);
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::write(paths::join(&state, "fingerprint.txt"), "stale-fingerprint").unwrap();
+        let probes = host_probes(&profile, &config_path);
+        let probe = probes
+            .iter()
+            .find(|p| p.id == "fingerprint-consistent")
+            .unwrap();
+        assert!(matches!(probe.outcome, Outcome::Escaped(_)));
+
+        refresh_fingerprint_stamp(&profile, &cfg).unwrap();
+        let probes = host_probes(&profile, &config_path);
+        let probe = probes
+            .iter()
+            .find(|p| p.id == "fingerprint-consistent")
+            .unwrap();
+        assert_eq!(probe.outcome, Outcome::Contained);
         std::fs::remove_dir_all(&profile).unwrap();
     }
 
