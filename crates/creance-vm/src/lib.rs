@@ -12,6 +12,7 @@ pub mod guestprofile;
 pub mod host;
 pub mod lima;
 pub mod paths;
+pub mod pidfile;
 pub mod private;
 pub mod running;
 pub mod state;

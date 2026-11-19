@@ -1,4 +1,3 @@
-#![allow(unsafe_code)] // libc::kill pid liveness — audited, pid from our own pid file
 //! The cage gate: the host-side control service guarding every environment's
 //! external networking.
 //!
@@ -676,21 +675,15 @@ pub fn spawn_daemon(
     instance_dir: &str,
     proxy_port: u16,
 ) -> Result<(), String> {
-    let pid_file = creance_vm::paths::join(&creance_vm::proxy_dir(profile_dir), "gate.pid");
+    let pid_file = creance_vm::pidfile::proxy_pid_file(profile_dir, "gate.pid");
     // A published record means a live daemon owns this gate.
     if Path::new(&creance_vm::paths::join(instance_dir, "cage-gate.json")).exists() {
         return Ok(());
     }
-    if let Some(pid) = std::fs::read_to_string(&pid_file)
-        .ok()
-        .and_then(|s| s.trim().parse::<i32>().ok())
-    {
-        // EPERM means alive under another user — still alive.
-        let alive = unsafe { libc::kill(pid, 0) == 0 }
-            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
-        if alive {
-            return Ok(());
-        }
+    // FINDING-021: the pid file proves liveness only with its start-time
+    // token — a reused PID must never pass for our daemon.
+    if creance_vm::pidfile::alive(&pid_file) {
+        return Ok(());
     }
     let exe = std::env::current_exe()
         .map_err(|e| e.to_string())?
@@ -718,7 +711,7 @@ pub fn spawn_daemon(
         })
         .spawn()
         .map_err(|e| format!("cannot spawn gate daemon: {e}"))?;
-    std::fs::write(&pid_file, child.id().to_string()).map_err(|e| e.to_string())?;
+    creance_vm::pidfile::write(&pid_file, child.id() as i32)?;
     Ok(())
 }
 

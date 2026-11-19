@@ -8,19 +8,17 @@
 //! the core's loopback listener. Everything else in the guest is firewalled
 //! off (see the provision script), making this tunnel the only wire out.
 
-#![allow(unsafe_code)] // libc::kill signal delivery — audited, pid from our own pid file
-
 use crate::paths;
+use crate::pidfile;
 use std::process::{Command, Stdio};
 
-/// Brings the tunnel up for a running instance (idempotent): alive pid →
-/// probe → reuse; otherwise spawn a fresh `ssh -R`.
+/// Brings the tunnel up for a running instance (idempotent): a pid file
+/// proving a live ssh (start time included, FINDING-021) → reuse; otherwise
+/// spawn a fresh `ssh -R`.
 pub fn ensure(profile: &str, instance: &str, guest_port: u16) -> Result<(), String> {
-    let pid_file = tunnel_pid_file(profile);
-    if let Some(pid) = read_pid(&pid_file) {
-        if alive(pid) {
-            return Ok(());
-        }
+    let pid_file = pidfile::proxy_pid_file(profile, "tunnel.pid");
+    if pidfile::alive(&pid_file) {
+        return Ok(());
     }
     let home = crate::vm::lima_home(profile);
     let out = Command::new("limactl")
@@ -77,41 +75,17 @@ pub fn ensure(profile: &str, instance: &str, guest_port: u16) -> Result<(), Stri
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| format!("cannot spawn ssh tunnel: {e}"))?;
-    std::fs::write(&pid_file, child.id().to_string()).map_err(|e| e.to_string())?;
+    pidfile::write(&pid_file, child.id() as i32)?;
     // Give the forward a moment to bind before callers probe it.
     std::thread::sleep(std::time::Duration::from_millis(500));
     Ok(())
 }
 
-/// Tears the tunnel down (VM stop companion).
+/// Tears the tunnel down (VM stop companion). Never signals a process the
+/// pid file cannot prove is ours (start time included, FINDING-021).
 pub fn stop(profile: &str) -> Result<(), String> {
-    let pid_file = tunnel_pid_file(profile);
-    if let Some(pid) = read_pid(&pid_file) {
-        if alive(pid) {
-            unsafe {
-                libc::kill(pid, libc::SIGTERM);
-            }
-        }
-    }
-    let _ = std::fs::remove_file(&pid_file);
+    pidfile::stop(&pidfile::proxy_pid_file(profile, "tunnel.pid"));
     Ok(())
-}
-
-fn read_pid(pid_file: &str) -> Option<i32> {
-    std::fs::read_to_string(pid_file)
-        .ok()
-        .and_then(|s| s.trim().parse::<i32>().ok())
-}
-
-fn tunnel_pid_file(profile: &str) -> String {
-    paths::join(&crate::proxy_dir(profile), "tunnel.pid")
-}
-
-fn alive(pid: i32) -> bool {
-    if pid <= 0 {
-        return false;
-    }
-    unsafe { libc::kill(pid, 0) == 0 }
 }
 
 /// The guest user lima provisions (host user name; lima mirrors it).

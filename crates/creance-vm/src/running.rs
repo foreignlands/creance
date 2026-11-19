@@ -23,41 +23,9 @@ struct RunningProfile {
 }
 
 /// The recorded process's start-time token: stable across a process's life,
-/// different for every launch (even of a reused PID).
-#[cfg(target_os = "macos")]
-fn process_start_token(pid: i32) -> String {
-    // kinfo_proc's first field is a union whose overlap member is the
-    // process start timeval (tv_sec: i64, tv_usec: i32 on macOS), so the
-    // raw sysctl buffer starts with exactly the two values we need.
-    unsafe {
-        let mut mib = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_PID, pid];
-        let mut buf = [0u8; 1024];
-        let mut size = buf.len();
-        if libc::sysctl(
-            mib.as_mut_ptr(),
-            4,
-            buf.as_mut_ptr() as *mut libc::c_void,
-            &mut size,
-            std::ptr::null_mut(),
-            0,
-        ) != 0
-        {
-            return String::new();
-        }
-        let sec = i64::from_ne_bytes(buf[0..8].try_into().expect("8 bytes"));
-        let usec = i32::from_ne_bytes(buf[8..12].try_into().expect("4 bytes"));
-        // Epoch zero (or a zero-sized answer) means the lookup found nothing.
-        if sec == 0 || size < 12 {
-            return String::new();
-        }
-        format!("{sec} {usec}")
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn process_start_token(_pid: i32) -> String {
-    String::new()
-}
+/// different for every launch (even of a reused PID). Shared with the
+/// pid-file helpers (FINDING-021 moved it to `pidfile`).
+use crate::pidfile::process_start_token;
 
 fn process_alive(pid: i32) -> bool {
     if pid <= 0 {
