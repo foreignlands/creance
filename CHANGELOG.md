@@ -4,6 +4,30 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.5.3] — 2026-11-20
+
+### Fixed — night-09: R7 findings 040–043
+
+- **F-041**: night-08's idempotent sync path stripped exit_policy from
+  its comparison, so an anchor change with an unmoved revision kept an
+  OPEN gate running on evidence judged against the OLD anchor. The
+  anchor is part of "unchanged" now; any drift demands a restart.
+- **F-040**: the fingerprint stamp hashed the whole config, so any
+  routine host-side operation (a select rotating the revision, an
+  anchor tune) left the escape probe permanently red. The stamp now
+  records the guest's promise only (timezone, locale, browser
+  language); the full fingerprint still guards the up-time running
+  lock.
+- **F-042**: the core's control socket is enforced by reconciliation,
+  not by its secret — live verification showed mihomo's unix controller
+  ignores the configured secret entirely (file permissions ARE its
+  auth). The secret stays for any TCP path, and gate-open now refuses
+  to draw exit evidence from a core whose runtime diverged from its
+  generated config (readiness checks mode among everything else).
+- **F-043**: selecting a node revokes the gates at once (both CLI and
+  workbench paths), matching Go's synchronous applyProxy revocation —
+  no more open-gate-with-declared-different-exit window.
+
 ## [0.5.2] — 2026-11-20
 
 ### Fixed — night-08: R6 findings 036–039

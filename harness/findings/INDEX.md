@@ -3,7 +3,10 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
-| 040 | S4 | F-033 回归：setup 指纹戳覆盖全 config（含 proxy/revision/exit_policy），任何合法 select/重启使 escape-test 恒报 Escaped（探针 H4 实证前提）；record 源吸收漂移、戳源永久报警，双源冲突 | R6-B3 | 待修复 |
+| 043 | S5 | select_and_apply 不撤销 gate（Go applyProxy 每次 select/restart/route 同步 closeProxyGate——proxy.go:334）：select→proxy-start 窗口内 Open gate+声明新节点+wire 旧节点共存；applied() 对运行核心失明（F-036），与 F-041 组合成弱缝 | R7-B3/G4 | 已修复（night-09：select 即撤 gate 两入口） |
+| 042 | S4 | mihomo external-controller-unix 零认证（Go 同形非漂移）：同 uid 无凭证 PATCH mode=direct / SAFE_PATHS 内 yaml 重载 MATCH,DIRECT 全部 HTTP 204 成立，出口证据预言机随核心运行时被劫持（宿主出口替代节点失败），config.yaml/sources.json 零痕迹；guest 不可达（0700 目录） | R7-B1 | 已修复（night-09：secret+readiness 对账+gate-open 前核心对账；unix 免鉴为 mihomo 设计） |
+| 041 | S4 | night-08 回归：proxy-revision 幂等 Unchanged 路径的 strip_config 剥掉 exit_policy——锚点漂移（换 ip/mode 迁移）+revision 不动 → 200 且 gate 保持 Open，无重检查无重启要求；renew 可无限续期无硬顶（探针 m1-m5 实证；附 created_at=0+时钟≤epoch fail-open 逻辑读） | R7-A2/A3 | 已修复（night-09：Unchanged 含锚点比对） |
+| 040 | S4 | F-033 回归：setup 指纹戳覆盖全 config（含 proxy/revision/exit_policy），任何合法 select/重启使 escape-test 恒报 Escaped（探针 H4 实证前提）；record 源吸收漂移、戳源永久报警，双源冲突 | R6-B3 | 已修复（night-09：戳改 guest 承诺面指纹） |
 | 039 | S5 | 幽灵 workspace 清单 crates/Cargo.toml（git tracked，ff286a6 残尸，0.2.0/your-org）阻断外部 path-dep：继承绑定旧版+crates/crates/ 双倍路径（实测 build error） | R6-C 工具链 | 已修复（night-08：幽灵清单删除，path-dep 实证通过） |
 | 038 | S4 | 出口证据=单目的地采样被泛化为全流量锚定：出口节点差异化路由可洗白大陆出口（TLS 防 MITM/核心单 MATCH/parse_trace 15 项矩阵均已验证封死，唯一开放路径在节点以外） | R6-A1 | 已修复（night-08：单目的地边界如实声明+审计 exit_sample 标注） |
 | 037 | S2 | gate 认证 fail-open：record 不可读→token 退化空串，空 Bearer 过恒时比较；无凭证进程 check→grant→Open 全链成立（探针实证）；Go 用启动时内存 token 恒拒——语义漂移。边界=同 uid+close 瞬态窗口，guest 不可达 | R6-A4/A3 | 已修复（night-08：token 内存化 fail-closed，r6 探针实证全拒） |

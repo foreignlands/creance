@@ -1,0 +1,26 @@
+[package]
+name = "r7-stamp-matrix"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# R7 探针：R6-H4/F-033 补丁（eab85aa）回归——指纹戳刷新与 check_running 的顺序语义。
+# 走真实 crate（record_running / check_running / refresh_fingerprint_stamp /
+# escape::host_probes 的 fingerprint-consistent 探针本体），不做逻辑复刻。
+# 假设：
+#   S1 运行记录活 + config 已改 → check_running 拒（up 顶部拦截），戳不被刷新
+#      ——漂移不被合法 up 洗白。
+#   S2 记录死/无记录 → check_running 过 → refresh 后戳=新 config 指纹
+#      ——合法 up 路径戳恒刷新。
+#   S3 fingerprint-consistent 探针红绿矩阵：缺戳 NotEnforced / 匹配 Contained /
+#      漂移 Escaped（真实 host_probes 输出）。
+#   S4 记录源 vs 戳源双源行为：040 场景（select 后不 up 就跑探针）应为红——
+#      证实 040 的"戳源永久报警"描述仍然成立（该 finding 已在案，不在本轮修复）。
+[dependencies]
+creance = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance" }
+creance-gate = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-gate" }
+creance-proxy = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-proxy" }
+creance-vm = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-vm" }
+serde_json = "1"
+
+[workspace]

@@ -1,0 +1,27 @@
+[package]
+name = "r7-sync-matrix"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# R7 探针：night-08 修复面回归（基线 281899c / v0.5.2，完整 ci.sh RC=0）。
+# 走真实 crate（path-dep 直连仓库，F-039 修复后可用；教训：复刻对修复复验无效）。
+# 假设：
+#   H1 sync 幂等 Unchanged 路径对 exit_policy 锚点变化失明（strip_config 剥掉
+#      exit_policy）：gate Open + 锚点漂移 + revision 不动 → proxy-revision
+#      返回 Unchanged，gate 保持 Open——night-08 之前每次 sync 无条件 close
+#      反而挡住此路，修复是否引入回归？
+#   H2 对照组：同一锚点变化 + revision 变化 → Adopted 路径的 only_completed
+#      应拒（409 → close）。
+#   H3 grant 绑定时间源边界（可达侧）：created_at 未来/过期/为 0/缺字段。
+#      不可达侧（系统时钟 ≤ epoch 使 now=0）只能逻辑推演，另行记录。
+#   H4 record token 字段被同 uid 外部改写：客户端 403 死锁是否自愈
+#      （up 的 spawn_daemon 去重是否放行死锁守护）。
+[dependencies]
+creance = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance" }
+creance-gate = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-gate" }
+creance-proxy = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-proxy" }
+creance-vm = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-vm" }
+serde_json = "1"
+
+[workspace]

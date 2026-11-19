@@ -31,10 +31,10 @@
 | # | 条目 | 入口 | 状态 |
 |---|---|---|---|
 | C1 | store 并发写：两进程同时 import/save（原子性） | creance-proxy/src/store.rs | 已穷尽：**FINDING-014 S4** 丢失更新+非原子 select 实测；write_private 单写原子 ✓；三个入口（CLI/workbench/refresh）均无互斥 |
-| C2 | applied 一致性矩阵：revision/endpoint/selected/chain 全组合枚举 | store.rs `applied/route` | 未覆盖 |
+| C2 | applied 一致性矩阵：revision/endpoint/selected/chain 全组合枚举 | store.rs `applied/route` | 已覆盖（R5：15 变体全部正确，见 C6 行尾记录） |
 | C3 | gate 状态机：并发 control 命令、租期到期瞬间 grant、close 后 renew | creance-gate/src/gate.rs | 已覆盖（R4 实机黑盒：hammer 12 轮+确定性双守护——**FINDING-028 S2** 守护战争（败者永生、closed 期间 wire 间歇可用）、**FINDING-029 S4** retire_stale_record 误删活 record、**FINDING-027 S4** 僵尸 ssh 骗过 pidfile；单守护下 closed=wire down、forged renew/grant 拒绝、drain 无残留隧道全部正确；record/config 原子写核验）。**R5 night-06 修复面回归**：run_id 绑定边角（rename 原子无撕裂；`Err=>continue` 持续损坏 record → 守护永生+control 全 403 砖化+watchdog 持线不动，同 uid 自伤面记档，CLI touch 即愈）；disown×stop 并发收敛 ✓；双 up 收敛 ✓；still_owner 消失拍 → 不动 wire ✓；**spawn_daemon 去重命中垂死守护 → FINDING-035 S4**（确定性探针）；r4 对照证 F-028 disown 机制在损坏 record 重生面成立 ✓；daemon_serving 非 socket 路径 ENOTSOCK→保守当活（方向正确，自伤面记档） |
-| C4 | gate 鉴权：token 时序、错 Host/Origin 组合、超大 body、chunked | gate.rs `handle` | 进行中（Host!=cage/Origin 存在/错 token 全 403 ✓；body 64KiB 上限+parse 失败落 0 ✓；bearer 非恒时比较 vs Go ConstantTimeCompare→FINDING-008；双 CL 后值覆盖 S5 记录；chunked body 未测——handle 不解析 TE，read_exact(CL) 恒等） |
-| C5 | sync_proxy_revision：构造"恰好可采纳"的边界变更组合 | gate.rs | 已覆盖（R4 源码审查：采纳路径=revision 变更或 exit_policy 完成+strip_config 相等+only-completed 校验+新 revision 非空，全部与 Go SyncProxyRevision 对齐；注意点：`!revision_changed && !binding_completed` 分支对 exit_policy 变更**静默忽略**（strip_config 剔除 exit_policy → 判等 → Ok 不采纳不报重启）——0.4 无 exit_policy 变更输入面（无 CLI），0.5 evidence chain 落地时须重审此分支） |
+| C4 | gate 鉴权：token 时序、错 Host/Origin 组合、超大 body、chunked | gate.rs `handle` | 已覆盖（Host!=cage/Origin 存在/错 token 全 403 ✓；body 64KiB 上限+parse 失败落 0 ✓；bearer 非恒时比较→FINDING-008；双 CL 后值覆盖 S5 记录；chunked body 不解析 TE，read_exact(CL) 恒等；**R7**：token 内存化回归——record 外部改写→403 死锁无自愈（up 放行，stop 唯愈）判非 finding 被同 uid config 改写支配；grant 时间矩阵 t1-t7 全拒（r7-sync-matrix）；record 改写+TOCTOU 案见 findings/041 已排除节） |
+| C5 | sync_proxy_revision：构造"恰好可采纳"的边界变更组合 | gate.rs | 已覆盖（R4 源码审查+R7 重审兑现：采纳路径=revision 变更或 exit_policy 完成+strip_config 相等+only-completed 校验+新 revision 非空，与 Go SyncProxyRevision 对齐；**R4 预警的 Unchanged 分支 exit_policy 静默忽略在 0.5 输入面下已实证成洞 → FINDING-041 S4**（r7-sync-matrix m1-m5）；幂等保护与 select 必关的语义分叉 → FINDING-043） |
 | C6 | running 记录：PID 复用模拟、启动时间戳伪造 | creance-vm/src/running.rs | 已穷尽：kinfo_proc 断言验证正确（proc.h:91-98 union 重叠 p_starttime）；start token 机制健全；伪造 record（pid=1 真实 token）可致 config 变更永久受阻——同 uid 自伤面 S4 记档未单列；C2 applied 矩阵 15 变体全部正确 |
 | C7 | fingerprint 稳定性：归一化等价但字节不同的配置 | config.rs `fingerprint` | 已穷尽（R5）：结构体序列化 sha256（字段序固定 → 文件字节序/空白无关）；exit_policy 先 normalized 再哈希 → 等价策略同指纹 ✓；proxy_revision 有意入指纹（select/refresh 即漂移，由 running.rs 拦 `up`，保守方向）。**fingerprint-consistent 探针死代码 → FINDING-033 S5**（fingerprint.txt 全仓库无写入者，恒 NotEnforced） |
 
@@ -63,7 +63,7 @@
 |---|---|---|---|
 | F1 | FD/内存：反复 dial 不 drop、超大 MAX_HEADER 攻击、gate 多实例残留 | 全局 | 进行中（审查）：gate accept loop 每连接 spawn 无上限（serve.rs 有 64 上限、gate 无）——同 uid 自伤面记档；MAX_HEADER/1MiB api/take 界均正确 |
 | F2 | 慢速 DoS：半开连接占满 serve 64 槽位后的行为 | serve.rs | 已穷尽（审查）：loopback-only+本机可信进程架构下自伤面；64 槽 TOCTOU 轻微超限一次性；chunked 检测对 "Transfer-Encoding:chunked"（无空格）绕过但无后续危害（S5 记档）；CSRF Origin 精确匹配/GET 只读/1MiB body 上限全部正确 |
-| F3 | mihomo 控制通道：假 core.sock、慢应答、>1MiB 应答 | creance-proxy/src/service.rs `api` | 已覆盖（R4 审查：应答上限/读界正确（此前记录）；假 core.sock=同 uid 预占=自伤面（api 喂垃圾→解析错误→上层拒绝，无 fail-open）；慢应答受 api 读界与上层预算约束。真核心在环测试留待 0.5 exit-policy 实测时顺带） |
+| F3 | mihomo 控制通道：假 core.sock、慢应答、>1MiB 应答 | creance-proxy/src/service.rs `api` | 已覆盖（R4 审查：应答上限/读界正确；假 core.sock=同 uid 预占=自伤面，无 fail-open；慢应答受读界与预算约束。**R7 真核心在环完成（R6 未验证想法兑现）→ FINDING-042 S4**：external-controller-unix 零认证，PATCH mode=direct / SAFE_PATHS 内 yaml 重载实测成立，出口证据预言机被无痕劫持；guest 不可达；Go 同形非漂移） |
 
 ## G. 与 Go 原版语义对照（只读 /Users/shenyiyu/Documents/zcode/claude-cage-ref）
 
@@ -71,7 +71,7 @@
 |---|---|---|
 | G1 | egress.go vs egress.rs 逐分支 diff（错误文案、时序） | 已穷尽：socks5/CONNECT/TLS/DNS/deadline 分支已对照；已知差异集合=F-006（响应宽容 5 类）、F-013（凭据截断）、F-004（URL 校验 3 处）；no-fallback 文案一致 |
 | G2 | import.go vs import.rs 拒绝矩阵逐条 | 已穷尽：拒绝矩阵/optionKey/ssh/hysteria2/wsHeaders/unsafeOption 逐行一致；差异=F-002/003（数字）+F-012（非字符串键）|
-| G3 | gate*.go vs gate.rs 状态迁移与租期 | 已穷尽：Grant 五重判定（Checking/epoch/CheckID/时间戳/Authorizes 签名）vs Rust 单查 authorizes → F-008；lease 90s 值一致；fault 条件一致；Rust 缺 report.RunID/Configuration 绑定 |
-| G4 | store.go vs store.rs Route/Import 语义 | 进行中：route() 的 chain/环/缺失判定一致（C2 矩阵 15 变体全对）；Import 的 refresh 保留语义有 repo 测试；Go store.go 细节未逐行 |
+| G3 | gate*.go vs gate.rs 状态迁移与租期 | 已穷尽：Grant 五重判定（Checking/epoch/CheckID/时间戳/Authorizes 签名）vs Rust 单查 authorizes → F-008；lease 90s 值一致；fault 条件一致；RunID 绑定 night-08 已落 ✓；**Configuration 绑定+Renew 重授权+24h 硬顶+预铸下界仍缺 → R7 设计审查文档 harness/go-authz-alignment.md（0.6 对齐面，含三维绑定落点与 F-041/042 交互）** |
+| G4 | store.go vs store.rs Route/Import 语义 | 已覆盖：route() 的 chain/环/缺失判定一致（C2 矩阵 15 变体全对）；Import 的 refresh 保留语义有 repo 测试；**R7 select 语义对照：Go applyProxy 每次 select/restart/route 同步 closeProxyGate（proxy.go:334），Rust select_and_apply 不触碰 gate → FINDING-043 S5**；Go store.go 其余（Import 校验/unsafeOption/Runtime 生成）逐行结论与 G2/F3 一致 |
 
 > 状态由审查员更新（本文件是 harness 中唯一允许审查员写的非 findings 文件）。
