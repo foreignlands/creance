@@ -191,13 +191,29 @@ pub struct GateHandle {
     gate: Arc<Gate>,
     pub record: GateRecord,
     instance_dir: String,
+    /// Cleared by `disown`: a handle renamed over by a successor must not
+    /// delete the successor's record on drop (F-028's last twist — the
+    /// loser's parting shot used to erase the winner, cascading into a
+    /// full gate collapse).
+    owns_record: AtomicBool,
+}
+
+impl GateHandle {
+    /// Declares the published record no longer ours (a successor renamed
+    /// over it): drop will still stop this gate's server and socket, but
+    /// leaves the winner's record — and with it the wire — untouched.
+    pub fn disown(&self) {
+        self.owns_record.store(false, Ordering::Relaxed);
+    }
 }
 
 impl Drop for GateHandle {
     fn drop(&mut self) {
         self.gate.shutdown();
-        let record = Path::new(&self.instance_dir).join("cage-gate.json");
-        let _ = std::fs::remove_file(record);
+        if self.owns_record.load(Ordering::Relaxed) {
+            let record = Path::new(&self.instance_dir).join("cage-gate.json");
+            let _ = std::fs::remove_file(record);
+        }
     }
 }
 
@@ -364,6 +380,7 @@ impl Gate {
             gate,
             record,
             instance_dir: instance_dir.to_owned(),
+            owns_record: AtomicBool::new(true),
         })
     }
 
@@ -859,6 +876,11 @@ pub fn run_daemon(
         }
     }
     handle.gate.shutdown();
+    if replaced {
+        // Leave the winner's record (and wire) standing: dropping a
+        // disowned handle stops only this gate's own server and socket.
+        handle.disown();
+    }
     drop(handle);
     if replaced {
         return 0;
@@ -1270,6 +1292,42 @@ mod tests {
         drop(listener);
         assert!(!daemon_serving(&instance_dir), "refused socket is dead");
         fs::remove_dir_all(&frozen_dir).unwrap();
+        fs::remove_dir_all(&profile).unwrap();
+    }
+
+    #[test]
+    fn disowned_handle_drop_leaves_the_successors_record() {
+        // F-028's last twist: a renamed-over loser dropping its handle used
+        // to delete whatever record was live — the winner's — cascading
+        // into a full gate collapse (verified on the live machine).
+        let (profile, config_path) = prepare_profile();
+        let instance_dir = creance_vm::paths::join(&profile, "lima/test-vm");
+        fs::create_dir_all(&instance_dir).unwrap();
+        let record_path = creance_vm::paths::join(&instance_dir, "cage-gate.json");
+        let loser = Gate::start(
+            &instance_dir,
+            &config_path,
+            &profile,
+            "gate-test-inst",
+            17896,
+        )
+        .unwrap();
+
+        // A successor renames over the record; the loser notices and disowns.
+        let successor = serde_json::json!({
+            "socket": loser.record.socket,
+            "token": loser.record.token,
+            "run_id": creance_proxy::token()[..32].to_owned(),
+        });
+        fs::write(&record_path, serde_json::to_vec(&successor).unwrap()).unwrap();
+        assert!(!loser.gate.still_owner());
+        loser.disown();
+        drop(loser);
+
+        assert!(
+            Path::new(&record_path).exists(),
+            "a disowned drop must not delete the winner's record"
+        );
         fs::remove_dir_all(&profile).unwrap();
     }
 
