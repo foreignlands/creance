@@ -4,6 +4,38 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.5.0] — 2026-11-19
+
+### Added — exit-policy evidence chain (ROADMAP 0.5)
+
+- **`creance gate-open` now grants on evidence, not assertion** (0.4's
+  grant carried five self-declared checks, labelled as such): the exit
+  is observed live through the configured proxy (Cloudflare trace:
+  connecting IP + country), evaluated against the exit-policy anchor —
+  static IP equality, dynamic country match, or `any` — under the
+  mandatory mainland-IPv4 deny list (6,204 prefixes). Only a Passed
+  verdict opens the wire; Failed/Unknown stay closed with the reason and
+  the observed exit printed.
+- The observation rides the grant as inert evidence keys (`exit_ip`,
+  `exit_country`) — part of the record for audit.
+- Honesty boundaries, enforced by refusal: region/city-scoped anchors
+  evaluate Unknown (the trace source carries no honest region data —
+  `colo` is a Cloudflare datacenter, not the exit's region) and stay
+  closed until a GeoIP source lands; an unbound default policy refuses
+  with binding guidance; a dead proxy means no evidence, never a pass.
+- Trust assumption (documented in `evidence.rs`): the observation trusts
+  the proxy path to reach 1.1.1.1 — the same trust the wire rests on.
+  A second independent trace source for cross-checking is future work.
+- `gate::open` takes the caller-supplied checks (the CLI assembles
+  structural self-checks + the evidence verdict); the daemon-side
+  REQUIRED-set enforcement is unchanged.
+
+### Changed
+
+- Default (unbound) exit policies no longer open: bind a scope in
+  config.json first (QUICKSTART has the three recipes). This replaces
+  0.4's open-by-default behavior — the gate is now evidence-first.
+
 ## [0.4.2] — 2026-11-19
 
 ### Fixed — night-06: R4 findings 027–030 + provision fail-open (031)

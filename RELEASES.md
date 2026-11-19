@@ -12,11 +12,10 @@ update CHANGELOG, `git tag -s vX.Y.Z`.
 | 0.4 | Guest profiles + per-session credentials | **DONE 2026-11-19**: gate-daemon owns the wire; generated identity; session-only secrets, hunted by probes |
 | 0.4.1 | night-05 hardening (R3 findings 019–026) | **DONE 2026-11-19**: guest privilege path removed (S2 escape closed, live-verified); gate records prove liveness; pid files start-time bound; orphan tunnels reaped |
 | 0.4.2 | night-06 hardening (R4 findings 027–031) | **DONE 2026-11-19**: daemon war ended (run_id ownership + disown, live-verified); slow daemons never mutinied (connect-level evidence); zombies harvested (waitpid); dial CRLF refused; provision never skips containment |
-| 0.5 | Exit-policy evidence chain | grant requires live exit-IP evidence against the anchor + mainland deny list (replaces self-check-only grant) |
+| 0.5 | Exit-policy evidence chain | **DONE 2026-11-19**: gate-open grants on live exit observation (trace → anchor + mainland deny, Passed-only); unbound/region/city anchors refuse honestly; evidence keys ride the grant |
 | 0.6 | Multi-environment & snapshots | several contained environments per host, snapshot restore |
 | 0.7 | API stabilization | rustdoc coverage, MSRV declared, semver-checks in CI |
-| 0.6 | API stabilization | rustdoc coverage, MSRV declared, semver-checks in CI |
-| 0.7–0.9 | RC hardening | no breaking changes; docs complete; escape suite extended |
+| 0.8–0.9 | RC hardening | no breaking changes; docs complete; escape suite extended |
 | 1.0 | Contained workspace GA | enforcement planes all live; published crates |
 
 ## Support window

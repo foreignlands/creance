@@ -35,9 +35,30 @@ creance up           # 启动；guest 时区/语言自动对齐 profile
 creance shell bash   # 进去干活（装 claude code、跑任务）
 ```
 
+### 出口锚定（gate-open 前必读）
+
+0.5 起，`creance gate-open` 需要**实测出口证据**：出口 IP 经代理实测、
+比对锚定规则 + 强制中国大陆网段拒绝。默认配置（`dynamic`/`country` 且
+未绑定国家）会被如实拒绝。二选一，编辑 config.json 的 `exit_policy`：
+
+```jsonc
+// 方案 A：不锚国家，但出口落在中国大陆仍会被拒绝（最宽松）
+{ "mode": "dynamic", "scope": "any" }
+
+// 方案 B：锚定国家（出口实测国家必须一致）
+{ "mode": "dynamic", "scope": "country", "country_code": "US" }
+
+// 方案 C：锚定固定出口 IP
+{ "mode": "static", "ip": "203.0.113.7" }
+```
+
+`region`/`city` 锚定暂无诚实的实测数据源（观测源只有 IP+国家码），
+会以 Unknown 如实拒绝——待 GeoIP 数据源接入后放开。
+
 ## 3. 验收隔离
 
 ```sh
+creance gate-open     # 出口证据通过后开闸（90s 租期，wire 跟随）
 creance escape-test
 ```
 

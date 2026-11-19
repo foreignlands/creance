@@ -275,7 +275,31 @@ fn cmd_gate(open: bool) -> i32 {
     let instance = instance();
     let instance_dir = creance_vm::paths::join(&creance_vm::vm::lima_home(&profile), &instance);
     let outcome = if open {
-        gate::open(&instance_dir).map(|s| format!("open (epoch {})", s.epoch))
+        // 0.5: a grant needs live exit evidence. Observe the exit through
+        // the configured proxy, evaluate it against the anchor (plus the
+        // mandatory mainland deny list), and only a Passed verdict opens
+        // the wire — anything else stays closed with the reason.
+        let cfg = match config::load(&config::config_path()) {
+            Ok(c) => c,
+            Err(e) => return fail(e),
+        };
+        let location = match creance::evidence::observe(&cfg) {
+            Ok(l) => l,
+            Err(e) => return fail(format!("出口观测失败，外网保持关闭：{e}")),
+        };
+        let (state, message) = cfg.exit_policy.evaluate(&location.ip, Some(&location));
+        if state != creance_vm::exit_policy::State::Passed {
+            return fail(format!(
+                "出口证据未通过，外网保持关闭：{message}（实测出口 {} {}）",
+                location.ip, location.country_code
+            ));
+        }
+        gate::open(&instance_dir, &creance::evidence::grant_checks(&location)).map(|s| {
+            format!(
+                "open (epoch {}，出口 {} {})",
+                s.epoch, location.ip, location.country_code
+            )
+        })
     } else {
         gate::close_and_remove(&profile, &instance_dir, proxy_store_port(&profile))
             .map(|_| "closed".to_owned())
@@ -283,9 +307,6 @@ fn cmd_gate(open: bool) -> i32 {
     match outcome {
         Ok(msg) => {
             println!("gate: {msg}");
-            if open {
-                println!("note: grant carries self-checks only; exit-policy evidence lands in 0.5");
-            }
             0
         }
         Err(e) => fail(e),

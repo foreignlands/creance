@@ -3,6 +3,7 @@
 
 pub mod diagnose;
 pub mod escape;
+pub mod evidence;
 pub mod serve;
 
 pub use creance_net;

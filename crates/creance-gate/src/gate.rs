@@ -891,15 +891,16 @@ pub fn run_daemon(
 }
 
 /// Convenience: opens the gate (check window + grant) over the record.
-pub fn open(instance_dir: &str) -> Result<GateStatus, String> {
+/// The caller supplies the checks — structural self-checks plus the
+/// exit-consistency verdict from live evidence (see creance's evidence
+/// module). The daemon still enforces its REQUIRED set on arrival; a
+/// grant missing any critical check is refused there.
+pub fn open(
+    instance_dir: &str,
+    checks: &std::collections::BTreeMap<String, String>,
+) -> Result<GateStatus, String> {
     let client = GateClient::open(instance_dir)?;
     client.begin_check()?;
-    // The full exit-policy evidence chain lands in 0.5; this grant carries
-    // the five required self-checks and is labelled as unverified.
-    let mut checks = std::collections::BTreeMap::new();
-    for c in SafetyReport::REQUIRED {
-        checks.insert((*c).to_owned(), "passed".to_owned());
-    }
     let status = client.status()?;
     let body = serde_json::json!({
         "action": "grant",
