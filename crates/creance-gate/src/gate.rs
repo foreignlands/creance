@@ -23,7 +23,7 @@ use creance_vm::config::{self, Config};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::os::unix::net::UnixListener;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -177,6 +177,13 @@ pub struct Gate {
     instance: String,
     proxy_port: u16,
     run_id: String,
+    /// The control-plane bearer, read into memory at start (F-037: the
+    /// per-request re-read of the record file degraded to an empty token
+    /// whenever the file was unreadable — chmod 000, or the removal window
+    /// during close — and `constant_time_eq("", "")` let a credential-less
+    /// process drive check→grant→open). Holding our own token also means a
+    /// renamed-over loser never accepts the winner's.
+    token: String,
     inner: Mutex<GateInner>,
     shutdown: AtomicBool,
     config_path: String,
@@ -250,7 +257,7 @@ impl Gate {
 
         let record = GateRecord {
             socket: socket.clone(),
-            token,
+            token: token.clone(),
             run_id: run_id.clone(),
         };
         // Publish the record atomically; readers check it is private.
@@ -271,6 +278,7 @@ impl Gate {
             instance: instance.to_owned(),
             proxy_port,
             run_id,
+            token,
             inner: Mutex::new(GateInner {
                 state: GateState::Closed,
                 reason: String::new(),
@@ -450,7 +458,7 @@ impl Gate {
         // bearer must match the record's token.
         if host != "cage"
             || origin_present
-            || !constant_time_eq(bearer.as_bytes(), self.record_token().as_bytes())
+            || !constant_time_eq(bearer.as_bytes(), self.token.as_bytes())
         {
             let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
             return;
@@ -480,18 +488,6 @@ impl Gate {
             .as_bytes(),
         );
         let _ = stream.write_all(&response.1);
-    }
-
-    fn record_token(&self) -> String {
-        std::fs::read_to_string(self.record_path())
-            .ok()
-            .and_then(|s| serde_json::from_str::<GateRecord>(&s).ok())
-            .map(|r| r.token)
-            .unwrap_or_default()
-    }
-
-    fn record_path(&self) -> PathBuf {
-        PathBuf::from(&self.record_path)
     }
 
     fn control(&self, body: &[u8]) -> (u16, Vec<u8>) {
@@ -1389,6 +1385,66 @@ mod tests {
         let _ = std::fs::remove_file(creance_vm::pidfile::proxy_pid_file(&profile, "gate.pid"));
         let _ = bystander.kill();
         let _ = bystander.wait();
+        fs::remove_dir_all(&profile).unwrap();
+    }
+
+    #[test]
+    fn unreadable_record_never_degrades_the_bearer_check() {
+        // F-037 regression: the token lives in memory — an unreadable
+        // record file (chmod 000, or the removal window during close)
+        // must not turn the check into `constant_time_eq("", "")`, which
+        // let a credential-less process drive check→grant→open.
+        let (profile, config_path) = prepare_profile();
+        let instance_dir = creance_vm::paths::join(&profile, "lima/test-vm");
+        fs::create_dir_all(&instance_dir).unwrap();
+        let handle = Gate::start(
+            &instance_dir,
+            &config_path,
+            &profile,
+            "gate-test-inst",
+            17896,
+        )
+        .unwrap();
+        let record = handle.record.clone();
+
+        let status = |bearer: &str| -> String {
+            use std::io::{Read, Write};
+            use std::os::unix::net::UnixStream;
+            let mut stream = UnixStream::connect(&record.socket).unwrap();
+            let auth = if bearer.is_empty() {
+                String::new()
+            } else {
+                format!("Authorization: Bearer {bearer}\r\n")
+            };
+            stream
+                .write_all(format!("GET /status HTTP/1.1\r\nHost: cage\r\n{auth}\r\n").as_bytes())
+                .unwrap();
+            let mut raw = Vec::new();
+            stream.read_to_end(&mut raw).unwrap();
+            String::from_utf8_lossy(&raw)
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .split_whitespace()
+                .nth(1)
+                .unwrap_or_default()
+                .to_owned()
+        };
+
+        // Baseline: right token works, empty bearer is refused.
+        assert_eq!(status(&record.token), "200");
+        assert_eq!(status(""), "403");
+
+        // The record unreadable: the in-memory token keeps serving the
+        // legitimate holder and still refuses the credential-less.
+        let record_path = creance_vm::paths::join(&instance_dir, "cage-gate.json");
+        let mut perms = fs::metadata(&record_path).unwrap().permissions();
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o000);
+        fs::set_permissions(&record_path, perms).unwrap();
+        assert_eq!(status(""), "403", "no credential stays refused");
+        assert_eq!(status(&record.token), "200", "holder unaffected");
+        drop(handle);
         fs::remove_dir_all(&profile).unwrap();
     }
 
