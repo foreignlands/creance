@@ -97,13 +97,17 @@ pub fn stop(profile: &str) -> Result<(), String> {
 /// Kills `ssh -R` forwards for `instance` that no pid file owns (F-026:
 /// "closed = wire down" must not depend on one file's survival — a pid
 /// write that failed, or a deleted file, would leave an orphan serving the
-/// guest forever). The match is `HostKeyAlias=lima-<instance>`, a string
-/// unique to this instance's tunnel command line, so it cannot hit an
-/// unrelated process; the pid the file does own is spared.
-pub fn reap_orphans(profile: &str, instance: &str) {
+/// guest forever). The match needs BOTH the instance's HostKeyAlias AND
+/// the reverse-forward spec: the alias alone also appears in every
+/// `limactl shell` ssh client (learned on the live machine — sessions
+/// died mid-command until the sweep was narrowed), while `-R
+/// <port>:127.0.0.1:<port>` is ours alone. The pid the file owns is spared.
+pub fn reap_orphans(profile: &str, instance: &str, port: u16) {
     let Ok(out) = Command::new("pgrep")
         .arg("-f")
-        .arg(format!("HostKeyAlias=lima-{instance}"))
+        .arg(format!(
+            "HostKeyAlias=lima-{instance}.*-R {port}:127.0.0.1:{port}"
+        ))
         .output()
     else {
         return;
@@ -136,7 +140,8 @@ mod tests {
             .into_owned();
         std::fs::create_dir_all(crate::proxy_dir(&profile)).unwrap();
         let instance = format!("test-inst-{}", crate::token()[..6].to_owned());
-        let signature = format!("HostKeyAlias=lima-{instance}");
+        let port: u16 = 18765;
+        let signature = format!("HostKeyAlias=lima-{instance} -N -R {port}:127.0.0.1:{port}");
 
         let mut owned = Command::new("tail")
             .args(["-f", "/dev/null", &signature])
@@ -151,17 +156,27 @@ mod tests {
             .args(["-f", "/dev/null", &signature])
             .spawn()
             .unwrap();
+        // The limactl-shell shape: alias without the reverse-forward spec.
+        // It must never match the sweep.
+        let mut shell_client = Command::new("tail")
+            .args(["-f", "/dev/null", &format!("HostKeyAlias=lima-{instance}")])
+            .spawn()
+            .unwrap();
 
-        reap_orphans(&profile, &instance);
+        reap_orphans(&profile, &instance, port);
         std::thread::sleep(std::time::Duration::from_millis(300));
 
         let orphan_dead = orphan.try_wait().unwrap().is_some();
         let owned_alive = owned.try_wait().unwrap().is_none();
+        let shell_alive = shell_client.try_wait().unwrap().is_none();
         let _ = owned.kill();
         let _ = owned.wait();
         let _ = orphan.wait();
+        let _ = shell_client.kill();
+        let _ = shell_client.wait();
         assert!(orphan_dead, "orphan must be reaped");
         assert!(owned_alive, "the owned tunnel must survive the sweep");
+        assert!(shell_alive, "a shell-shaped client must never be reaped");
         std::fs::remove_dir_all(&profile).unwrap();
     }
 }

@@ -22,7 +22,9 @@ ls <profile>/proxy/tunnel.pid                                    # 不存在
 
 ## 修复
 
-`tunnel::reap_orphans(profile, instance)`：按 `HostKeyAlias=lima-<instance>`（该实例隧道命令行独有的字符串）pgrep 特征匹配，杀掉 pid 文件未拥有的进程，pid 文件拥有的豁免（与 F-021 的所有权判定不冲突）。接线三处：watchdog 的 Closed 分支、spawn_daemon 的 stale 清扫、close_and_remove/run_daemon 退场。回归测试用 `tail -f /dev/null <signature>` 伪装命令行特征：孤儿死、owned 活。
+`tunnel::reap_orphans(profile, instance, port)`：pgrep 特征匹配 `HostKeyAlias=lima-<instance>.*-R <port>:127.0.0.1:<port>`，杀掉 pid 文件未拥有的进程，pid 文件拥有的豁免（与 F-021 的所有权判定不冲突）。接线四处：watchdog 的 Closed 分支、spawn_daemon 的 stale 清扫、close_and_remove、run_daemon 退场。
+
+**特征必须同时含 HostKeyAlias 与 `-R <port>:127.0.0.1:<port>` 两段**——第一版只匹配 HostKeyAlias，实机立即暴露误杀：`limactl shell` 的每次 ssh 客户端命令行同样携带 `HostKeyAlias=lima-<instance>`（lima 约定），watchdog 每 500ms 的清扫把执行中的 shell 会话掐死（短命令幸存、>500ms 的命令 rc=255）。反向转发段 `-R <port>:127.0.0.1:<port>` 只有我们的隧道有（vz 下 lima 自身不设 -R）。回归测试三进程：孤儿死、owned 活、shell 形态客户端（仅 alias 无 -R）永不被收割。
 
 ## 边界（如实记录）
 

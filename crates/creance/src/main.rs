@@ -277,7 +277,8 @@ fn cmd_gate(open: bool) -> i32 {
     let outcome = if open {
         gate::open(&instance_dir).map(|s| format!("open (epoch {})", s.epoch))
     } else {
-        gate::close_and_remove(&profile, &instance_dir).map(|_| "closed".to_owned())
+        gate::close_and_remove(&profile, &instance_dir, proxy_store_port(&profile))
+            .map(|_| "closed".to_owned())
     };
     match outcome {
         Ok(msg) => {
@@ -547,7 +548,7 @@ fn cmd_stop(keep_proxy: bool) -> i32 {
     // F-019: the gate retires by its record going away — close over the
     // socket if a daemon still serves, remove the record either way, and
     // cut the tunnel now (close_and_remove does all three).
-    let _ = gate::close_and_remove(&profile, &gate_instance_dir());
+    let _ = gate::close_and_remove(&profile, &gate_instance_dir(), proxy_store_port(&profile));
     if code == 0 && !keep_proxy {
         let _ = gate::close_gates(&profile);
         return cmd_simple(|| creance_proxy::service::stop(&profile));

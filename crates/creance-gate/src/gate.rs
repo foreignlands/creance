@@ -300,7 +300,11 @@ impl Gate {
             drop(inner);
             if closed {
                 let _ = creance_vm::tunnel::stop(&watchdog.profile_dir);
-                creance_vm::tunnel::reap_orphans(&watchdog.profile_dir, &watchdog.instance);
+                creance_vm::tunnel::reap_orphans(
+                    &watchdog.profile_dir,
+                    &watchdog.instance,
+                    watchdog.proxy_port,
+                );
             } else {
                 let _ = creance_vm::tunnel::ensure(
                     &watchdog.profile_dir,
@@ -688,7 +692,7 @@ pub fn spawn_daemon(
         // dead watchdog can no longer cut — and raise a fresh daemon below.
         let _ = std::fs::remove_file(&pid_file);
         let _ = creance_vm::tunnel::stop(profile_dir);
-        creance_vm::tunnel::reap_orphans(profile_dir, instance);
+        creance_vm::tunnel::reap_orphans(profile_dir, instance, proxy_port);
     } else if Path::new(&creance_vm::paths::join(instance_dir, "cage-gate.json")).exists()
         || creance_vm::pidfile::alive(&pid_file)
     {
@@ -776,7 +780,7 @@ pub fn run_daemon(
     handle.gate.shutdown();
     drop(handle);
     let _ = creance_vm::tunnel::stop(profile_dir);
-    creance_vm::tunnel::reap_orphans(profile_dir, instance);
+    creance_vm::tunnel::reap_orphans(profile_dir, instance, proxy_port);
     0
 }
 
@@ -803,7 +807,7 @@ pub fn open(instance_dir: &str) -> Result<GateStatus, String> {
 /// retires on its own), and cuts the tunnel right away — the closed wire
 /// must not depend on a daemon that may already be gone (F-019), nor on
 /// the pid file's survival (F-026's signature reaping).
-pub fn close_and_remove(profile: &str, instance_dir: &str) -> Result<(), String> {
+pub fn close_and_remove(profile: &str, instance_dir: &str, port: u16) -> Result<(), String> {
     if let Ok(client) = GateClient::open(instance_dir) {
         let _ = client.close("宿主请求关闭");
     }
@@ -813,7 +817,7 @@ pub fn close_and_remove(profile: &str, instance_dir: &str) -> Result<(), String>
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    creance_vm::tunnel::reap_orphans(profile, &instance);
+    creance_vm::tunnel::reap_orphans(profile, &instance, port);
     Ok(())
 }
 
