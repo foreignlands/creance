@@ -32,11 +32,14 @@ pub fn validate_proxy_url(s: &str) -> Result<(), String> {
     if !matches!(u.scheme(), "http" | "https" | "socks5" | "socks5h") {
         return Err("proxy must use http, https or socks5".to_owned());
     }
-    if u.host_str()
+    // FINDING-004: strip the brackets Go's Hostname() never returns —
+    // `[::1]` is as numeric as `::1`.
+    let host = u
+        .host_str()
         .unwrap_or_default()
-        .parse::<std::net::IpAddr>()
-        .is_err()
-    {
+        .trim_start_matches('[')
+        .trim_end_matches(']');
+    if host.parse::<std::net::IpAddr>().is_err() {
         return Err(
             "proxy endpoint must be a numeric IP address; DNS bootstrap is not allowed".to_owned(),
         );
@@ -45,7 +48,15 @@ pub fn validate_proxy_url(s: &str) -> Result<(), String> {
     if !(1..=65535).contains(&port) {
         return Err("proxy requires a valid explicit port".to_owned());
     }
-    if !(u.path().is_empty() || u.path() == "/") || u.query().is_some() || u.fragment().is_some() {
+    // FINDING-004: Go rejects any Path — `/` is a path too. The WHATWG
+    // parser cannot distinguish an absent path from a spelled `/` on special
+    // schemes (it defaults http/https to "/"), so treat a trailing slash in
+    // the input as the spelled one.
+    if (!u.path().is_empty() && u.path() != "/")
+        || (u.path() == "/" && s.ends_with('/'))
+        || u.query().is_some()
+        || u.fragment().is_some()
+    {
         return Err("proxy URL must not contain a path, query or fragment".to_owned());
     }
     Ok(())

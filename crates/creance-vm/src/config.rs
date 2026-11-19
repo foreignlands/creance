@@ -138,7 +138,9 @@ fn validate_timezone(tz: &str) -> Result<(), String> {
         return Err("unknown cage timezone".to_owned());
     }
     let db = std::path::Path::new("/usr/share/zoneinfo").join(tz);
-    if db.exists() {
+    // Go's time.LoadLocation reads the file's contents, so a directory name
+    // ("Etc", "posix", "right") is not a timezone there either (FINDING-004).
+    if std::fs::metadata(&db).map(|m| m.is_file()).unwrap_or(false) {
         return Ok(());
     }
     if std::path::Path::new("/usr/share/zoneinfo").is_dir() {
@@ -203,6 +205,7 @@ mod tests {
             "socks5://1.2.3.4:0",              // port 0
             "socks4://1.2.3.4:1080",           // scheme
             "socks5://1.2.3.4:1080/path",      // path
+            "socks5://1.2.3.4:1080/",          // trailing slash is still a path (FINDING-004)
         ] {
             c.proxy_url = bad.to_owned();
             assert!(c.validate().is_err(), "{bad} must be rejected");
@@ -210,6 +213,11 @@ mod tests {
         c.proxy_url = "http://10.0.0.1:8080".to_owned();
         assert!(c.validate().is_ok());
         c.proxy_url = "socks5://user:pw@1.2.3.4:1080".to_owned();
+        assert!(c.validate().is_ok());
+        // Bracketed IPv6 literals are numeric endpoints too (FINDING-004).
+        c.proxy_url = "socks5://[::1]:1080".to_owned();
+        assert!(c.validate().is_ok(), "[::1] must parse as an IP literal");
+        c.proxy_url = "socks5://user:pw@[::1]:1080".to_owned();
         assert!(c.validate().is_ok());
     }
 
@@ -233,6 +241,12 @@ mod tests {
         assert!(c.validate().is_ok());
         c.timezone = "Not/AZone/../..".to_owned();
         assert!(c.validate().is_err());
+        // A zoneinfo *directory* name is not a timezone (FINDING-004):
+        // Go's time.LoadLocation fails on it, so must we.
+        if std::path::Path::new("/usr/share/zoneinfo").is_dir() {
+            c.timezone = "Etc".to_owned();
+            assert!(c.validate().is_err(), "directory name Etc must be rejected");
+        }
         c.timezone = "Etc/UTC".to_owned();
         c.locale = "en_US".to_owned();
         assert!(c.validate().is_err());
