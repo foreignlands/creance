@@ -74,6 +74,12 @@ fn workbench_end_to_end() {
     // subscription policy (FINDING-009) has its own unit coverage.
     std::env::set_var("CREANCE_ALLOW_HTTP_SUB", "1");
     let (profile, config_path) = util::fresh_profile();
+    // Point the early /api/check at a port nothing can hold: a running
+    // environment on this machine (limactl's forwarder) sits on the
+    // default 17896 and turns the expected instant refusal into a hang.
+    let mut closed_port = creance_vm::config::load(&config_path).unwrap();
+    closed_port.proxy_url = "socks5://127.0.0.1:1".to_owned();
+    creance_vm::config::write_private_config(&config_path, &closed_port).unwrap();
     let port = start_server(&profile, &config_path);
 
     // ---- routing ----

@@ -86,13 +86,13 @@ pub fn generate_lima_yaml(options: &SetupOptions) -> Result<Vec<u8>, String> {
     // pass uid numbers through unmapped, so lima's host-mirrored uid is what
     // keeps the writable workspace writable — a number leaks nothing; the
     // name and GECOS comment are the identity, and both are ours.
-    // `passwordlessSudo: false` alone does NOT close the privilege path
-    // (lima then provisions a random password inside the guest); the
-    // provision script strips the sudoers grant itself.
+    // passwordlessSudo stays at lima's default: lima only allows false for
+    // `plain` instances, and false anyway does NOT close the privilege path
+    // (lima then parks a random password in the guest's ~/password). The
+    // provision script strips the sudoers grant itself — that is the fix.
     let mut user = Mapping::new();
     user.insert("name".into(), Yaml::from(options.guest.username.clone()));
     user.insert("comment".into(), Yaml::from("creance guest"));
-    user.insert("passwordlessSudo".into(), Yaml::from(false));
 
     let mut containerd = Mapping::new();
     containerd.insert("system".into(), Yaml::from(false));
@@ -234,13 +234,16 @@ mod tests {
         // FINDING-024: lima rejects a `hostname` field — the identity lands
         // via provision's hostnamectl instead, so the field must stay absent.
         assert!(v["hostname"].is_null(), "{yaml}");
-        // F-020/F-022: the guest user is the generated identity with no
-        // passwordless sudo; uid stays unset so the writable mount keeps
-        // working (vz virtiofs passes uid numbers through unmapped).
+        // F-020/F-022: the guest user is the generated identity; uid stays
+        // unset so the writable mount keeps working (vz virtiofs passes uid
+        // numbers through unmapped), and the sudoers grant dies in provision.
         assert_eq!(v["user"]["name"], "devabc12345");
         assert_eq!(v["user"]["comment"], "creance guest");
-        assert_eq!(v["user"]["passwordlessSudo"], Yaml::Bool(false));
         assert!(v["user"]["uid"].is_null(), "uid must stay host-mirrored");
+        assert!(
+            v["user"]["passwordlessSudo"].is_null(),
+            "lima rejects false here; provision strips the grant instead"
+        );
         let script = v["provision"][0]["script"].as_str().unwrap_or_default();
         assert!(
             script.contains("hostnamectl set-hostname cage-"),

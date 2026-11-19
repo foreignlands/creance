@@ -697,6 +697,11 @@ pub fn spawn_daemon(
         .to_string_lossy()
         .into_owned();
     use std::process::{Command, Stdio};
+    // F-025: a virgin profile has no proxy/ directory yet — create it
+    // before touching the log or the pid file, or a healthy spawn reads
+    // back as ENOENT failure.
+    creance_vm::private::ensure_private_dir(&creance_vm::proxy_dir(profile_dir))
+        .map_err(|e| e.to_string())?;
     let log = creance_vm::paths::join(&creance_vm::proxy_dir(profile_dir), "gate-daemon.log");
     let log = std::fs::OpenOptions::new()
         .create(true)

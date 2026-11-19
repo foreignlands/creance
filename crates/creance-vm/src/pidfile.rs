@@ -9,6 +9,7 @@
 #![allow(unsafe_code)] // libc sysctl/kill — audited, pid from our own pid file
 
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 #[derive(Serialize, Deserialize)]
 pub struct Entry {
@@ -82,8 +83,14 @@ pub fn entry_alive(entry: &Entry) -> bool {
     current == entry.started
 }
 
-/// Records `pid` and its start-time token in a JSON pid file.
+/// Records `pid` and its start-time token in a JSON pid file. The parent
+/// directory is created when missing (F-025: a virgin profile has no
+/// proxy/ dir yet, and a missing directory must not read as daemon
+/// failure).
 pub fn write(path: &str, pid: i32) -> Result<(), String> {
+    if let Some(parent) = Path::new(path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
     let entry = Entry {
         pid,
         started: process_start_token(pid),
