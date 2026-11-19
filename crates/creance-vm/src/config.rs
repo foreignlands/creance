@@ -118,6 +118,22 @@ impl Config {
         let b = serde_json::to_vec(&normalized).expect("config serializes");
         hex::encode(Sha256::digest(&b))
     }
+
+    /// The fields the GUEST can perceive — the actual provisioning promise
+    /// a setup stamp records (F-040). Host-only concerns (which proxy
+    /// endpoint, which revision, which exit anchor) are deliberately
+    /// excluded: a routine proxy-select or anchor tune must not turn the
+    /// escape probe permanently red; the full fingerprint still guards
+    /// the running-record lock at `up`.
+    pub fn guest_fingerprint(&self) -> String {
+        let promise = (
+            self.timezone.clone(),
+            self.locale.clone(),
+            self.browser_language.clone(),
+        );
+        let b = serde_json::to_vec(&promise).expect("promise serializes");
+        hex::encode(Sha256::digest(&b))
+    }
 }
 
 /// Atomically writes a validated configuration as a private file.

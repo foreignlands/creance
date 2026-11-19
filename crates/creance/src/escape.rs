@@ -183,7 +183,7 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
                     Outcome::NotEnforced
                 } else {
                     match std::fs::read_to_string(&setup_stamp) {
-                        Ok(text) if text.trim() == c.fingerprint() => Outcome::Contained,
+                        Ok(text) if text.trim() == c.guest_fingerprint() => Outcome::Contained,
                         Ok(_) => Outcome::Escaped(
                             "profile changed since the VM was created; run creance stop".to_owned(),
                         ),
@@ -204,7 +204,7 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
 pub fn refresh_fingerprint_stamp(profile: &str, cfg: &config::Config) -> Result<(), String> {
     let stamp = paths::join(&vm::state_dir(profile), "fingerprint.txt");
     std::fs::create_dir_all(vm::state_dir(profile)).map_err(|e| e.to_string())?;
-    std::fs::write(&stamp, cfg.fingerprint()).map_err(|e| e.to_string())
+    std::fs::write(&stamp, cfg.guest_fingerprint()).map_err(|e| e.to_string())
 }
 
 /// Whether the profile's Lima instance is actually running (not merely
@@ -598,6 +598,48 @@ mod tests {
     }
 
     #[test]
+    fn host_only_config_changes_keep_the_probe_green() {
+        // F-040 regression: the setup stamp records the GUEST's promise
+        // (timezone/locale/browser language). Proxy concerns — endpoint,
+        // revision, exit anchor — are host-only: a routine select or
+        // anchor tune between runs must not turn the probe red.
+        let (profile, config_path) = fresh_profile();
+        let cfg = creance_vm::config::load(&config_path).unwrap();
+        refresh_fingerprint_stamp(&profile, &cfg).unwrap();
+        let probe = |p: &str| {
+            host_probes(p, &config_path)
+                .into_iter()
+                .find(|x| x.id == "fingerprint-consistent")
+                .unwrap()
+                .outcome
+        };
+        assert_eq!(probe(&profile), Outcome::Contained);
+
+        let mut tuned = cfg.clone();
+        tuned.proxy_url = "socks5://127.0.0.1:19999".to_owned();
+        tuned.proxy_revision = creance_vm::token();
+        tuned.exit_policy = creance_vm::exit_policy::Policy {
+            mode: "static".to_owned(),
+            scope: "any".to_owned(),
+            ip: "203.0.113.7".to_owned(),
+            ..Default::default()
+        };
+        creance_vm::config::write_private_config(&config_path, &tuned).unwrap();
+        assert_eq!(
+            probe(&profile),
+            Outcome::Contained,
+            "host-only fields are not part of the promise"
+        );
+
+        // A guest-visible change still drifts.
+        let mut drifted = tuned;
+        drifted.locale = "ja_JP.UTF-8".to_owned();
+        creance_vm::config::write_private_config(&config_path, &drifted).unwrap();
+        assert!(matches!(probe(&profile), Outcome::Escaped(_)));
+        std::fs::remove_dir_all(&profile).unwrap();
+    }
+
+    #[test]
     fn up_refreshes_a_stale_stamp() {
         // R6-H4: a routine proxy-select between runs changed the config
         // fingerprint (proxy_revision is part of it) — the next `up` is
@@ -632,7 +674,7 @@ mod tests {
         let cfg = creance_vm::config::load(&config_path).unwrap();
         let stamp = paths::join(&vm::state_dir(&profile), "fingerprint.txt");
         std::fs::create_dir_all(vm::state_dir(&profile)).unwrap();
-        std::fs::write(&stamp, cfg.fingerprint()).unwrap();
+        std::fs::write(&stamp, cfg.guest_fingerprint()).unwrap();
         let probe = |p: &str| {
             host_probes(p, &config_path)
                 .into_iter()
