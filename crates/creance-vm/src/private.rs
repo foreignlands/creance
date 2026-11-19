@@ -71,10 +71,16 @@ fn hex_prefix(v: u64) -> String {
 }
 
 fn nanos() -> u64 {
-    std::time::SystemTime::now()
+    // Test-temp names must be unique under parallel execution: subsec
+    // nanos alone collide when two tests start in the same instant (an
+    // intermittent AlreadyExists on macOS CI) — mix in a counter.
+    static COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.subsec_nanos() as u64)
-        .unwrap_or(0)
+        .unwrap_or(0);
+    nanos ^ n.rotate_left(20)
 }
 
 #[cfg(test)]

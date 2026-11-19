@@ -550,6 +550,15 @@ fn cmd_setup(memory: u32, cpus: u32) -> i32 {
     }
     let code = creance_vm::vm::create(&profile, &instance);
     if code == 0 {
+        // F-033: the fingerprint the VM was promised at creation. The
+        // escape probe compares the live config against this snapshot —
+        // drift after a config change means the VM and profile disagree
+        // (re-run setup after `creance stop` to re-pin).
+        let stamp =
+            creance_vm::paths::join(&creance_vm::vm::state_dir(&profile), "fingerprint.txt");
+        if let Err(e) = std::fs::write(&stamp, cfg.fingerprint()) {
+            eprintln!("warning: cannot write fingerprint stamp: {e}");
+        }
         println!("instance {instance} created; run `creance up` to start it");
     }
     code

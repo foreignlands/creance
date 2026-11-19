@@ -589,6 +589,34 @@ mod tests {
     }
 
     #[test]
+    fn fingerprint_probe_compares_against_the_setup_stamp() {
+        // F-033: setup writes the promised fingerprint; the probe must
+        // enforce agreement and flag drift after a config change.
+        let (profile, config_path) = fresh_profile();
+        let cfg = creance_vm::config::load(&config_path).unwrap();
+        let stamp = paths::join(&vm::state_dir(&profile), "fingerprint.txt");
+        std::fs::create_dir_all(vm::state_dir(&profile)).unwrap();
+        std::fs::write(&stamp, cfg.fingerprint()).unwrap();
+        let probe = |p: &str| {
+            host_probes(p, &config_path)
+                .into_iter()
+                .find(|x| x.id == "fingerprint-consistent")
+                .unwrap()
+                .outcome
+        };
+        assert_eq!(probe(&profile), Outcome::Contained, "fresh stamp agrees");
+
+        let mut drifted = cfg.clone();
+        drifted.timezone = "Asia/Tokyo".to_owned();
+        creance_vm::config::write_private_config(&config_path, &drifted).unwrap();
+        match probe(&profile) {
+            Outcome::Escaped(why) => assert!(why.contains("creance stop"), "{why}"),
+            other => panic!("drifted config must escape, got {other:?}"),
+        }
+        std::fs::remove_dir_all(&profile).unwrap();
+    }
+
+    #[test]
     fn stray_token_shaped_secrets_are_escaped() {
         // F-022 regression: a credential-shaped file in the profile
         // directory must break containment, not pass it.
