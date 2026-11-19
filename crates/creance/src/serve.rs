@@ -147,16 +147,15 @@ fn route(ctx: &ServeCtx, method: &str, path: &str, body: &[u8]) -> (u16, &'stati
                 Ok(d) => d,
                 Err(e) => return (502, json!({"error": e})),
             };
-            let mut store = match creance_proxy::load(&ctx.profile) {
-                Ok(s) => s,
-                Err(e) => return (409, json!({"error": e})),
-            };
-            if let Err(e) = store.import(name, url, &data, "", 0, "workbench") {
-                return (409, json!({"error": e}));
-            }
-            let count = store.count();
-            match creance_proxy::save(&ctx.profile, &store) {
-                Ok(()) => (200, json!({"ok": true, "nodes": count})),
+            let saved = creance_proxy::with_store_lock(&ctx.profile, || {
+                let mut store = creance_proxy::load(&ctx.profile)?;
+                store.import(name, url, &data, "", 0, "workbench")?;
+                let count = store.count();
+                creance_proxy::save(&ctx.profile, &store)?;
+                Ok(count)
+            });
+            match saved {
+                Ok(count) => (200, json!({"ok": true, "nodes": count})),
                 Err(e) => (409, json!({"error": e})),
             }
         }),

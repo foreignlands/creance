@@ -374,17 +374,18 @@ fn cmd_proxy_import(
         (None, None) => return fail("pass --file or --url".to_owned()),
     };
     let profile = profile();
-    let mut store = match creance_proxy::load(&profile) {
-        Ok(s) => s,
+    let imported = creance_proxy::with_store_lock(&profile, || {
+        let mut store = creance_proxy::load(&profile)?;
+        store.import(&name, "", &data, "", interval, "cli")?;
+        let count = store.count();
+        creance_proxy::save(&profile, &store)?;
+        Ok(count)
+    });
+    let count = match imported {
+        Ok(c) => c,
         Err(e) => return fail(e),
     };
-    if let Err(e) = store.import(&name, "", &data, "", interval, "cli") {
-        return fail(e);
-    }
-    if let Err(e) = creance_proxy::save(&profile, &store) {
-        return fail(e);
-    }
-    println!("imported {} nodes from {name}", store.count());
+    println!("imported {count} nodes from {name}");
     if let Some(node) = select {
         return cmd_proxy_select(node);
     }
@@ -409,23 +410,21 @@ fn cmd_proxy_refresh() -> i32 {
         }
         match creance_proxy::fetch::fetch_subscription(&cfg, &source.url) {
             Ok(data) => {
-                let mut store = match creance_proxy::load(&profile) {
-                    Ok(s) => s,
-                    Err(e) => return fail(e),
-                };
-                if let Err(e) = store.import(
-                    &source.name,
-                    &source.url,
-                    &data,
-                    &source.id,
-                    source.interval_hours,
-                    "refresh",
-                ) {
-                    eprintln!("{}: {e}", source.name);
-                    continue;
-                }
-                if creance_proxy::save(&profile, &store).is_ok() {
-                    refreshed += 1;
+                let outcome = creance_proxy::with_store_lock(&profile, || {
+                    let mut store = creance_proxy::load(&profile)?;
+                    store.import(
+                        &source.name,
+                        &source.url,
+                        &data,
+                        &source.id,
+                        source.interval_hours,
+                        "refresh",
+                    )?;
+                    creance_proxy::save(&profile, &store)
+                });
+                match outcome {
+                    Ok(()) => refreshed += 1,
+                    Err(e) => eprintln!("{}: {e}", source.name),
                 }
             }
             Err(e) => eprintln!("{}: {e}", source.name),

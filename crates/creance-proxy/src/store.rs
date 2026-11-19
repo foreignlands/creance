@@ -299,6 +299,58 @@ impl Store {
     }
 }
 
+/// An exclusive flock on the profile's store lock file. Hold it across a
+/// whole load → modify → save sequence so concurrent importers, refreshes,
+/// and selections cannot overwrite each other's sources (FINDING-014).
+pub struct StoreLock {
+    fd: std::os::unix::io::RawFd,
+}
+
+#[allow(unsafe_code)] // libc::flock/close on our own private lock file
+impl Drop for StoreLock {
+    fn drop(&mut self) {
+        unsafe {
+            libc::flock(self.fd, libc::LOCK_UN);
+            libc::close(self.fd);
+        }
+    }
+}
+
+/// Takes the profile's store lock (an exclusive flock on `proxy/.lock`).
+#[allow(unsafe_code)] // libc::flock/close on our own private lock file
+fn store_lock(profile: &str) -> Result<StoreLock, String> {
+    let d = dir(profile);
+    creance_vm::private::ensure_private_dir(&d).map_err(|e| e.to_string())?;
+    let path = Path::new(&d).join(".lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&path)
+        .map_err(|e| format!("cannot open store lock: {e}"))?;
+    let fd = std::os::unix::io::IntoRawFd::into_raw_fd(file);
+    unsafe {
+        if libc::flock(fd, libc::LOCK_EX) != 0 {
+            let err = std::io::Error::last_os_error();
+            libc::close(fd);
+            return Err(format!("cannot lock store: {err}"));
+        }
+    }
+    Ok(StoreLock { fd })
+}
+
+/// Runs `f` while holding the profile's store lock, serializing every
+/// load → modify → save sequence against the same profile (FINDING-014).
+/// Callers must not nest this: `select_and_apply` and `start_managed` lock
+/// internally, so wrap only their own unlocked steps.
+pub fn with_store_lock<T>(
+    profile: &str,
+    f: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let _guard = store_lock(profile)?;
+    f()
+}
+
 /// The single source of truth for the private endpoint used by cage: the
 /// store must agree with config.json down to the revision.
 pub fn applied(profile: &str, endpoint: &str, revision: &str) -> Result<Store, String> {
@@ -324,6 +376,7 @@ pub fn applied(profile: &str, endpoint: &str, revision: &str) -> Result<Store, S
 /// selection, revision rotation, and the config.json fields that [`applied`]
 /// later verifies.
 pub fn select_and_apply(profile: &str, config_path: &str, node: &str) -> Result<Store, String> {
+    let _guard = store_lock(profile)?;
     let mut store = load(profile)?;
     let resolved = store
         .sources
@@ -334,11 +387,30 @@ pub fn select_and_apply(profile: &str, config_path: &str, node: &str) -> Result<
         .ok_or_else(|| format!("节点 {node} 不存在于任何来源"))?;
     store.selected = resolved;
     store.revision = token();
-    save(profile, &store)?;
+    // Load the config before touching the store: an unreadable config must
+    // never leave a half-applied selection behind (FINDING-014).
     let mut config = creance_vm::config::load(config_path)?;
+    let previous = std::fs::read(Path::new(&dir(profile)).join("sources.json")).ok();
+    save(profile, &store)?;
     config.proxy_url = store.endpoint();
     config.proxy_revision = store.revision.clone();
-    creance_vm::config::write_private_config(config_path, &config)?;
+    if let Err(e) = creance_vm::config::write_private_config(config_path, &config) {
+        // Roll the store back so applied() never sees a mismatched pair.
+        let path = Path::new(&dir(profile))
+            .join("sources.json")
+            .to_str()
+            .unwrap_or_default()
+            .to_owned();
+        match &previous {
+            Some(bytes) => {
+                let _ = write_private(&path, bytes);
+            }
+            None => {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+        return Err(format!("代理配置写入失败，选择已回滚：{e}"));
+    }
     Ok(store)
 }
 
@@ -347,6 +419,7 @@ pub fn select_and_apply(profile: &str, config_path: &str, node: &str) -> Result<
 /// the revision rotates only when a real restart is about to happen, so a
 /// stale record can never re-open a gate.
 pub fn start_managed(profile: &str, config_path: &str) -> Result<(), String> {
+    let _guard = store_lock(profile)?;
     let config = creance_vm::config::load(config_path)?;
     let store = applied(profile, &config.proxy_url, &config.proxy_revision)?;
     // Fast path (Go proxyCommand): same physical binding and a running,
@@ -526,5 +599,65 @@ mod tests {
         assert_eq!(civil_from_days(19_723), (2024, 1, 1));
         let now = iso8601_now();
         assert!(now.ends_with('Z') && now.len() == 20, "{now}");
+    }
+
+    fn sub_yaml(name: &str, server: &str) -> String {
+        format!(
+            "proxies:\n  - name: {name}\n    type: ss\n    server: {server}\n    port: 1\n    cipher: aes-128-gcm\n    password: x\n"
+        )
+    }
+
+    /// The CLI/workbench import entry is load → import → save. Two concurrent
+    /// importers (FINDING-014) must not overwrite each other's source: the
+    /// entry sequence runs under [`with_store_lock`], so both sources survive.
+    #[test]
+    fn concurrent_importers_do_not_lose_sources() {
+        let tmp = std::env::temp_dir().join(format!("cage-c1-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let profile = tmp.to_string_lossy().into_owned();
+        let yaml_a = sub_yaml("nodeA", "1.1.1.1");
+        let yaml_b = sub_yaml("nodeB", "2.2.2.2");
+        let run = |name: &str, yaml: &str, profile: &str| -> Result<(), String> {
+            with_store_lock(profile, || {
+                let mut s = load(profile)?;
+                s.import(name, "", yaml.as_bytes(), "", 0, "")?;
+                save(profile, &s)
+            })
+        };
+        let p1 = profile.clone();
+        let p2 = profile.clone();
+        let h1 = std::thread::spawn(move || run("srcA", &yaml_a, &p1));
+        let h2 = std::thread::spawn(move || run("srcB", &yaml_b, &p2));
+        h1.join().unwrap().unwrap();
+        h2.join().unwrap().unwrap();
+        let s = load(&profile).unwrap();
+        let names: Vec<&str> = s.sources.iter().map(|x| x.name.as_str()).collect();
+        assert!(
+            names.contains(&"srcA") && names.contains(&"srcB"),
+            "both concurrent imports must survive: {names:?}"
+        );
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    /// select_and_apply (FINDING-014, part 2): a config that cannot be loaded
+    /// must leave the store untouched — no selected/revision written that
+    /// applied() would then refuse.
+    #[test]
+    fn select_and_apply_leaves_store_untouched_when_config_is_unreadable() {
+        let tmp = std::env::temp_dir().join(format!("cage-c1b-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let profile = tmp.to_string_lossy().into_owned();
+        let mut s = store_with(vec![node("exit", "exit", "")], "exit", Vec::new());
+        s.revision = "old-rev".to_owned();
+        save(&profile, &s).unwrap();
+        let config_path = creance_vm::paths::join(&profile, "missing.json");
+        assert!(
+            select_and_apply(&profile, &config_path, "exit").is_err(),
+            "unreadable config must fail the select"
+        );
+        let after = load(&profile).unwrap();
+        assert_eq!(after.selected, "exit", "selection unchanged");
+        assert_eq!(after.revision, "old-rev", "revision unchanged");
+        std::fs::remove_dir_all(&tmp).unwrap();
     }
 }
