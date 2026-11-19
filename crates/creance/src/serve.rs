@@ -167,6 +167,15 @@ fn route(ctx: &ServeCtx, method: &str, path: &str, body: &[u8]) -> (u16, &'stati
             }
         }),
         ("POST", "/api/proxy/start") => cmd_action(ctx, || {
+            // F-036: gates learn about the (possibly changed) exit BEFORE
+            // the core restarts — same ordering as the CLI's proxy-start,
+            // no open-gate-with-swapped-exit window, and no silently
+            // skipped sync either (the workbench used to skip it entirely).
+            if let Ok(client) =
+                creance_gate::gate::GateClient::open(&gate_instance_dir(&ctx.profile))
+            {
+                let _ = client.sync_proxy_revision();
+            }
             creance_proxy::start_managed(&ctx.profile, &ctx.config_path)
         }),
         ("POST", "/api/proxy/stop") => cmd_action(ctx, || {

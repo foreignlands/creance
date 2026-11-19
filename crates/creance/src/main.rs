@@ -369,13 +369,14 @@ fn cmd_escape_test() -> i32 {
 
 fn cmd_proxy_start() -> i32 {
     cmd_simple(|| {
-        creance_proxy::start_managed(&profile(), &config::config_path())?;
-        // Running instances get told about the (re)started core so their
-        // gates re-open only against the fresh revision.
+        // F-036: tell the running gates FIRST — a changed exit closes the
+        // gate while the OLD core is still serving, so there is never a
+        // moment of "open gate + already-swapped exit". Restarting first
+        // left exactly that window (and the sync error was swallowed).
         if let Ok(client) = gate::GateClient::open(&gate_instance_dir()) {
             let _ = client.sync_proxy_revision();
         }
-        Ok(())
+        creance_proxy::start_managed(&profile(), &config::config_path())
     })
 }
 

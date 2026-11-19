@@ -81,6 +81,17 @@ pub struct GateCommand {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SafetyReport {
     pub report_id: String,
+    /// Binding dimensions (F-036, first slice of the Go contract): the
+    /// gate's run the report was produced for, and when. A report minted
+    /// for another gate (or another lifetime of this one) must not open
+    /// this gate; stale reports die with the check window. The Go
+    /// contract's configuration-fingerprint binding lands with the 0.6
+    /// authorization-set alignment.
+    #[serde(default)]
+    pub run_id: String,
+    /// Unix epoch seconds; 0 = absent (refused by the grant check).
+    #[serde(default)]
+    pub created_at: u64,
     #[serde(default)]
     pub checks: std::collections::BTreeMap<String, String>,
 }
@@ -549,7 +560,21 @@ impl Gate {
             }
             "grant" => {
                 // FINDING-008: Go only grants from the Checking state with
-                // the report bound to the open check window.
+                // the report bound to the open check window. F-036 adds
+                // the run binding: the report must name THIS gate's run
+                // and be minted inside the check window, and the inner
+                // report id must match the outer one (they used to be
+                // checked asymmetrically).
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let window = CHECK_LEASE.as_secs();
+                let bound = |report: &SafetyReport| {
+                    report.run_id == self.run_id
+                        && report.created_at <= now
+                        && now - report.created_at <= window
+                };
                 if inner.state != GateState::Checking {
                     (409, error_json("仅在检测进行中可以授权开放，外网保持关闭"))
                 } else if command.report_id != inner.check_id || inner.check_id.is_empty() {
@@ -557,7 +582,11 @@ impl Gate {
                     (409, error_json("授权与当前检测窗口不匹配，外网保持关闭"))
                 } else {
                     match command.report.take() {
-                        Some(report) if report.authorizes() => {
+                        Some(report)
+                            if report.authorizes()
+                                && report.report_id == command.report_id
+                                && bound(&report) =>
+                        {
                             inner.state = GateState::Open;
                             inner.reason.clear();
                             inner.opened_at = Some(Instant::now());
@@ -601,13 +630,21 @@ impl Gate {
                 )
             }
             "proxy-revision" => match self.sync_proxy_revision_with(&mut inner) {
-                Ok(()) => {
+                // F-036: only an ADOPTED change (or a rejected sync) closes
+                // the gate — an idempotent no-change sync keeps the state,
+                // so a routine `proxy-start` on an unchanged config no
+                // longer force-retires an open gate.
+                Ok(SyncOutcome::Adopted) => {
                     inner.close("代理节点已变更，等待重新检查");
                     (
                         200,
                         serde_json::to_vec(&inner.status(&self.run_id)).expect("status"),
                     )
                 }
+                Ok(SyncOutcome::Unchanged) => (
+                    200,
+                    serde_json::to_vec(&inner.status(&self.run_id)).expect("status"),
+                ),
                 Err(message) => {
                     inner.close(&message);
                     (409, error_json(&message))
@@ -622,12 +659,12 @@ impl Gate {
     /// first-time completion of the exit-policy binding under the same mode
     /// and scope — is accepted and recorded; anything else requires a
     /// restart. No change is an idempotent success.
-    fn sync_proxy_revision_with(&self, inner: &mut GateInner) -> Result<(), String> {
+    fn sync_proxy_revision_with(&self, inner: &mut GateInner) -> Result<SyncOutcome, String> {
         let new_config = config::load(&self.config_path)?;
         let old_config = inner
             .recorded
             .clone()
-            .ok_or("出口地址或环境设置变化需要重启环境")?;
+            .ok_or("出口地址或环境设置变化需要重启环境".to_owned())?;
         let revision_changed = new_config.proxy_revision != old_config.proxy_revision
             || new_config.proxy_url != old_config.proxy_url;
         let binding_completed = old_config.exit_policy.needs_binding()
@@ -638,7 +675,7 @@ impl Gate {
         if !revision_changed && !binding_completed {
             // Nothing to adopt: the gate keeps its state.
             if strip_config(&old_config) == strip_config(&new_config) {
-                return Ok(());
+                return Ok(SyncOutcome::Unchanged);
             }
             return Err("出口地址或环境设置变化需要重启环境".to_owned());
         }
@@ -662,8 +699,15 @@ impl Gate {
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default();
         let _ = creance_vm::running::record_running(&instance_dir, &new_config);
-        Ok(())
+        Ok(SyncOutcome::Adopted)
     }
+}
+
+/// What a proxy-revision sync decided (F-036): an adopted change closes
+/// the gate for re-checking; an idempotent no-change keeps the state.
+enum SyncOutcome {
+    Adopted,
+    Unchanged,
 }
 
 /// True when `new` only fills fields `old` left empty (same mode/scope);
@@ -912,10 +956,22 @@ pub fn open(
     let client = GateClient::open(instance_dir)?;
     client.begin_check()?;
     let status = client.status()?;
+    // F-036: the binding fields are minted here — bound to the record's
+    // run and the current instant — so callers cannot omit them and a
+    // report from another gate's lifetime never opens this one.
+    let created_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let body = serde_json::json!({
         "action": "grant",
         "report_id": status.check_id,
-        "report": {"report_id": status.check_id, "checks": checks},
+        "report": {
+            "report_id": status.check_id,
+            "run_id": client.record.run_id,
+            "created_at": created_at,
+            "checks": checks,
+        },
     });
     client.raw_control(&body.to_string())
 }
@@ -1140,7 +1196,12 @@ mod tests {
         assert!(raw.0.starts_with("409"), "{raw:?}");
         assert_eq!(client.status().unwrap().state, GateState::Checking);
 
-        // With every required check passed and the window id carried, open.
+        // With every required check passed, the window id carried, and the
+        // F-036 run/time binding present, open.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
         let mut checks = std::collections::BTreeMap::new();
         for c in SafetyReport::REQUIRED {
             checks.insert((*c).to_owned(), "passed".to_owned());
@@ -1148,11 +1209,36 @@ mod tests {
         let good = serde_json::json!({
             "action": "grant",
             "report_id": check_id,
-            "report": {"report_id": check_id, "checks": checks},
+            "report": {"report_id": check_id, "run_id": record.run_id, "created_at": now, "checks": checks},
         });
         let raw = call_raw(&record, &good.to_string()).unwrap();
         assert!(raw.0.starts_with("200"), "{raw:?}");
         assert!(serde_json::to_string(&raw.1).unwrap().contains("open"));
+
+        // F-036 regressions: binding failures refuse without opening.
+        client.begin_check().unwrap();
+        let check_id2 = client.status().unwrap().check_id;
+        let wrong_run = serde_json::json!({
+            "action": "grant",
+            "report_id": check_id2,
+            "report": {"report_id": check_id2, "run_id": "some-other-gate", "created_at": now, "checks": checks},
+        });
+        let raw = call_raw(&record, &wrong_run.to_string()).unwrap();
+        assert!(
+            raw.0.starts_with("409"),
+            "a report for another run must not open: {raw:?}"
+        );
+        let stale_report = serde_json::json!({
+            "action": "grant",
+            "report_id": check_id2,
+            "report": {"report_id": check_id2, "run_id": record.run_id, "created_at": now - 3600, "checks": checks},
+        });
+        let raw = call_raw(&record, &stale_report.to_string()).unwrap();
+        assert!(
+            raw.0.starts_with("409"),
+            "a stale report must not open: {raw:?}"
+        );
+        client.close("F-036 回归收尾").unwrap();
 
         // Close is honored with its reason.
         let status = client.close("测试关闭").unwrap();
