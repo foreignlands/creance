@@ -745,29 +745,60 @@ fn read_body<C: Read>(
         .unwrap_or(false)
     {
         body = read_chunked(channel, max_body)?;
-    } else if let Some(len) = header("content-length").and_then(|v| v.parse::<u64>().ok()) {
-        // Exact read: EOF is never required — peers may hold the tunnel
-        // open after the body.
-        if len > max_body as u64 {
-            return Err("HTTP response body too large".to_owned());
-        }
-        (&mut *channel)
-            .take(len)
-            .read_to_end(&mut body)
-            .map_err(|e| e.to_string())?;
-        if body.len() as u64 != len {
-            return Err("incomplete HTTP response body".to_owned());
-        }
     } else {
-        // Without Content-Length the stream ends at EOF; read one byte past
-        // the cap so an oversized body errors instead of importing silently
-        // truncated.
-        (&mut *channel)
-            .take(max_body as u64 + 1)
-            .read_to_end(&mut body)
-            .map_err(|e| e.to_string())?;
-        if body.len() > max_body {
-            return Err("HTTP response body too large".to_owned());
+        // FINDING-006: Content-Length must be unambiguous and parseable.
+        let lengths: Vec<&str> = headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+            .map(|(_, v)| v.as_str())
+            .collect();
+        let len = match lengths.as_slice() {
+            [] => None,
+            [only] => Some(
+                only.trim()
+                    .parse::<u64>()
+                    .map_err(|_| "invalid Content-Length".to_owned())?,
+            ),
+            many => {
+                let first = many[0].trim();
+                if many.iter().all(|v| v.trim() == first) {
+                    Some(
+                        first
+                            .parse::<u64>()
+                            .map_err(|_| "invalid Content-Length".to_owned())?,
+                    )
+                } else {
+                    return Err("ambiguous Content-Length".to_owned());
+                }
+            }
+        };
+        match len {
+            // Exact read: EOF is never required — peers may hold the tunnel
+            // open after the body.
+            Some(len) => {
+                if len > max_body as u64 {
+                    return Err("HTTP response body too large".to_owned());
+                }
+                (&mut *channel)
+                    .take(len)
+                    .read_to_end(&mut body)
+                    .map_err(|e| e.to_string())?;
+                if body.len() as u64 != len {
+                    return Err("incomplete HTTP response body".to_owned());
+                }
+            }
+            None => {
+                // Without Content-Length the stream ends at EOF; read one
+                // byte past the cap so an oversized body errors instead of
+                // importing silently truncated.
+                (&mut *channel)
+                    .take(max_body as u64 + 1)
+                    .read_to_end(&mut body)
+                    .map_err(|e| e.to_string())?;
+                if body.len() > max_body {
+                    return Err("HTTP response body too large".to_owned());
+                }
+            }
         }
     }
     Ok(body)
@@ -780,7 +811,9 @@ fn read_chunked<C: Read>(channel: &mut C, max_body: usize) -> Result<Vec<u8>, St
         loop {
             let mut b = [0u8; 1];
             if channel.read(&mut b).map_err(|e| e.to_string())? == 0 {
-                return Ok(body);
+                // FINDING-006: EOF between chunks is a truncated body, not
+                // a silent success.
+                return Err("incomplete HTTP response body".to_owned());
             }
             line.push(b[0]);
             if line.ends_with(b"\r\n") {
@@ -802,8 +835,15 @@ fn read_chunked<C: Read>(channel: &mut C, max_body: usize) -> Result<Vec<u8>, St
         let mut chunk = vec![0u8; size];
         channel.read_exact(&mut chunk).map_err(|e| e.to_string())?;
         body.extend_from_slice(&chunk);
+        // The chunk terminator must be exactly CRLF — anything else is a
+        // corrupted stream, not something to swallow and resync past.
         let mut crlf = [0u8; 2];
-        let _ = channel.read_exact(&mut crlf);
+        channel
+            .read_exact(&mut crlf)
+            .map_err(|_| "invalid chunk terminator".to_owned())?;
+        if &crlf != b"\r\n" {
+            return Err("invalid chunk terminator".to_owned());
+        }
     }
 }
 
@@ -877,6 +917,63 @@ mod tests {
         push_socks5_target(&mut req2, "1.2.3.4", 8080).unwrap();
         assert_eq!(req2[3], 0x01);
         assert_eq!(&req2[4..8], &[1, 2, 3, 4]);
+    }
+
+    fn read_body_from(
+        wire: &[u8],
+        headers: &[(&str, &str)],
+        max: usize,
+    ) -> Result<Vec<u8>, String> {
+        let headers: Vec<(String, String)> = headers
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        let mut reader = wire;
+        read_body(&mut reader, &headers, max)
+    }
+
+    #[test]
+    fn lenient_response_defects_are_rejected() {
+        // FINDING-006: all five lenient-acceptance classes refused.
+        // Double Content-Length with different values.
+        let err = read_body_from(
+            b"abcdef",
+            &[("Content-Length", "3"), ("content-length", "10")],
+            64,
+        )
+        .unwrap_err();
+        assert!(err.contains("ambiguous"), "{err}");
+        // Garbage Content-Length.
+        let err = read_body_from(b"abcdef", &[("Content-Length", "abc")], 64).unwrap_err();
+        assert!(err.contains("invalid Content-Length"), "{err}");
+        // Duplicate-but-equal Content-Length is accepted.
+        let body = read_body_from(
+            b"abc",
+            &[("Content-Length", "3"), ("content-length", "3")],
+            64,
+        )
+        .unwrap();
+        assert_eq!(body, b"abc");
+        // Chunked: EOF at a chunk-line boundary.
+        let err =
+            read_body_from(b"3\r\nabc\r\n", &[("Transfer-Encoding", "chunked")], 64).unwrap_err();
+        assert!(err.contains("incomplete"), "{err}");
+        // Chunked: garbage where CRLF belongs.
+        let err = read_body_from(
+            b"3\r\nabcZZ5\r\nhello\r\n0\r\n\r\n",
+            &[("Transfer-Encoding", "chunked")],
+            64,
+        )
+        .unwrap_err();
+        assert!(err.contains("terminator"), "{err}");
+        // Chunked: complete honest stream still parses.
+        let body = read_body_from(
+            b"3\r\nabc\r\n5\r\nhello\r\n0\r\n\r\n",
+            &[("Transfer-Encoding", "chunked")],
+            64,
+        )
+        .unwrap();
+        assert_eq!(body, b"abchello");
     }
 
     #[test]

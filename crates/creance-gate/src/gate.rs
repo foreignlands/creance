@@ -59,6 +59,9 @@ pub struct GateStatus {
     pub run_id: String,
     pub policy: String,
     pub epoch: u64,
+    /// Identifies the open check window; a grant must carry it back.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub check_id: String,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub counts: std::collections::BTreeMap<String, u64>,
 }
@@ -107,6 +110,7 @@ struct GateInner {
     opened_at: Option<Instant>,
     lease: Duration,
     report: Option<SafetyReport>,
+    check_id: String,
     counts: std::collections::BTreeMap<String, u64>,
     /// The configuration snapshot this gate started with; `proxy-revision`
     /// compares the freshly loaded config against it.
@@ -121,6 +125,7 @@ impl GateInner {
             run_id: run_id.to_owned(),
             policy: POLICY.to_owned(),
             epoch: self.epoch,
+            check_id: self.check_id.clone(),
             counts: self.counts.clone(),
         }
     }
@@ -131,19 +136,39 @@ impl GateInner {
         self.epoch += 1;
         self.opened_at = None;
         self.report = None;
+        self.check_id.clear();
         *self.counts.entry("closed".to_owned()).or_default() += 1;
     }
 }
 
-fn truncate_utf8(s: &str, max: usize) -> &str {
-    match s
-        .char_indices()
-        .nth_back(s.chars().count().saturating_sub(max))
-    {
-        Some((i, _)) if s.len() > max => &s[..i.min(s.len())],
-        _ if s.len() <= max => s,
-        _ => s,
+/// The longest prefix of `s` that is at most `max` BYTES and ends on a
+/// char boundary. FINDING-008: the previous implementation measured in
+/// chars, so multi-byte text barely truncated at all.
+/// Length-safe constant-time equality for secret comparisons (FINDING-008;
+/// Go uses subtle.ConstantTimeCompare).
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
     }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+fn truncate_utf8(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut end = 0;
+    for (i, ch) in s.char_indices() {
+        if i + ch.len_utf8() > max {
+            break;
+        }
+        end = i + ch.len_utf8();
+    }
+    &s[..end]
 }
 
 /// The gate's shared core, served on its private socket.
@@ -225,6 +250,7 @@ impl Gate {
                 opened_at: None,
                 lease: CHECK_LEASE,
                 report: None,
+                check_id: String::new(),
                 counts: std::collections::BTreeMap::new(),
                 recorded: config::load(config_path).ok(),
             }),
@@ -357,7 +383,10 @@ impl Gate {
         }
         // Host must be the private name, Origin must be absent, and the
         // bearer must match the record's token.
-        if host != "cage" || origin_present || bearer != self.record_token() {
+        if host != "cage"
+            || origin_present
+            || !constant_time_eq(bearer.as_bytes(), self.record_token().as_bytes())
+        {
             let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
             return;
         }
@@ -401,7 +430,7 @@ impl Gate {
     }
 
     fn control(&self, body: &[u8]) -> (u16, Vec<u8>) {
-        let command: GateCommand = match serde_json::from_slice(body) {
+        let mut command: GateCommand = match serde_json::from_slice(body) {
             Ok(c) => c,
             Err(e) => return (400, error_json(&format!("invalid command: {e}"))),
         };
@@ -439,6 +468,10 @@ impl Gate {
                 inner.reason.clear();
                 inner.opened_at = Some(Instant::now());
                 inner.lease = CHECK_LEASE;
+                // FINDING-008: the check window gets an id; a grant must
+                // carry it back, tying the report to this window (Go's
+                // CheckID binding).
+                inner.check_id = creance_vm::token()[..16].to_owned();
                 let _ = &command;
                 (
                     200,
@@ -453,20 +486,31 @@ impl Gate {
                     serde_json::to_vec(&inner.status(&self.run_id)).expect("status"),
                 )
             }
-            "grant" => match command.report {
-                Some(report) if report.authorizes() => {
-                    inner.state = GateState::Open;
-                    inner.reason.clear();
-                    inner.opened_at = Some(Instant::now());
-                    inner.lease = OPEN_LEASE;
-                    inner.report = Some(report);
-                    (
-                        200,
-                        serde_json::to_vec(&inner.status(&self.run_id)).expect("status"),
-                    )
+            "grant" => {
+                // FINDING-008: Go only grants from the Checking state with
+                // the report bound to the open check window.
+                if inner.state != GateState::Checking {
+                    (409, error_json("仅在检测进行中可以授权开放，外网保持关闭"))
+                } else if command.report_id != inner.check_id || inner.check_id.is_empty() {
+                    inner.close("授权与当前检测窗口不匹配，外网保持关闭");
+                    (409, error_json("授权与当前检测窗口不匹配，外网保持关闭"))
+                } else {
+                    match command.report.take() {
+                        Some(report) if report.authorizes() => {
+                            inner.state = GateState::Open;
+                            inner.reason.clear();
+                            inner.opened_at = Some(Instant::now());
+                            inner.lease = OPEN_LEASE;
+                            inner.report = Some(report);
+                            (
+                                200,
+                                serde_json::to_vec(&inner.status(&self.run_id)).expect("status"),
+                            )
+                        }
+                        _ => (409, error_json("安全报告缺失必需的通过项，外网保持关闭")),
+                    }
                 }
-                _ => (409, error_json("安全报告缺失必需的通过项，外网保持关闭")),
-            },
+            }
             "renew" => {
                 let matches_report = inner
                     .report
@@ -540,12 +584,43 @@ impl Gate {
         if strip_config(&old_config) != strip_config(&new_config) {
             return Err("出口地址或环境设置变化需要重启环境".to_owned());
         }
+        // FINDING-008: the exit policy may only be *completed*, never
+        // modified — Go's SyncProxyRevision allows each field to change
+        // only from unbound to a value. Any other change demands a restart.
+        if !exit_policy_only_completed(&old_config.exit_policy, &new_config.exit_policy) {
+            return Err("出口地址或环境设置变化需要重启环境".to_owned());
+        }
         if new_config.proxy_revision.is_empty() {
             return Err("出口地址或环境设置变化需要重启环境".to_owned());
         }
         inner.recorded = Some(new_config.clone());
+        // Go refreshes the environment's running record so its fingerprint
+        // matches the adopted configuration.
+        let instance_dir = Path::new(&self.record_path)
+            .parent()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let _ = creance_vm::running::record_running(&instance_dir, &new_config);
         Ok(())
     }
+}
+
+/// True when `new` only fills fields `old` left empty (same mode/scope);
+/// any bound value that changed means the anchor moved — a restart.
+fn exit_policy_only_completed(
+    old: &crate::exit_policy::Policy,
+    new: &crate::exit_policy::Policy,
+) -> bool {
+    let old = old.normalized();
+    let new = new.normalized();
+    if old.mode != new.mode || old.scope != new.scope {
+        return false;
+    }
+    let completed = |o: &str, n: &str| o.is_empty() || o == n;
+    completed(&old.ip, &new.ip)
+        && completed(&old.country_code, &new.country_code)
+        && completed(&old.region, &new.region)
+        && completed(&old.city, &new.city)
 }
 
 /// The fields a revision change may move: the exit endpoint/revision and the
@@ -729,24 +804,32 @@ mod tests {
         assert_eq!(status.policy, POLICY);
         assert_eq!(status.run_id, record.run_id);
 
-        // Checking opens the check window.
+        // Checking opens the check window and issues its id.
         let status = client.begin_check().unwrap();
         assert_eq!(status.state, GateState::Checking);
+        let check_id = status.check_id.clone();
+        assert!(!check_id.is_empty());
 
-        // Grant without the required checks is refused and closes.
-        let bad = serde_json::json!({"action": "grant", "report_id": "r1"});
+        // A grant bound to this window but missing required checks: refused
+        // WITHOUT closing (the report can be completed and resubmitted).
+        let bad = serde_json::json!({
+            "action": "grant",
+            "report_id": check_id,
+            "report": {"report_id": check_id, "checks": {}},
+        });
         let raw = call_raw(&record, &bad.to_string()).unwrap();
         assert!(raw.0.starts_with("409"), "{raw:?}");
+        assert_eq!(client.status().unwrap().state, GateState::Checking);
 
-        // With every required check passed, the gate opens.
+        // With every required check passed and the window id carried, open.
         let mut checks = std::collections::BTreeMap::new();
         for c in SafetyReport::REQUIRED {
             checks.insert((*c).to_owned(), "passed".to_owned());
         }
         let good = serde_json::json!({
             "action": "grant",
-            "report_id": "r2",
-            "report": {"report_id": "r2", "checks": checks},
+            "report_id": check_id,
+            "report": {"report_id": check_id, "checks": checks},
         });
         let raw = call_raw(&record, &good.to_string()).unwrap();
         assert!(raw.0.starts_with("200"), "{raw:?}");
@@ -756,7 +839,43 @@ mod tests {
         let status = client.close("测试关闭").unwrap();
         assert_eq!(status.state, GateState::Closed);
         assert_eq!(status.reason, "测试关闭");
+
+        // FINDING-008 regressions ------------------------------------
+        // A grant while Closed is refused outright (Go: Checking-only).
+        let mut checks = std::collections::BTreeMap::new();
+        for c in SafetyReport::REQUIRED {
+            checks.insert((*c).to_owned(), "passed".to_owned());
+        }
+        let closed_grant = serde_json::json!({
+            "action": "grant",
+            "report_id": "whatever",
+            "report": {"report_id": "whatever", "checks": checks.clone()},
+        });
+        let raw = call_raw(&record, &closed_grant.to_string()).unwrap();
+        assert!(raw.0.starts_with("409"), "{raw:?}");
+
+        // A grant with a stale window id closes the gate (mis-bound report).
+        client.begin_check().unwrap();
+        let stale = serde_json::json!({
+            "action": "grant",
+            "report_id": "stale-id",
+            "report": {"report_id": "stale-id", "checks": checks},
+        });
+        let raw = call_raw(&record, &stale.to_string()).unwrap();
+        assert!(raw.0.starts_with("409"), "{raw:?}");
+        assert_eq!(client.status().unwrap().state, GateState::Closed);
         fs::remove_dir_all(&profile).unwrap();
+    }
+
+    #[test]
+    fn truncate_reason_enforces_the_byte_budget() {
+        // FINDING-008: multi-byte text must actually hit the 200-byte cap.
+        let cjk = "好".repeat(150); // 450 bytes
+        let truncated = truncate_utf8(&cjk, 200);
+        assert!(truncated.len() <= 200, "{}", truncated.len());
+        assert!(truncated.chars().all(|c| c == '好'));
+        assert_eq!(truncate_utf8("abc", 200), "abc");
+        assert_eq!(truncate_utf8(&"a".repeat(300), 200).len(), 200);
     }
 
     #[test]

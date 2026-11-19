@@ -18,6 +18,7 @@ pub fn read_header_block<R: Read>(
     let mut block = Vec::with_capacity(1024);
     let mut chunk = [0u8; 8192];
     let mut leftover: Vec<u8> = Vec::new();
+    let mut terminated = false;
     loop {
         let n = inner.read(&mut chunk)?;
         if n == 0 {
@@ -32,8 +33,14 @@ pub fn read_header_block<R: Read>(
         if let Some(pos) = find_terminator(&block, start.saturating_sub(3)) {
             leftover.extend_from_slice(&block[pos + 4..]);
             block.truncate(pos + 4);
+            terminated = true;
             break;
         }
+    }
+    // FINDING-006: a non-empty header block that never reached its blank
+    // line is a truncated response, not a success.
+    if !block.is_empty() && !terminated {
+        return Err(io::Error::other("HTTP header incomplete"));
     }
     Ok((
         block,
@@ -131,5 +138,13 @@ mod tests {
     fn empty_stream_is_not_an_error() {
         let (block, _) = read_header_block(b"".as_slice(), 16 << 10).unwrap();
         assert_eq!(block, Vec::<u8>::new());
+    }
+
+    #[test]
+    fn truncated_headers_are_rejected() {
+        // FINDING-006: a half header block ("HTTP/1.1 200 OK\r\nX" + EOF)
+        // must error instead of passing as a 200 with an empty body.
+        let wire = b"HTTP/1.1 200 OK\r\nX".as_slice();
+        assert!(read_header_block(wire, 16 << 10).is_err());
     }
 }

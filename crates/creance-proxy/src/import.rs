@@ -12,6 +12,27 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
 /// The protocols the bundled core supports for imports.
+/// True when the payload visibly contains a decimal integer too wide for
+/// 64 bits — the one parse failure serde_yaml cannot represent (Go's
+/// yaml.v3 degrades to float64 instead).
+fn contains_overflow_integer(data: &[u8]) -> bool {
+    let mut run = 0usize;
+    for &b in data.iter().chain(std::iter::once(&b' ')) {
+        if b.is_ascii_digit() {
+            run += 1;
+            // 20 digits already overflows u64 for values ≥ 10^19; a rare
+            // in-range 20-digit number only trades the generic message for
+            // a more specific one.
+            if run >= 20 {
+                return true;
+            }
+        } else {
+            run = 0;
+        }
+    }
+    false
+}
+
 /// A single linear pass over the raw bytes: refuse absurd flow-nesting
 /// depth (>128 — the parser's own limit, but reached here in O(n)) and
 /// absurd single-line length (>1 MiB, another quadratic-scanner vector).
@@ -73,8 +94,15 @@ pub fn parse_nodes(data: &[u8], source_id: &str) -> Result<(Vec<Node>, Vec<NodeI
     // own recursion limit rejects it. One linear pass refuses it instantly.
     precheck_depth(data)?;
     let yaml: serde_yaml::Value = serde_yaml::from_slice(data).map_err(|_| {
-        "无法读取 YAML，请导入 Clash/Mihomo 节点订阅或配置；暂不支持 Base64 列表或分享链接"
-            .to_owned()
+        // FINDING-002: serde_yaml rejects whole documents over a single
+        // integer wider than 64 bits (Go's yaml.v3 falls back to float64);
+        // point the user at the actual cause instead of the generic text.
+        if contains_overflow_integer(data) {
+            "订阅包含超出 64 位范围的整数（如端口或端口范围写成超大数字），请修正后重试".to_owned()
+        } else {
+            "无法读取 YAML，请导入 Clash/Mihomo 节点订阅或配置；暂不支持 Base64 列表或分享链接"
+                .to_owned()
+        }
     })?;
     let mut proxies: Vec<serde_yaml::Value> = yaml
         .get("proxies")
@@ -305,9 +333,18 @@ fn yaml_to_json(v: serde_yaml::Value) -> Result<Value, String> {
         serde_yaml::Value::Null => Value::Null,
         serde_yaml::Value::Bool(b) => Value::Bool(b),
         serde_yaml::Value::Number(n) => {
-            serde_json::Number::from_f64(n.as_f64().unwrap_or_default())
-                .map(Value::Number)
-                .ok_or("节点包含非有限数字")?
+            // FINDING-003: integral scalars must stay integral — the old
+            // blanket f64 conversion turned `mport: 443` into "443.0" and
+            // every downstream integer parser rejected it.
+            if let Some(i) = n.as_i64() {
+                Value::Number(serde_json::Number::from(i))
+            } else if let Some(u) = n.as_u64() {
+                Value::Number(serde_json::Number::from(u))
+            } else {
+                serde_json::Number::from_f64(n.as_f64().unwrap_or_default())
+                    .map(Value::Number)
+                    .ok_or("节点包含非有限数字")?
+            }
         }
         serde_yaml::Value::String(s) => Value::String(s),
         serde_yaml::Value::Sequence(seq) => Value::Array(
@@ -757,6 +794,29 @@ proxies:
     dialer-proxy: "A"
 "#;
         assert!(parse_nodes(y.as_bytes(), "src").is_err());
+    }
+
+    #[test]
+    fn numeric_hysteria2_fields_stay_integral() {
+        // FINDING-003: `mport: 443` (a number, not a string) must normalize
+        // to ports "443", not be rejected as "443.0".
+        let y = "proxies:\n  - name: H2num\n    type: hysteria2\n    server: 1.2.3.4\n    port: 443\n    mport: 443\n    auth: pw\n";
+        let (nodes, _) = parse_nodes(y.as_bytes(), "src").unwrap();
+        assert_eq!(
+            nodes[0].config.get("ports").and_then(Value::as_str),
+            Some("443"),
+            "{:?}",
+            nodes[0].config
+        );
+    }
+
+    #[test]
+    fn overflow_integers_get_an_actionable_error() {
+        // FINDING-002: the document is still rejected (serde_yaml cannot
+        // hold the number), but the message names the cause.
+        let y = "proxies:\n  - name: big\n    type: ss\n    server: 1.2.3.4\n    port: 99999999999999999999\n    cipher: aes-128-gcm\n    password: x\n";
+        let err = parse_nodes(y.as_bytes(), "src").unwrap_err();
+        assert!(err.contains("超出 64 位范围"), "{err}");
     }
 
     #[test]
