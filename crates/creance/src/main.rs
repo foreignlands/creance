@@ -580,6 +580,23 @@ fn cmd_setup(memory: u32, cpus: u32) -> i32 {
         proxy_port: proxy_store_port(&profile),
         guest,
     };
+    // F-051: setup on an existing instance rebuilds it — limactl create
+    // refuses to touch a live directory, and every "re-run setup"
+    // guidance (drift, promise changes) depends on this path existing.
+    // The VM disk goes; the host workspace does not.
+    let existing = creance_vm::paths::join(
+        &creance_vm::vm::lima_home(&profile),
+        &format!("{instance}/lima.yaml"),
+    );
+    if Path::new(&existing).exists() {
+        println!("rebuilding existing instance {instance} (VM disk replaced; workspace untouched)");
+        let code = creance_vm::vm::delete(&profile, &instance);
+        if code != 0 {
+            return fail(format!(
+                "cannot remove the existing instance {instance}; run `creance stop` first"
+            ));
+        }
+    }
     if let Err(e) = creance_vm::lima::setup_instance(&profile, &instance, &options) {
         return fail(e);
     }

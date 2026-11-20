@@ -237,6 +237,14 @@ pub fn create(profile: &str, instance: &str) -> i32 {
     run_attached(profile, &["create", &yaml])
 }
 
+/// Deletes the instance outright — the VM disk, not the host workspace
+/// (the workspace lives outside the Lima home and survives). F-051:
+/// re-running setup must actually rebuild the instance instead of
+/// dead-ending on limactl's "already exists".
+pub fn delete(profile: &str, instance: &str) -> i32 {
+    run_attached(profile, &["delete", "-f", instance])
+}
+
 /// Prints instance diagnostics.
 pub fn doctor(profile: &str, _instance: &str) -> i32 {
     match run_captured(profile, &["list", "--format", "json"]) {
