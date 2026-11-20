@@ -4,6 +4,25 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.5.5] — 2026-11-20
+
+### Fixed — night-11: R9 findings 048–051
+
+- **F-048 (grant path restored)**: the rules reconciliation guessed a
+  bare array; the live core answers {"rules":[...]} — every honest core
+  was judged divergent and gate-open failed 100% of the time. The
+  captured live response is now the frozen fixture of a pure judge
+  (with flip/smuggle/bare-array counter-examples).
+- **F-049**: a missing or unreadable fingerprint stamp no longer skips
+  the drift check — `up` refuses, the escape probe flags a running VM
+  without its stamp, and a setup that cannot write the stamp fails.
+- **F-050**: an unreadable store (one corrupted sources.json) no longer
+  silently blinds both gate-open reconciliations — no store, no
+  evidence.
+- **F-051**: `creance setup` rebuilds an existing instance (limactl
+  delete -f then create; the VM disk is replaced, the host workspace is
+  untouched) — every "re-run setup" guidance is finally reachable.
+
 ## [0.5.4] — 2026-11-20
 
 ### Fixed — night-10: R8 findings 044–047

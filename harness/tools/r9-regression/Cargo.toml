@@ -1,0 +1,35 @@
+[package]
+name = "r9-regression"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# R9 探针：night-10 修复面纯回归（基线 35a2f8 / v0.5.4，完整 ci.sh RC 见 findings）。
+# 走真实 crate（path-dep；教训：rustc 复刻对修复复验无效）。
+# 假设：
+#   H1 F-046 修复面：/rules 对账的形状假设（裸数组 + type=="Match"）是否与
+#      真实核心一致——2026-11-20 实机冒烟（target/proxy-core/mihomo v?，direct
+#      配置）实测 GET /rules 返回 {"rules":[…]} 包装对象。假核心按真实形状
+#      应答时，诚实核心必须通过 check_running（可用性），预测：Err("readiness:
+#      rules") 恒假 → gate-open 全灭。负控：裸数组形状（修复自己的假设）
+#      才通过——证明修复只对不存在的形状有效。
+#   H2 F-044 修复面：stamp 形态矩阵——匹配/漂移/缺失/空/尾随空白 × 探针结果 ×
+#      report() 退出码。缺失 stamp 时 cmd_up 的 `if let Ok` 跳过检查（fail-open），
+#      探针报 NotEnforced（不计入失败）→ 洗绿路径重启的实证。
+#   H3 F-047 修复面：事务性库侧件——close_gates 对活 socket 但拒绝命令的
+#      守护 → Err（CLI `?` 中止 select）；死记录 → Ok+就地清理；未知节点
+#      → Err 且 store 不动（校验先于落盘）。
+#   H4 F-046b：对账的 fail-open 输入——corrupt sources.json → load Err
+#      （cmd_gate 的 `if let Ok` 全跳）；缺失 sources.json → Ok(默认随机
+#      auth+空 selected) → check_running 仍被 selection 拒（fail-closed 对照）。
+#   H5 F-045 面：三个 guest 字段白名单是否挡全 shell 元字符（单引号/反引号/
+#      $()）；heredoc 定界符带不带引号（供给时展开与否）。
+
+[dependencies]
+creance = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance" }
+creance-gate = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-gate" }
+creance-proxy = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-proxy" }
+creance-vm = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-vm" }
+serde_json = "1"
+
+[workspace]
