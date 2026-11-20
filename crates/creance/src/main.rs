@@ -592,12 +592,13 @@ fn cmd_setup(memory: u32, cpus: u32) -> i32 {
 fn cmd_proxy_select(node: String) -> i32 {
     cmd_simple(|| {
         let profile = profile();
+        // F-043/F-047: revoking the OLD gate's evidence comes FIRST and
+        // its failure is fatal to the switch (Go's applyProxy is
+        // transactional: close fails → nothing lands). Selecting first
+        // and swallowing the close error left an open gate behind a
+        // config already declaring a different exit, reported as success.
+        gate::close_gates(&profile)?;
         creance_proxy::select_and_apply(&profile, &config::config_path(), &node)?;
-        // F-043: the switch is declared the moment select lands — close
-        // the gates synchronously (Go's applyProxy does exactly this).
-        // Until the next proxy-start, an open gate must never coexist
-        // with a config that already declares a different exit.
-        let _ = gate::close_gates(&profile);
         println!("applied {node}; run `creance proxy-start` to launch the core");
         Ok(())
     })
