@@ -4,6 +4,16 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.5.7] — 2026-11-20
+
+### Fixed — night-13: R11 finding 055
+
+- **F-055**: the provision URL consumed the inner-script ARCH through
+  a cross-quote expansion the outer shell never defined — the arch
+  segment was empty on every architecture and the pinned node download
+  was dead code on the apt fallback. ARCH now expands where it lives;
+  the URL's completeness is asserted and probe-verified end to end.
+
 ## [0.5.6] — 2026-11-20
 
 ### Fixed — night-12: R10 findings 052–054

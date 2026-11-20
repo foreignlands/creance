@@ -3,6 +3,7 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 055 | S4 | F-054 修复的 arm64-URL 子声称不成立：工具链段 `'"$ARCH"'` 在外层 dash 展开、ARCH 只在内层 sh -c 赋值 → URL 架构段恒空（所有架构 404）→ nodejs.org 主下载死代码、恒走 apt 兜底（nodejs 18）；F-054 其余子修复（APT_OPTS 拼接/300s 预算/124 吞/契约可达）实证有效；commit message "URL is even right on arm64" 与行为落差与 F-052 同型（night-11 工程陷阱 #49 再现） | R11（F-054 修复面回归） | 已修复（night-13：内层展开+探针同步复验 PASS） |
 | 052 | S4 | F-049 修复只落地 2/3：cmd_up 的 stamp 读失败仍 `if let Ok` 跳过（commit message 与 STATE 声称的 "any stamp read failure refuses up" 不存在于代码）——实机：删 stamp → up rc=0，且无实例时 limactl start 从 template:default 自动创建未供给原版 VM（无拓扑/无身份/无令牌）在 creance up 下启动成功 | R10-A1（F-049 修复面回归） | 已修复（night-12：三分支真落地+up 前实例存在检查；实机双 case 拒绝） |
 | 053 | S4 | lima 2.3.0 create 小写化实例名 vs creance vmname 大小写保留 → instance_running 名字恒等式永假：F-049 探针守卫（stamp missing on running VM）与 gate-record 探针在 setup 产物上永不触发（实机：Running VM+删 stamp → 两探针 NotEnforced、escape-test 报 contained）；macOS APFS 大小写不敏感掩盖路径级后果，case-sensitive 卷上 F-051 重建检测必 miss→死胡同回归；limactl start 自动创建反而保留大写（lima 自不一致） | R10-E1/F-051 面 | 已修复（night-12：实例名生成统一小写对齐 lima） |
 | 054 | S4 | 首启供给截断 fail-open：无 --max-time 的 nodejs curl 在供给期（无 tunnel）挂死被超时击杀，拓扑锁定+特权回收（脚本自称 containment contract）整段未执行——实测 VM 交付 OUTPUT ACCEPT+免密 sudo+ipv6 开（up rc=0）；手工重跑脚本可全程走完=纯次序+超时缺陷；次生：[[ bashism 在 dash 下恒 x64 退化 | R10-E1/D（F-031/F-034 残留） | 已修复（night-12：网络步骤全有界+工具链段 300s 硬预算+POSIX case） |
