@@ -1,0 +1,24 @@
+[package]
+name = "r11-regression"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# R11 探针：night-12 修复面收敛回归（基线 c20332d / v0.5.6，完整 ci.sh RC=0）。
+# 走真实 crate（path-dep）。假设（修复后语义）：
+#   H1 F-053 修复面：实例名小写化全局一致——
+#      a) 混合大小写 workspace 名 → base 小写（对齐 lima 2.3 create 小写化）；
+#      b) instance_name 在真假两种 lima home 形态下都返回小写名；
+#      c) 旧UpperCase 假设翻转验证：若 base 保留大小写，则与 lima 小写化
+#         产物失配（此处以"名字必须 == 小写期望"断言固化修复语义）。
+#   H2 F-052 修复面（库侧）：setup 写戳失败 fail-closed 的前提——
+#      stamp 路径恒为 state_dir/fingerprint.txt；guest_fingerprint 是
+#      三元组 JSON 的 sha256（给 shell 侧四 case 探针提供锚）。
+
+[dependencies]
+creance-proxy = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-proxy" }
+creance-vm = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-vm" }
+sha2 = "0.10"
+serde_json = "1"
+
+[workspace]

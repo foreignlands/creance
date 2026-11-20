@@ -182,7 +182,7 @@ timeout "$TOOLCHAIN_BUDGET" sh -c '
   ARCH=$(case "$(uname -m)" in aarch64) echo arm64;; *) echo x64;; esac)
   # F-034: download atomically (tmp + mv) — a partial corpse in
   # /usr/local/bin shadows the apt fallback node.
-  if curl -fsSL -m 120 https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-'"$ARCH"'/bin/node -o /usr/local/bin/node.new 2>/dev/null && mv /usr/local/bin/node.new /usr/local/bin/node 2>/dev/null; then
+  if curl -fsSL -m 120 https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-$ARCH/bin/node -o /usr/local/bin/node.new 2>/dev/null && mv /usr/local/bin/node.new /usr/local/bin/node 2>/dev/null; then
     chmod +x /usr/local/bin/node 2>/dev/null || true
   else
     rm -f /usr/local/bin/node.new
@@ -315,6 +315,17 @@ mod tests {
         );
         assert!(script.contains("-m 120"), "curl carries its own deadline");
         assert!(!script.contains("[["), "dash has no [[ ]]");
+        // F-055: ARCH is an INNER-script variable — the URL must expand it
+        // inside the single-quoted block, never through a cross-quote
+        // `'"$ARCH"'` (outer shell never defined it: empty URL segment).
+        assert!(
+            script.contains("linux-$ARCH/bin/node"),
+            "the URL consumes the inner ARCH variable"
+        );
+        assert!(
+            !script.contains(&format!("'\"{}", "$ARCH")),
+            "no cross-quote expansion of inner variables"
+        );
         assert!(
             script.contains("sed -i '\\#^devabc12345 #d'"),
             "the cloud-init sudoers grant must die in provision"
