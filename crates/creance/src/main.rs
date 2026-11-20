@@ -657,21 +657,41 @@ fn cmd_up() -> i32 {
     if let Err(e) = running::check_running(&creance_vm::vm::state_dir(&profile), &cfg) {
         return fail(e);
     }
-    // F-044: the stamp records what the guest was provisioned with, and a
-    // bare `limactl start` never re-provisions. If the guest-visible
-    // promise drifted since setup, bringing the VM up would ship a guest
-    // running the OLD locale/timezone behind a config claiming the new
-    // one — refuse and point at re-setup instead of laundering the drift.
+    // F-044/F-052: the stamp records what the guest was provisioned with,
+    // and a bare `limactl start` never re-provisions. Any stamp read
+    // failure (missing, unreadable, a directory) refuses `up` — a missing
+    // stamp used to skip the check, and `limactl start` on a nonexistent
+    // instance name silently clones Lima's default template: an
+    // unprovisioned VM behind a green exit code.
     let stamp = creance_vm::paths::join(&creance_vm::vm::state_dir(&profile), "fingerprint.txt");
-    if let Ok(pinned) = std::fs::read_to_string(&stamp) {
-        if pinned.trim() != cfg.guest_fingerprint() {
+    match std::fs::read_to_string(&stamp) {
+        Ok(pinned) if pinned.trim() == cfg.guest_fingerprint() => {}
+        Ok(_) => {
             return fail(
                 "guest 环境（时区/语言）自创建以来已变更，且启动不会重新供给；请先 creance stop 再 creance setup 重建环境"
                     .to_owned(),
-            );
+            )
+        }
+        Err(_) => {
+            return fail(
+                "fingerprint 戳缺失或不可读（应由 creance setup 写入）；拒绝启动，请先 creance stop 再 creance setup 重建环境"
+                    .to_owned(),
+            )
         }
     }
     let instance = instance();
+    // F-052's template trap: `limactl start <unknown-name>` clones the
+    // default template instead of failing. Only an instance this profile
+    // set up may be started.
+    let instance_yaml = creance_vm::paths::join(
+        &creance_vm::vm::lima_home(&profile),
+        &format!("{instance}/lima.yaml"),
+    );
+    if !Path::new(&instance_yaml).exists() {
+        return fail(format!(
+            "实例 {instance} 不存在（未 setup 或已被删除）；拒绝启动，请先 creance setup"
+        ));
+    }
     let code = creance_vm::vm::up(&profile, &instance);
     if code == 0 {
         // 0.4: the gate owns the wire now — Closed gate = tunnel down. Raising
