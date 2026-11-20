@@ -4,6 +4,27 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.5.4] — 2026-11-20
+
+### Fixed — night-10: R8 findings 044–047
+
+- **F-044**: `up` no longer refreshes the fingerprint stamp — after the
+  promise narrowed to guest-visible fields, a refresh could only
+  launder real drift (a bare start never re-provisions). Up now refuses
+  to start on drift and points at re-setup.
+- **F-045**: the promise fields have a real supply: provision writes
+  CAGE_TZ/CAGE_LOCALE/CAGE_LANGUAGE to /etc/profile.d/cage-env.sh (Go
+  injects the same trio); browser_language is no longer a vacuous
+  promise.
+- **F-046**: readiness reconciles the RULES now (a flipped core keeping
+  every self-reported field honest while swapping MATCH,CAGE for
+  MATCH,DIRECT used to pass), and gate-open reconciles again after the
+  trace sample — the flip window shrinks to milliseconds.
+- **F-047**: selecting a node is transactional — the old gate's
+  revocation comes first and its failure aborts the selection (Go's
+  applyProxy semantics), never an open gate behind a changed config
+  reported as success.
+
 ## [0.5.3] — 2026-11-20
 
 ### Fixed — night-09: R7 findings 040–043

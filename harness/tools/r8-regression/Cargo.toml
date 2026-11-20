@@ -1,0 +1,28 @@
+[package]
+name = "r8-regression"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# R8 探针：night-09 修复面回归（基线 985a5a2 / v0.5.3，完整 ci.sh RC=0）。
+# 走真实 crate（path-dep 直连仓库；教训：复刻对修复复验无效）。
+# 假设：
+#   H1 F-041 修复面回归：Unchanged 路径现要求 exit_policy.normalized 全等——
+#      部分绑定（needs_binding→仍 needs_binding）落哪支？等价锚（大小写/空白）
+#      会不会被误判？un-bind 是否被拒？（真实 Gate + GateClient 全矩阵）
+#   H2 F-040 修复面：guest_fingerprint 三字段承诺面——host 侧字段变化探针保持绿
+#      （修复意图）；guest 侧字段变化探针红（诚实）；但 up 的无条件刷新
+#      （refresh_fingerprint_stamp）把红洗绿而 guest 从未重供给——假绿实证。
+#   H3 F-043 修复面：select 后 close_gates 对在服 gate 撤销 + 死记录清理。
+#   H4 F-042 残余：check_running 的对账=对核心自述的对账（/configs 五字段 +
+#      组选择，从不过 /rules）——规则级翻转（保 mode=rule + 伪装组选择）的
+#      自述足以通过对账；负对照：mode=direct 自述被拒（修复对已记录攻击有效）。
+
+[dependencies]
+creance = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance" }
+creance-gate = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-gate" }
+creance-proxy = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-proxy" }
+creance-vm = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-vm" }
+serde_json = "1"
+
+[workspace]

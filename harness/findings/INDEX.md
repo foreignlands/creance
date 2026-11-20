@@ -3,6 +3,10 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 047 | S5 | F-043 修复的失败分支：select 先落地后 `let _` 吞 close_gates 错误——Go applyProxy 是事务性（close 失败→中止+defer 回滚 store/config），Rust 失败时"Open gate+新声明+旧 wire"三方不一致共存且报成功；窗口 ≤90s（renew 零调用者→lease 必到期）且再 open 被 check_running selection 拒，无取证重复路径 | R8-A4（F-043 面） | 已修复（night-10：select 事务性——close 前置传播 Err） |
+| 046 | S4 | night-09 check_running 对账集不含 /rules：保 mode=rule+同端口/同 interface/unified-delay+伪装 CAGE 组预选回 selected 的规则级重载自述穿透对账（假核心在环实证；负对照 mode=direct 仍拒=修复对已记录攻击有效）；对账=对核心自述的对账（同源限度）；TOCTOU 不独立成洞（被本面吸收）；SAFE_PATHS 同 uid 内不可收窄（设计地板）；F-038 假设再收窄：洗地路由可由同 uid 自装、无需不诚实订阅 | R8-A3（F-042 面） | 已修复（night-10：对账补 /rules+采样后二次对账） |
+| 045 | S5 | browser_language 被 guest_fingerprint 承诺为 guest 可感知但全仓库零供给路径（改它→探针红→强制 re-setup→依然无人消费）；Go 经 CAGE_LANGUAGE 注入（guest.go:315）且 CAGE_TZ/CAGE_LOCALE env 链整条缺失；dns_url 两版同形硬编码不进 guest（F-040 排除正确，承诺面盘点收口） | R8-A2（F-040 面） | 已修复（night-10：provision 写 /etc/profile.d/cage-env.sh 三字段） |
+| 044 | S4 | up 无条件刷新 fingerprint stamp：F-040 后刷戳唯一能改变结果场景=guest 三字段真实漂移，而 vm::up=裸 limactl start 不重供给——stop→edit→up 把诚实红洗绿（探针 h2.3 FAIL 实证），guest 实际仍旧时区；刷戳注释理由"proxy_revision is part of it"已被 F-040 自删；up_refreshes_a_stale_stamp 测试把假绿奉为规范须反转 | R8-A1（F-041 邻面/F-040 修复引入） | 已修复（night-10：删刷新，漂移 up 拒绝+re-setup 提示） |
 | 043 | S5 | select_and_apply 不撤销 gate（Go applyProxy 每次 select/restart/route 同步 closeProxyGate——proxy.go:334）：select→proxy-start 窗口内 Open gate+声明新节点+wire 旧节点共存；applied() 对运行核心失明（F-036），与 F-041 组合成弱缝 | R7-B3/G4 | 已修复（night-09：select 即撤 gate 两入口） |
 | 042 | S4 | mihomo external-controller-unix 零认证（Go 同形非漂移）：同 uid 无凭证 PATCH mode=direct / SAFE_PATHS 内 yaml 重载 MATCH,DIRECT 全部 HTTP 204 成立，出口证据预言机随核心运行时被劫持（宿主出口替代节点失败），config.yaml/sources.json 零痕迹；guest 不可达（0700 目录） | R7-B1 | 已修复（night-09：secret+readiness 对账+gate-open 前核心对账；unix 免鉴为 mihomo 设计） |
 | 041 | S4 | night-08 回归：proxy-revision 幂等 Unchanged 路径的 strip_config 剥掉 exit_policy——锚点漂移（换 ip/mode 迁移）+revision 不动 → 200 且 gate 保持 Open，无重检查无重启要求；renew 可无限续期无硬顶（探针 m1-m5 实证；附 created_at=0+时钟≤epoch fail-open 逻辑读） | R7-A2/A3 | 已修复（night-09：Unchanged 含锚点比对） |
