@@ -555,6 +555,7 @@ fn cmd_setup(memory: u32, cpus: u32) -> i32 {
         workspace: creance_vm::vm::environment_dir(&profile),
         timezone: cfg.timezone.clone(),
         locale: cfg.locale.clone(),
+        browser_language: cfg.browser_language.clone(),
         proxy_port: proxy_store_port(&profile),
         guest,
     };

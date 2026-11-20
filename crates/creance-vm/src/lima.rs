@@ -25,6 +25,7 @@ pub struct SetupOptions {
     /// Guest fingerprint settings, taken from the profile config.
     pub timezone: String,
     pub locale: String,
+    pub browser_language: String,
     /// Host-side managed-core port; the guest loopback forwards back to it.
     pub proxy_port: u16,
     /// Generated guest identity (hostname/username/session token).
@@ -40,6 +41,7 @@ impl Default for SetupOptions {
             workspace: String::new(),
             timezone: "Etc/UTC".to_owned(),
             locale: "en_US.UTF-8".to_owned(),
+            browser_language: "en-US".to_owned(),
             proxy_port: 17896,
             guest: crate::guestprofile::Profile::generate(),
         }
@@ -75,6 +77,8 @@ pub fn generate_lima_yaml(options: &SetupOptions) -> Result<Vec<u8>, String> {
         "script".into(),
         Yaml::from(provision_script(
             &options.locale,
+            &options.timezone,
+            &options.browser_language,
             &options.guest.session_token,
             &options.guest.hostname,
             &options.guest.username,
@@ -136,13 +140,29 @@ pub fn generate_lima_yaml(options: &SetupOptions) -> Result<Vec<u8>, String> {
 /// The guest bootstrap: fingerprint (timezone/locale) first, then the tool
 /// chain. Guest networking is not yet gated (see ROADMAP); the apt step
 /// runs on the VM's NAT until the cage network layer is in place.
-fn provision_script(locale: &str, session_token: &str, hostname: &str, username: &str) -> String {
+fn provision_script(
+    locale: &str,
+    timezone: &str,
+    browser_language: &str,
+    session_token: &str,
+    hostname: &str,
+    username: &str,
+) -> String {
     format!(
         r#"#!/bin/sh
 set -e
 export CLAUDE_CAGE=1
 export CREANCE_SESSION_TOKEN={session_token}
 hostnamectl set-hostname {hostname} 2>/dev/null || true
+# F-045: the guest-visible fingerprint fields get a real supply path —
+# the caged agent can perceive the promise (Go injects the same CAGE_*
+# environment at guest start; without this, browser_language was a
+# vacuous promise that still forced re-setups).
+cat > /etc/profile.d/cage-env.sh <<'CAGEENV'
+export CAGE_TZ={timezone}
+export CAGE_LOCALE={locale}
+export CAGE_LANGUAGE={browser_language}
+CAGEENV
 export DEBIAN_FRONTEND=noninteractive
 locale-gen {locale} >/dev/null 2>&1 || true
 update-locale LANG={locale} >/dev/null 2>&1 || true
@@ -263,6 +283,10 @@ mod tests {
             script.contains("hostnamectl set-hostname cage-"),
             "identity must land via provision"
         );
+        // F-045: the guest-visible promise fields have a real supply path.
+        assert!(script.contains("export CAGE_TZ=Etc/UTC"), "{script}");
+        assert!(script.contains("export CAGE_LOCALE=en_US.UTF-8"));
+        assert!(script.contains("export CAGE_LANGUAGE=en-US"));
         // F-031: installation failures must not abort the script before the
         // lockdown and privilege retirement land.
         assert!(
