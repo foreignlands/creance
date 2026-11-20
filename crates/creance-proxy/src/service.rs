@@ -161,12 +161,7 @@ pub fn check_running(profile: &str, store: &Store) -> Result<(), String> {
     // MATCH,DIRECT used to pass this check — the rules were never
     // queried. The generated config carries exactly one rule.
     let rules = api(profile, &store.auth, "GET", "/rules")?;
-    let honest_routing = rules.as_array().is_some_and(|a| {
-        a.len() == 1
-            && a[0].get("type").and_then(|v| v.as_str()) == Some("Match")
-            && a[0].get("proxy").and_then(|v| v.as_str()) == Some(GROUP)
-    });
-    if !honest_routing {
+    if !honest_routing(&rules) {
         return Err("readiness: rules".to_owned());
     }
     Ok(())
@@ -664,5 +659,52 @@ mod tests {
         // pointer to the fetch script.
         let err = core_path().unwrap_err();
         assert!(err.contains("fetch-proxy-core.sh") || err.contains("重新安装"));
+    }
+}
+
+/// F-048: mihomo wraps the rule list — `{"rules":[{...}]}` (captured
+/// verbatim from a live v1.19.x core; fixture in the tests below). The
+/// first cut of this check guessed a bare array and rejected every
+/// honest core, breaking gate-open entirely. The payload of a MATCH
+/// rule is an empty string, not "MATCH" — do not assert on it.
+fn honest_routing(body: &serde_json::Value) -> bool {
+    body.get("rules")
+        .and_then(|v| v.as_array())
+        .is_some_and(|rules| {
+            rules.len() == 1
+                && rules[0].get("type").and_then(|v| v.as_str()) == Some("Match")
+                && rules[0].get("proxy").and_then(|v| v.as_str()) == Some(crate::store::GROUP)
+        })
+}
+
+#[cfg(test)]
+mod rules_tests {
+    use super::*;
+
+    /// Captured verbatim from a live mihomo v1.19.x core running the
+    /// generated config shape (single MATCH,CAGE rule) — F-048's fixture.
+    #[test]
+    fn rules_judge_accepts_the_live_shape_and_rejects_flips() {
+        let live = r#"{"rules":[{"index":0,"type":"Match","payload":"","proxy":"CAGE","size":-1,"extra":{"disabled":false,"hitCount":0}}]}"#;
+        let live: serde_json::Value = serde_json::from_str(live).unwrap();
+        assert!(honest_routing(&live), "the captured live shape must pass");
+
+        // Rule-level flip: MATCH,DIRECT with otherwise honest fields.
+        let flipped = serde_json::json!({"rules": [
+            {"index":0,"type":"Match","payload":"","proxy":"DIRECT","size":-1}
+        ]});
+        assert!(!honest_routing(&flipped), "a flipped route must fail");
+
+        // A smuggled extra rule must fail.
+        let extra = serde_json::json!({"rules": [
+            {"type":"Match","proxy":"CAGE"},
+            {"type":"Match","proxy":"DIRECT"}
+        ]});
+        assert!(!honest_routing(&extra));
+
+        // The shape night-10 wrongly guessed (bare array) is not the wire
+        // shape — and must not be accepted either.
+        let bare = serde_json::json!([{"type":"Match","proxy":"CAGE"}]);
+        assert!(!honest_routing(&bare));
     }
 }
