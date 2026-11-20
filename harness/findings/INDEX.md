@@ -3,6 +3,9 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 052 | S4 | F-049 修复只落地 2/3：cmd_up 的 stamp 读失败仍 `if let Ok` 跳过（commit message 与 STATE 声称的 "any stamp read failure refuses up" 不存在于代码）——实机：删 stamp → up rc=0，且无实例时 limactl start 从 template:default 自动创建未供给原版 VM（无拓扑/无身份/无令牌）在 creance up 下启动成功 | R10-A1（F-049 修复面回归） | 已修复（night-12：三分支真落地+up 前实例存在检查；实机双 case 拒绝） |
+| 053 | S4 | lima 2.3.0 create 小写化实例名 vs creance vmname 大小写保留 → instance_running 名字恒等式永假：F-049 探针守卫（stamp missing on running VM）与 gate-record 探针在 setup 产物上永不触发（实机：Running VM+删 stamp → 两探针 NotEnforced、escape-test 报 contained）；macOS APFS 大小写不敏感掩盖路径级后果，case-sensitive 卷上 F-051 重建检测必 miss→死胡同回归；limactl start 自动创建反而保留大写（lima 自不一致） | R10-E1/F-051 面 | 已修复（night-12：实例名生成统一小写对齐 lima） |
+| 054 | S4 | 首启供给截断 fail-open：无 --max-time 的 nodejs curl 在供给期（无 tunnel）挂死被超时击杀，拓扑锁定+特权回收（脚本自称 containment contract）整段未执行——实测 VM 交付 OUTPUT ACCEPT+免密 sudo+ipv6 开（up rc=0）；手工重跑脚本可全程走完=纯次序+超时缺陷；次生：[[ bashism 在 dash 下恒 x64 退化 | R10-E1/D（F-031/F-034 残留） | 已修复（night-12：网络步骤全有界+工具链段 300s 硬预算+POSIX case） |
 | 051 | S5 | F-044 拒绝后的法定恢复路径不可达：全仓库无实例删除命令，setup→裸 limactl create 对存量实例必然失败不重写戳——漂移用户被"creance setup 重建"指引引进死胡同，唯一出路是删整个 profile 目录（含 workspace）；先于 night-10 存在但 F-044 使其成为法定路径 | R9-A1/A2（F-044/F-045 闭环） | 已修复（night-11：setup 检测存量实例 delete -f 重建） |
 | 050 | S4 | gate-open 对账对 store load 失败 fail-open：cmd_gate 两处 `if let Ok(load)`——同 uid 写坏 sources.json 一个文件即把 night-09+night-10 对账（含采样后二次对账）整体致盲，PUT 重载 evil yaml 免检出；缺文件形态反而 fail-closed（默认 store 空 selected 被 selection 拒）——只防住缺失没防住损坏 | R9-A3（F-042/F-046 修复链） | 已修复（night-11：store 读失败 fatal 两处对账） |
 | 049 | S4 | F-044 修复对 stamp 异常态 fail-open：up 的 `if let Ok(read_to_string)` 读失败即跳过漂移检查放行，探针同态报 NotEnforced（exit 0 不计失败）——stop→rm fingerprint.txt→改时区→up 完整复活洗绿路径；空/尾随空白形态反而 fail-closed（不对称）；setup 写戳失败仅警告返回 0 也造成合法序列的静默缺失 | R9-A1（F-044 面） | 已修复（night-11：stamp 读失败 fail-closed 三处） |

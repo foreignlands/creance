@@ -4,6 +4,25 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.5.6] — 2026-11-20
+
+### Fixed — night-12: R10 findings 052–054
+
+- **F-052**: night-11's up-refusal edit had been silently overwritten
+  (the commit message claimed it; the code never had it) — a deleted
+  stamp still skipped the drift check, and `limactl start` on an
+  unknown name cloned Lima's default template: an unprovisioned VM
+  behind a green exit. The refusal is real now (live-verified both
+  cases) and `up` only starts instances this profile set up.
+- **F-054**: every provision network step carries a deadline (curl -m,
+  apt timeouts) inside one hard 300s toolchain budget — a TCP blackhole
+  can no longer get the script killed before the lockdown and sudo
+  retirement run. The arch check is POSIX now, so the node download URL
+  is finally right on arm64.
+- **F-053**: instance names are generated lowercase, matching lima's
+  create-time lowercasing — mixed-case names made every existence check
+  query a name that never existed.
+
 ## [0.5.5] — 2026-11-20
 
 ### Fixed — night-11: R9 findings 048–051

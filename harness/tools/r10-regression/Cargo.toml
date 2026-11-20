@@ -1,0 +1,25 @@
+[package]
+name = "r10-regression"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# R10 探针：night-11 修复面纯回归（基线 c76b2a3 / v0.5.5，完整 ci.sh RC=0）。
+# 走真实 crate（path-dep）。假设（修复后语义）：
+#   H1 F-048 修复面：honest_routing 判定矩阵——包装形状过、翻转/夹带/裸数组/
+#      缺字段/非对象/超长全拒；api() 对 /rules 的 401/404 传播、非 JSON、
+#      >1MiB 截断、2xx 边界（299 宽容/199 拒绝）。
+#   H2 F-049 修复面：探针 stamp 矩阵——缺失+运行中 → Escaped（修复）；
+#      缺失+停止/无实例 → NotEnforced（virgin 语义）；目录/不可读/非UTF-8
+#      stamp → Escaped（读失败 fail-closed）。假 limactl 控制 Running 形态。
+#   H3 F-050 修复面：load Err 文案恒定串——不含路径、不含 serde 细节
+#      （corrupt/oversize/bad-version/bad-auth 四形态）。
+
+[dependencies]
+creance = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance" }
+creance-gate = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-gate" }
+creance-proxy = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-proxy" }
+creance-vm = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-vm" }
+serde_json = "1"
+
+[workspace]
