@@ -299,6 +299,17 @@ fn cmd_gate(open: bool) -> i32 {
             Ok(l) => l,
             Err(e) => return fail(format!("出口观测失败，外网保持关闭：{e}")),
         };
+        // F-046: reconcile AGAIN after the sample — a core flipped inside
+        // the check→observe window cannot have supplied the evidence. The
+        // residual window shrinks to the milliseconds between sample and
+        // this check.
+        if let Ok(store) = creance_proxy::load(&profile) {
+            if let Err(e) = creance_proxy::service::check_running(&profile, &store) {
+                return fail(format!(
+                    "核心运行态已偏离配置（{e}），拒绝采样出口证据，外网保持关闭"
+                ));
+            }
+        }
         let (state, message) = cfg.exit_policy.evaluate(&location.ip, Some(&location));
         if state != creance_vm::exit_policy::State::Passed {
             return fail(format!(

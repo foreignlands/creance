@@ -156,6 +156,19 @@ pub fn check_running(profile: &str, store: &Store) -> Result<(), String> {
     if group.get("now").and_then(|v| v.as_str()) != Some(store.selected.as_str()) {
         return Err("readiness: selection".to_owned());
     }
+    // F-046: the rules ARE the routing. A flipped core keeping every
+    // self-reported field honest but swapping MATCH,{GROUP} for
+    // MATCH,DIRECT used to pass this check — the rules were never
+    // queried. The generated config carries exactly one rule.
+    let rules = api(profile, &store.auth, "GET", "/rules")?;
+    let honest_routing = rules.as_array().is_some_and(|a| {
+        a.len() == 1
+            && a[0].get("type").and_then(|v| v.as_str()) == Some("Match")
+            && a[0].get("proxy").and_then(|v| v.as_str()) == Some(GROUP)
+    });
+    if !honest_routing {
+        return Err("readiness: rules".to_owned());
+    }
     Ok(())
 }
 
