@@ -166,24 +166,30 @@ CAGEENV
 export DEBIAN_FRONTEND=noninteractive
 locale-gen {locale} >/dev/null 2>&1 || true
 update-locale LANG={locale} >/dev/null 2>&1 || true
-# Toolchain installs are best-effort (F-031): a dead mirror or a flaky
-# first-boot network must never abort this script via `set -e` — the
-# topology lockdown and privilege retirement below are the containment
-# contract, and skipping them on an apt failure would ship the guest with
-# raw network access AND passwordless sudo.
-apt-get update -qq || true
-apt-get install -y -qq curl git ca-certificates xz-utils >/dev/null || true
-# F-034: download atomically (tmp + mv). `curl -o` straight at the target
-# leaves a partial binary behind on a mid-transfer failure, and /usr/local
-# bin shadows the apt fallback — the fallback chain defeated by its own
-# first leg's corpse. On failure the corpse never exists and apt fills in.
-if curl -fsSL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-$([[ $(uname -m) = aarch64 ]] && echo arm64 || echo x64)/bin/node -o /usr/local/bin/node.new 2>/dev/null && mv /usr/local/bin/node.new /usr/local/bin/node 2>/dev/null; then
-  chmod +x /usr/local/bin/node 2>/dev/null || true
-else
-  rm -f /usr/local/bin/node.new
-  apt-get install -y -qq nodejs npm >/dev/null || true
-fi
-curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1 || true
+# Toolchain installs are best-effort (F-031) AND time-bounded (F-054):
+# `|| true` guards against failure, but a network BLACKHOLE neither
+# fails nor succeeds — the provisioner's own timeout then killed the
+# script mid-flight and the containment contract below never ran,
+# shipping a VM with raw egress and passwordless sudo behind a green
+# `up`. Every network step carries its own deadline, and the whole
+# toolchain leg is wrapped in one hard budget so the contract section
+# is always reached.
+TOOLCHAIN_BUDGET=300
+APT_OPTS="-o Acquire::http::Timeout=20 -o Acquire::Retries=1"
+timeout "$TOOLCHAIN_BUDGET" sh -c '
+  apt-get update -qq || true
+  apt-get install '"$APT_OPTS"' -y -qq curl git ca-certificates xz-utils >/dev/null || true
+  ARCH=$(case "$(uname -m)" in aarch64) echo arm64;; *) echo x64;; esac)
+  # F-034: download atomically (tmp + mv) — a partial corpse in
+  # /usr/local/bin shadows the apt fallback node.
+  if curl -fsSL -m 120 https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-'"$ARCH"'/bin/node -o /usr/local/bin/node.new 2>/dev/null && mv /usr/local/bin/node.new /usr/local/bin/node 2>/dev/null; then
+    chmod +x /usr/local/bin/node 2>/dev/null || true
+  else
+    rm -f /usr/local/bin/node.new
+    apt-get install '"$APT_OPTS"' -y -qq nodejs npm >/dev/null || true
+  fi
+  curl -fsSL -m 120 https://claude.ai/install.sh | bash >/dev/null 2>&1 || true
+' || true
 
 # 0.3 TOPOLOGY LOCKDOWN — the guest's only wire out is the ssh -R tunnel to
 # the host-side core on this machine's own loopback (managed from the host
@@ -300,6 +306,15 @@ mod tests {
                 && script.contains("rm -f /usr/local/bin/node.new"),
             "downloads land on a temp name and clean up on failure"
         );
+        // F-054: every network step is time-bounded and the toolchain leg
+        // has a hard budget — a network blackhole must never eat the
+        // containment contract. And no bashism under #!/bin/sh (dash).
+        assert!(
+            script.contains("TOOLCHAIN_BUDGET=300"),
+            "hard budget on the toolchain leg"
+        );
+        assert!(script.contains("-m 120"), "curl carries its own deadline");
+        assert!(!script.contains("[["), "dash has no [[ ]]");
         assert!(
             script.contains("sed -i '\\#^devabc12345 #d'"),
             "the cloud-init sudoers grant must die in provision"
