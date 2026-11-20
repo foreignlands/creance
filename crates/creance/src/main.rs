@@ -615,6 +615,20 @@ fn cmd_up() -> i32 {
     if let Err(e) = running::check_running(&creance_vm::vm::state_dir(&profile), &cfg) {
         return fail(e);
     }
+    // F-044: the stamp records what the guest was provisioned with, and a
+    // bare `limactl start` never re-provisions. If the guest-visible
+    // promise drifted since setup, bringing the VM up would ship a guest
+    // running the OLD locale/timezone behind a config claiming the new
+    // one — refuse and point at re-setup instead of laundering the drift.
+    let stamp = creance_vm::paths::join(&creance_vm::vm::state_dir(&profile), "fingerprint.txt");
+    if let Ok(pinned) = std::fs::read_to_string(&stamp) {
+        if pinned.trim() != cfg.guest_fingerprint() {
+            return fail(
+                "guest 环境（时区/语言）自创建以来已变更，且启动不会重新供给；请先 creance stop 再 creance setup 重建环境"
+                    .to_owned(),
+            );
+        }
+    }
     let instance = instance();
     let code = creance_vm::vm::up(&profile, &instance);
     if code == 0 {
@@ -632,14 +646,6 @@ fn cmd_up() -> i32 {
             }
         }
         let _ = running::record_running(&instance_dir, &cfg);
-        // F-033/R6-H4: `up` is the moment the current config takes effect —
-        // refresh the fingerprint stamp so a routine proxy-select between
-        // runs doesn't leave the escape probe permanently red. Real drift
-        // (config changed while this VM's record is live) is still caught
-        // by check_running at the top of `up`.
-        if let Err(e) = creance::escape::refresh_fingerprint_stamp(&profile, &cfg) {
-            eprintln!("warning: cannot refresh fingerprint stamp: {e}");
-        }
         println!("Environment is up. The guest's only route out is the managed core (`creance escape-test` proves it).");
     }
     code
