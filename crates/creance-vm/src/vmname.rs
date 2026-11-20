@@ -113,13 +113,16 @@ pub fn is_scratch(name: &str) -> bool {
 
 /// The last element of `dir`, every run of bytes other than ASCII letters and
 /// digits made one `-`, cut to `max` bytes when `max > 0`, without `-` at
-/// either end. `None` when nothing is left.
+/// either end. `None` when nothing is left. Letters are lowercased: lima
+/// lowercases instance names on create (F-053), so a mixed-case name here
+/// would name an instance lima never records — every existence check
+/// (`limactl list`, probes) reads a name that does not exist.
 fn base_name(dir: &str, max: usize) -> Option<String> {
     let bytes = basename_bytes(dir);
     let mut out = Vec::new();
     for &c in bytes.iter().chain(std::iter::once(&b'\n')) {
         if c.is_ascii_alphanumeric() {
-            out.push(c);
+            out.push(c.to_ascii_lowercase());
         } else if out.last() != Some(&b'-') {
             out.push(b'-');
         }
@@ -177,7 +180,10 @@ mod tests {
         // Whitespace and punctuation collapse to one dash; alphanumerics stay.
         let n2 = Limit(0).name("/tmp/My Project (v2)");
         let (base, suffix) = n2.split_at(n2.len() - 8);
-        assert_eq!(base, "My-Project-v2-");
+        assert_eq!(
+            base, "my-project-v2-",
+            "lowercased: lima lowercases on create (F-053)"
+        );
         assert!(suffix.bytes().all(|c| c.is_ascii_hexdigit()));
         // The literal path string is hashed: "/tmp" and "/tmp/" differ.
         assert_ne!(Limit(0).name("/tmp"), Limit(0).name("/tmp/"));
@@ -196,7 +202,7 @@ mod tests {
     fn base_name_trims() {
         assert_eq!(
             base_name("/tmp/My-Project/", 0).as_deref(),
-            Some("My-Project")
+            Some("my-project")
         );
         assert_eq!(base_name("/tmp/…", 0), None);
         assert_eq!(base_name("/tmp/…", 3), None);
