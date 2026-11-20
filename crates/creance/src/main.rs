@@ -581,8 +581,10 @@ fn cmd_setup(memory: u32, cpus: u32) -> i32 {
         // (re-run setup after `creance stop` to re-pin).
         let stamp =
             creance_vm::paths::join(&creance_vm::vm::state_dir(&profile), "fingerprint.txt");
+        // F-049: a silently missing stamp permanently disarms the drift
+        // check — failing to write it fails the setup.
         if let Err(e) = std::fs::write(&stamp, cfg.guest_fingerprint()) {
-            eprintln!("warning: cannot write fingerprint stamp: {e}");
+            return fail(format!("cannot write fingerprint stamp: {e}"));
         }
         println!("instance {instance} created; run `creance up` to start it");
     }

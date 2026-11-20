@@ -179,8 +179,15 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
             Ok(c) => {
                 let stored = vm::state_dir(profile);
                 let setup_stamp = paths::join(&stored, "fingerprint.txt");
+                // F-049: a VM whose promise stamp is gone has lost its
+                // drift oracle — an escape, not "not enforced" (only a
+                // never-set-up profile reads NotEnforced).
                 if !Path::new(&setup_stamp).exists() {
-                    Outcome::NotEnforced
+                    if instance_running(profile, &instance) {
+                        Outcome::Escaped("fingerprint stamp missing on a running VM".to_owned())
+                    } else {
+                        Outcome::NotEnforced
+                    }
                 } else {
                     match std::fs::read_to_string(&setup_stamp) {
                         Ok(text) if text.trim() == c.guest_fingerprint() => Outcome::Contained,
