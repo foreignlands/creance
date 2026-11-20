@@ -1,0 +1,20 @@
+[package]
+name = "r12-provision-real"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# R12 探针：不走逐字复刻，直接调用真实 crate 的 generate_lima_yaml 取出
+# provision 脚本原文（F-053/F-033 教训：复刻型探针可能与生成物漂移），
+# 交给 dash 实机执行，验证 F-055 修复面（linux-$ARCH 内层展开）。
+# 用法：r12-provision-real <out-dir>
+#   <out-dir>/real-byte-exact.sh   生成原文（逐字节）
+#   <out-dir>/real-exec.sh         唯一差异 = /etc/… 绝对路径重写到 <out-dir>/rootfs
+#   <out-dir>/oldbug-exec.sh       再叠加 F-055 旧洞形态（linux-'"$ARCH"'）→ 负控
+#   <out-dir>/segment-real.txt     工具链段（timeout … ' || true'），供与 r11 探针对 diff
+
+[dependencies]
+creance-vm = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-vm" }
+serde_yaml = "0.9"
+
+[workspace]
