@@ -288,12 +288,19 @@ fn cmd_gate(open: bool) -> i32 {
         // reload) would feed the evidence sample whatever the flipper
         // wants. Reconcile the running core against its generated config
         // first — a diverged core may not supply exit evidence.
-        if let Ok(store) = creance_proxy::load(&profile) {
-            if let Err(e) = creance_proxy::service::check_running(&profile, &store) {
-                return fail(format!(
-                    "核心运行态已偏离配置（{e}），拒绝采样出口证据，外网保持关闭"
-                ));
+        // F-050: a store that cannot be read is not a reason to skip the
+        // reconciliation — corrupting sources.json used to blind both
+        // checks at once. Gate-open is a safety-sensitive path: no store,
+        // no evidence.
+        match creance_proxy::load(&profile) {
+            Ok(store) => {
+                if let Err(e) = creance_proxy::service::check_running(&profile, &store) {
+                    return fail(format!(
+                        "核心运行态已偏离配置（{e}），拒绝采样出口证据，外网保持关闭"
+                    ));
+                }
             }
+            Err(e) => return fail(format!("代理配置不可读，拒绝采样出口证据：{e}")),
         }
         let location = match creance::evidence::observe(&cfg) {
             Ok(l) => l,
@@ -303,12 +310,15 @@ fn cmd_gate(open: bool) -> i32 {
         // the check→observe window cannot have supplied the evidence. The
         // residual window shrinks to the milliseconds between sample and
         // this check.
-        if let Ok(store) = creance_proxy::load(&profile) {
-            if let Err(e) = creance_proxy::service::check_running(&profile, &store) {
-                return fail(format!(
-                    "核心运行态已偏离配置（{e}），拒绝采样出口证据，外网保持关闭"
-                ));
+        match creance_proxy::load(&profile) {
+            Ok(store) => {
+                if let Err(e) = creance_proxy::service::check_running(&profile, &store) {
+                    return fail(format!(
+                        "核心运行态已偏离配置（{e}），拒绝采样出口证据，外网保持关闭"
+                    ));
+                }
             }
+            Err(e) => return fail(format!("代理配置不可读，拒绝采样出口证据：{e}")),
         }
         let (state, message) = cfg.exit_policy.evaluate(&location.ip, Some(&location));
         if state != creance_vm::exit_policy::State::Passed {
