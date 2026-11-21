@@ -721,7 +721,13 @@ pub fn request_bounded(
     if let Some(ct) = content_type {
         req.push_str(&format!("Content-Type: {ct}\r\nAccept: {ct}\r\n"));
     }
-    req.push_str("User-Agent: cage\r\n\r\n");
+    // Neutral UA: this request leaves the machine (exit-evidence trace,
+    // subscription fetches), and a constant product-named UA is a
+    // clustering signal — N identical "cage" clients across IPs is a
+    // fingerprint no privacy tool should ship. curl/8.5.0 is what the
+    // Ubuntu 24.04 base image actually sends, which is exactly the crowd
+    // this traffic should blend into.
+    req.push_str("User-Agent: curl/8.5.0\r\n\r\n");
     channel.set_deadline(deadline);
     channel
         .write_all(req.as_bytes())

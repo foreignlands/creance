@@ -10,8 +10,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
-/// The select-group name every runtime config routes MATCH to.
-pub const GROUP: &str = "CAGE";
+/// The select-group name every runtime config routes MATCH to. A common
+/// generic name, not a product brand — the group string appears in core
+/// configs and API responses; "CAGE" was a fleet marker (2026-11-21
+/// de-clustering). PROXY is among the most frequent group names in real
+/// subscription configs, which is the crowd to blend into.
+pub const GROUP: &str = "PROXY";
 /// 8 MiB cap per subscription import.
 pub const MAX_IMPORT: usize = 8 << 20;
 const MAX_STORE_SIZE: usize = 32 << 20;
@@ -83,18 +87,15 @@ pub fn dir(profile: &str) -> String {
 }
 
 /// The core's control socket, hash-spaced so profiles never collide.
+/// (Unix-only product: macOS + Linux. The last cfg!(windows) branch died
+/// with the platform decision, 2026-11-21.)
 pub fn socket(profile: &str) -> String {
     let h = Sha256::digest(creance_vm::paths::clean(profile).as_bytes());
-    let name = format!("cage-proxy-{}-{}", users_uid(), hex::encode(&h[..4]));
-    if cfg!(windows) {
-        std::env::temp_dir()
-            .join(name)
-            .join("control.sock")
-            .to_string_lossy()
-            .into_owned()
-    } else {
-        format!("/tmp/{name}/control.sock")
-    }
+    format!(
+        "/tmp/managed-core-{}-{}/control.sock",
+        users_uid(),
+        hex::encode(&h[..4])
+    )
 }
 
 #[allow(unsafe_code)] // libc::getuid is a trivially safe FFI read
@@ -164,10 +165,11 @@ pub fn write_private(path: &str, data: &[u8]) -> Result<(), String> {
 }
 
 impl Store {
-    /// The SOCKS5 endpoint guests are pinned to: loopback only, user `cage`,
-    /// a 48-hex password from the store.
+    /// The SOCKS5 endpoint guests are pinned to: loopback only, a generic
+    /// username (no product brand — the credentials appear in core logs
+    /// and configs), a 48-hex password from the store.
     pub fn endpoint(&self) -> String {
-        format!("socks5://cage:{}@127.0.0.1:{}", self.auth, self.port)
+        format!("socks5://session:{}@127.0.0.1:{}", self.auth, self.port)
     }
 
     pub fn find(&self, id: &str) -> Option<&Node> {
@@ -564,7 +566,7 @@ mod tests {
     fn endpoint_is_loopback_only() {
         let s = store_with(Vec::new(), "", Vec::new());
         let e = s.endpoint();
-        assert!(e.starts_with("socks5://cage:"));
+        assert!(e.starts_with("socks5://session:"));
         assert!(e.ends_with("@127.0.0.1:17896"));
         assert_eq!(s.auth.len(), 48);
     }
@@ -582,7 +584,7 @@ mod tests {
         save(&profile, &s).unwrap();
         assert!(applied(&profile, &s.endpoint(), &s.revision).is_ok());
         // Endpoint mismatch closes the gate.
-        assert!(applied(&profile, "socks5://cage:wrong@127.0.0.1:1", &s.revision).is_err());
+        assert!(applied(&profile, "socks5://session:wrong@127.0.0.1:1", &s.revision).is_err());
         std::fs::remove_dir_all(&tmp).unwrap();
     }
 

@@ -143,7 +143,7 @@ mod tests {
             workspace: "/Users/me/project".to_owned(),
             guest: crate::guestprofile::Profile {
                 version: 1,
-                hostname: "cage-abc12345".to_owned(),
+                hostname: "thinkpad-abc1".to_owned(),
                 username: "devabc12345".to_owned(),
                 session_token: "ab".repeat(24),
             },
@@ -171,13 +171,15 @@ mod tests {
         );
         let script = v["provision"][0]["script"].as_str().unwrap_or_default();
         assert!(
-            script.contains("hostnamectl set-hostname cage-"),
+            script.contains("hostnamectl set-hostname thinkpad-"),
             "identity must land via provision"
         );
         // F-045: the guest-visible promise fields have a real supply path.
-        assert!(script.contains("export CAGE_TZ=Etc/UTC"), "{script}");
-        assert!(script.contains("export CAGE_LOCALE=en_US.UTF-8"));
-        assert!(script.contains("export CAGE_LANGUAGE=en-US"));
+        // Brandless names (2026-11-21 de-clustering): the guest sees these.
+        assert!(script.contains("export SESSION_TZ=Etc/UTC"), "{script}");
+        assert!(script.contains("export SESSION_LOCALE=en_US.UTF-8"));
+        assert!(script.contains("export SESSION_LANGUAGE=en-US"));
+        assert!(!script.contains("cage"), "no brand strings reach the guest");
         // F-031: installation failures must not abort the script before the
         // lockdown and privilege retirement land.
         assert!(

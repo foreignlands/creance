@@ -7,7 +7,7 @@
 //!
 //! - `GET /status` → the current [`GateStatus`]
 //! - `POST /control` → one [`GateCommand`], authenticated with
-//!   `Authorization: Bearer <token>` and `Host: cage`; anything else is 403
+//!   `Authorization: Bearer <token>` and `Host: gate`; anything else is 403
 //!
 //! Actions `check`/`fault`/`grant`/`renew` open or probe the gate only while
 //! the applied proxy configuration still validates; `close` tears it down
@@ -29,7 +29,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// The safety contract every status carries.
-pub const POLICY: &str = "cage-safety/3";
+pub const POLICY: &str = "session-safety/3";
 
 /// How long an opened gate may stay open without a renewal.
 const OPEN_LEASE: Duration = Duration::from_secs(90);
@@ -255,10 +255,8 @@ impl Gate {
     ) -> Result<GateHandle, String> {
         let token = creance_proxy::token();
         let run_id = creance_proxy::token()[..32].to_owned();
-        let sock_dir = std::env::temp_dir().join(format!(
-            "cage-gate-{}",
-            creance_proxy::token()[..8].to_owned()
-        ));
+        let sock_dir =
+            std::env::temp_dir().join(format!("gate-{}", creance_proxy::token()[..8].to_owned()));
         creance_vm::private::ensure_private_dir(sock_dir.to_string_lossy().as_ref())
             .map_err(|e| e.to_string())?;
         let socket = sock_dir.join("control.sock").to_string_lossy().into_owned();
@@ -467,7 +465,7 @@ impl Gate {
         }
         // Host must be the private name, Origin must be absent, and the
         // bearer must match the record's token.
-        if host != "cage"
+        if host != "gate"
             || origin_present
             || !constant_time_eq(bearer.as_bytes(), self.token.as_bytes())
         {
@@ -1011,7 +1009,7 @@ pub fn close_and_remove(profile: &str, instance_dir: &str, port: u16) -> Result<
     Ok(())
 }
 
-/// A host-side client for one gate record: the calls `cage proxy-stop` and
+/// A host-side client for one gate record: the calls `creance proxy-stop` and
 /// the workbench make against every running instance's gate.
 pub struct GateClient {
     pub record: GateRecord,
@@ -1040,7 +1038,7 @@ impl GateClient {
             .map_err(|_| "gate control socket unreachable".to_owned())?;
         let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
         let mut request = format!(
-            "{method} {path} HTTP/1.1\r\nHost: cage\r\nAuthorization: Bearer {}\r\nConnection: close\r\n",
+            "{method} {path} HTTP/1.1\r\nHost: gate\r\nAuthorization: Bearer {}\r\nConnection: close\r\n",
             self.record.token
         );
         if let Some(body) = body {
@@ -1130,10 +1128,7 @@ mod tests {
 
     fn prepare_profile() -> (String, String) {
         let profile = std::env::temp_dir()
-            .join(format!(
-                "cage-gate-{}",
-                creance_proxy::token()[..12].to_owned()
-            ))
+            .join(format!("gate-{}", creance_proxy::token()[..12].to_owned()))
             .to_string_lossy()
             .into_owned();
         let config_path = creance_vm::paths::join(&profile, "config.json");
@@ -1389,7 +1384,7 @@ mod tests {
         // The frozen-daemon shape: a listener that never accepts or reads
         // still completes connects — it must count as ALIVE, not stale.
         let frozen_dir = std::env::temp_dir().join(format!(
-            "cage-gate-frozen-{}",
+            "gate-frozen-{}",
             creance_proxy::token()[..8].to_owned()
         ));
         fs::create_dir_all(&frozen_dir).unwrap();
@@ -1402,9 +1397,22 @@ mod tests {
         );
 
         // The dead shape: the listener is gone, its socket file remains
-        // (exactly what a SIGKILLed daemon leaves behind).
+        // (exactly what a SIGKILLed daemon leaves behind). A connect that
+        // raced into the backlog before the close can still succeed for a
+        // beat — poll to refused instead of asserting the instant state
+        // (the R12-known flake, finally given a deterministic shape).
         drop(listener);
-        assert!(!daemon_serving(&instance_dir), "refused socket is dead");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            if !daemon_serving(&instance_dir) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "refused socket is dead"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
         fs::remove_dir_all(&frozen_dir).unwrap();
         fs::remove_dir_all(&profile).unwrap();
     }
@@ -1520,7 +1528,7 @@ mod tests {
                 format!("Authorization: Bearer {bearer}\r\n")
             };
             stream
-                .write_all(format!("GET /status HTTP/1.1\r\nHost: cage\r\n{auth}\r\n").as_bytes())
+                .write_all(format!("GET /status HTTP/1.1\r\nHost: gate\r\n{auth}\r\n").as_bytes())
                 .unwrap();
             let mut raw = Vec::new();
             stream.read_to_end(&mut raw).unwrap();
@@ -1604,14 +1612,14 @@ mod tests {
                 .to_owned()
         };
         assert!(
-            raw_no_auth("POST /control HTTP/1.1\r\nHost: cage\r\nContent-Length: 2\r\n\r\n{}")
+            raw_no_auth("POST /control HTTP/1.1\r\nHost: gate\r\nContent-Length: 2\r\n\r\n{}")
                 .starts_with("403")
         );
         assert!(raw_no_auth(&format!("POST /control HTTP/1.1\r\nHost: evil\r\nAuthorization: Bearer {}\r\nContent-Length: 2\r\n\r\n{{}}", record.token)).starts_with("403"));
         // Valid command with the right token goes through.
         let body = r#"{"action":"check"}"#;
         let got = raw_no_auth(&format!(
-            "POST /control HTTP/1.1\r\nHost: cage\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\n\r\n{}",
+            "POST /control HTTP/1.1\r\nHost: gate\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\n\r\n{}",
             record.token,
             body.len(),
             body
@@ -1752,7 +1760,7 @@ mod tests {
         use std::os::unix::net::UnixStream;
         let mut stream = UnixStream::connect(&record.socket).map_err(|e| e.to_string())?;
         let request = format!(
-            "POST /control HTTP/1.1\r\nHost: cage\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            "POST /control HTTP/1.1\r\nHost: gate\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             record.token,
             body.len(),
             body

@@ -53,7 +53,7 @@ pub fn core_path() -> Result<String, String> {
         }
     }
     Err(
-        "Cage 随附代理核心缺失，请重新安装完整应用；开发构建请运行 scripts/fetch-proxy-core.sh"
+        "creance 随附代理核心缺失，请重新安装完整应用；开发构建请运行 scripts/fetch-proxy-core.sh"
             .to_owned(),
     )
 }
@@ -91,7 +91,7 @@ fn api(profile: &str, auth: &str, method: &str, path: &str) -> Result<serde_json
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
     let req = format!(
-        "{method} {path} HTTP/1.1\r\nHost: cage-proxy\r\nAuthorization: Bearer {auth}\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n"
+        "{method} {path} HTTP/1.1\r\nHost: core\r\nAuthorization: Bearer {auth}\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n"
     );
     stream
         .write_all(req.as_bytes())
@@ -172,7 +172,7 @@ pub fn running(profile: &str, store: &Store) -> bool {
 #[cfg(target_os = "macos")]
 fn service_label(profile: &str) -> String {
     let h = sha2::Sha256::digest(profile.as_bytes());
-    format!("local.claude-cage.managed-proxy.{}", hex::encode(&h[..4]))
+    format!("local.managed-core.{}", hex::encode(&h[..4]))
 }
 
 #[cfg(target_os = "macos")]
@@ -264,14 +264,24 @@ fn stop_launchd(profile: &str) -> Result<(), String> {
         return Ok(());
     }
     let domain = format!("gui/{}", uid());
-    let label = format!("{domain}/{}", service_label(profile));
-    if run_command("launchctl", &["print", &label]).is_err() {
+    // The label was renamed in the 2026-11-21 de-clustering sweep; an
+    // install from before carries the legacy label in its plist. Probe
+    // BOTH before concluding "not loaded" — declaring a live legacy job
+    // residue would delete the plist and strand its running core.
+    let legacy_label = {
+        let h = sha2::Sha256::digest(profile.as_bytes());
+        format!("local.claude-cage.managed-proxy.{}", hex::encode(&h[..4]))
+    };
+    let loaded = [service_label(profile), legacy_label]
+        .into_iter()
+        .any(|l| run_command("launchctl", &["print", &format!("{domain}/{l}")]).is_ok());
+    if !loaded {
         // Not loaded: a leftover plist from a failed bootstrap is residue.
         let _ = std::fs::remove_file(service_path(profile));
         return Ok(());
     }
     if run_command("launchctl", &["bootout", &domain, &service_path(profile)]).is_err() {
-        return Err("未能停止 Cage 专属代理进程".to_owned());
+        return Err("未能停止 creance 专属代理进程".to_owned());
     }
     Ok(())
 }
@@ -332,7 +342,7 @@ pub fn start(profile: &str, store: &Store) -> Result<(), String> {
     stop(profile)?;
     // Never attach to or kill an unknown listener, even if it uses our port.
     if TcpListener::bind((Ipv4Addr::LOCALHOST, store.port)).is_err() {
-        return Err("Cage 代理端口已被占用，请更换独立端口".to_owned());
+        return Err("creance 代理端口已被占用，请更换独立端口".to_owned());
     }
     core_path()?;
     let sock = socket(profile);
@@ -355,7 +365,7 @@ pub fn start(profile: &str, store: &Store) -> Result<(), String> {
         .map_err(|e| e.to_string())?
         .to_string_lossy()
         .into_owned();
-    let relay_bin = Path::new(&dir(profile)).join("cage-relay");
+    let relay_bin = Path::new(&dir(profile)).join("relay");
     copy_executable_if_changed(&exe, relay_bin.to_string_lossy().as_ref())?;
     let core = core_path()?;
     let core_copy = Path::new(&dir(profile)).join("mihomo");
@@ -409,7 +419,7 @@ fn launch_supervised(profile: &str, relay_bin: &str, config_path: &str) -> Resul
         // Roll the half-started state back off so a retry starts clean.
         let _ = run_command("launchctl", &["bootout", &domain, &service_path(profile)]);
         let _ = std::fs::remove_file(service_path(profile));
-        return Err("无法启动 Cage 自带代理核心".to_owned());
+        return Err("无法启动 creance 自带代理核心".to_owned());
     }
     Ok(())
 }
@@ -436,7 +446,7 @@ fn launch_supervised(profile: &str, relay_bin: &str, config_path: &str) -> Resul
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .map_err(|e| format!("无法启动 Cage 自带代理核心：{e}"))?;
+        .map_err(|e| format!("无法启动 creance 自带代理核心：{e}"))?;
     let pid_file = pidfile::proxy_pid_file(profile, "core.pid");
     if let Err(e) = pidfile::write(&pid_file, child.id() as i32) {
         // A daemon we cannot pin must not outlive the call as unknown.
@@ -451,7 +461,7 @@ fn launch_supervised(profile: &str, relay_bin: &str, config_path: &str) -> Resul
     Ok(())
 }
 
-/// The `cage log-relay proxy` entry: owns the core's stdout/stderr capture so
+/// The relay entry (`log-relay proxy`): owns the core's stdout/stderr capture so
 /// a crash is recorded, and forwards termination signals to the child so
 /// launchd's bootout reaches mihomo. Every relay-side failure is logged too —
 /// under launchd there is no stderr to look at.
@@ -465,7 +475,7 @@ pub fn log_relay_proxy(profile: &str) -> i32 {
         .open(&log_path);
     let mut report = |message: &str| {
         let _ = log.as_mut().map(|f| {
-            let _ = writeln!(f, "cage relay: {message}");
+            let _ = writeln!(f, "relay: {message}");
         });
     };
     let Ok(core) = core_path() else {
@@ -660,10 +670,9 @@ fn physical_interface_linux() -> Result<String, String> {
             return Ok(default);
         }
     }
-    candidates
-        .into_iter()
-        .next()
-        .ok_or_else(|| "未找到可用的物理 IPv4 网卡；Cage 外网保持关闭，请连接网络后重试".to_owned())
+    candidates.into_iter().next().ok_or_else(|| {
+        "未找到可用的物理 IPv4 网卡；creance 外网保持关闭，请连接网络后重试".to_owned()
+    })
 }
 
 /// The lowest-metric default-route interface from a `/proc/net/route`
@@ -826,10 +835,9 @@ fn select_physical_interface(
             }
         }
     }
-    reachable
-        .first()
-        .cloned()
-        .ok_or_else(|| "未找到可用的物理 IPv4 网卡；Cage 外网保持关闭，请连接网络后重试".to_owned())
+    reachable.first().cloned().ok_or_else(|| {
+        "未找到可用的物理 IPv4 网卡；creance 外网保持关闭，请连接网络后重试".to_owned()
+    })
 }
 
 #[cfg(test)]
@@ -988,10 +996,10 @@ mod rules_tests {
     use super::*;
 
     /// Captured verbatim from a live mihomo v1.19.x core running the
-    /// generated config shape (single MATCH,CAGE rule) — F-048's fixture.
+    /// generated config shape (single MATCH,PROXY rule) — F-048's fixture.
     #[test]
     fn rules_judge_accepts_the_live_shape_and_rejects_flips() {
-        let live = r#"{"rules":[{"index":0,"type":"Match","payload":"","proxy":"CAGE","size":-1,"extra":{"disabled":false,"hitCount":0}}]}"#;
+        let live = r#"{"rules":[{"index":0,"type":"Match","payload":"","proxy":"PROXY","size":-1,"extra":{"disabled":false,"hitCount":0}}]}"#;
         let live: serde_json::Value = serde_json::from_str(live).unwrap();
         assert!(honest_routing(&live), "the captured live shape must pass");
 
@@ -1003,14 +1011,14 @@ mod rules_tests {
 
         // A smuggled extra rule must fail.
         let extra = serde_json::json!({"rules": [
-            {"type":"Match","proxy":"CAGE"},
+            {"type":"Match","proxy":"PROXY"},
             {"type":"Match","proxy":"DIRECT"}
         ]});
         assert!(!honest_routing(&extra));
 
         // The shape night-10 wrongly guessed (bare array) is not the wire
         // shape — and must not be accepted either.
-        let bare = serde_json::json!([{"type":"Match","proxy":"CAGE"}]);
+        let bare = serde_json::json!([{"type":"Match","proxy":"PROXY"}]);
         assert!(!honest_routing(&bare));
     }
 }

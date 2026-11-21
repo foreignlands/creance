@@ -20,13 +20,28 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// Generates a fresh profile: a natural-ish hostname, a non-reserved
-    /// username, and a 48-hex session token.
+    /// Generates a fresh profile: a real-machine-style hostname, a
+    /// non-reserved username, and a 48-hex session token.
+    ///
+    /// The hostname matters beyond aesthetics: it lands in shell prompts
+    /// and any telemetry that reports `os.hostname()`, where a constant
+    /// product prefix (`cage-…`) clusters every installation into one
+    /// identifiable fleet — the exact batch-detection upstream Cage
+    /// suffered (issue #173). A consumer-OEM model name with a short hex
+    /// suffix reads like a real machine while staying unique per profile.
     pub fn generate() -> Profile {
-        let suffix = &crate::token()[..8];
+        const BASES: &[&str] = &[
+            "thinkpad", "ideapad", "inspiron", "vivobook", "latitude", "pavilion", "zenbook",
+            "yoga", "swift", "nitro",
+        ];
+        // One token feeds both picks; hex digits are uniform enough entropy
+        // for a cosmetic base choice.
+        let token = crate::token();
+        let base = BASES[token.as_bytes()[0] as usize % BASES.len()];
+        let suffix = &token[..8];
         Profile {
             version: 1,
-            hostname: format!("cage-{suffix}"),
+            hostname: format!("{base}-{}", &suffix[..4]),
             username: format!("dev{suffix}"),
             session_token: crate::token(),
         }
@@ -124,7 +139,14 @@ mod tests {
     fn generated_profiles_validate() {
         let p = Profile::generate();
         assert_eq!(p.validate(), Ok(()));
-        assert!(p.hostname.starts_with("cage-"));
+        // Real-machine style: one of the OEM bases, never a product brand
+        // — a constant prefix here clusters every install into a fleet.
+        const BASES: &[&str] = &[
+            "thinkpad", "ideapad", "inspiron", "vivobook", "latitude", "pavilion", "zenbook",
+            "yoga", "swift", "nitro",
+        ];
+        assert!(BASES.iter().any(|b| p.hostname.starts_with(b)));
+        assert!(!p.hostname.contains("cage"));
         assert!(p.username.starts_with("dev"));
         assert_eq!(p.session_token.len(), 48);
     }

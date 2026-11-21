@@ -22,18 +22,18 @@ pub fn guest_bootstrap(
     format!(
         r#"#!/bin/sh
 set -e
-export CLAUDE_CAGE=1
 export CREANCE_SESSION_TOKEN={session_token}
 hostnamectl set-hostname {hostname} 2>/dev/null || true
 # F-045: the guest-visible fingerprint fields get a real supply path —
-# the caged agent can perceive the promise (Go injects the same CAGE_*
-# environment at guest start; without this, browser_language was a
-# vacuous promise that still forced re-setups).
-cat > /etc/profile.d/cage-env.sh <<'CAGEENV'
-export CAGE_TZ={timezone}
-export CAGE_LOCALE={locale}
-export CAGE_LANGUAGE={browser_language}
-CAGEENV
+# the confined agent can perceive the promise (Go injected CAGE_* at
+# guest start; without this, browser_language was a vacuous promise that
+# still forced re-setups). The names carry no product brand: guest
+# processes see these, and a constant brand prefix is a fleet marker.
+cat > /etc/profile.d/session-env.sh <<'SESSENV'
+export SESSION_TZ={timezone}
+export SESSION_LOCALE={locale}
+export SESSION_LANGUAGE={browser_language}
+SESSENV
 export DEBIAN_FRONTEND=noninteractive
 locale-gen {locale} >/dev/null 2>&1 || true
 update-locale LANG={locale} >/dev/null 2>&1 || true
@@ -123,7 +123,7 @@ mod tests {
             "Asia/Shanghai",
             "en-US",
             "a".repeat(48).as_str(),
-            "cage-0123abcd",
+            "nitro-012a",
             "dev0123abcd",
         )
     }

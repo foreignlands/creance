@@ -95,7 +95,7 @@ fn main() {
     name = "creance",
     version,
     about = "creance — a contained workspace for AI agents",
-    after_help = "Configuration: ~/.creance/config.json (override CREANCE_CONFIG; legacy ~/.claude-cage/CLAUDE_CAGE_CONFIG honored).\nEach configuration directory is an independent cage profile.\nOnly explicitly opened project folders are shared. No host Claude credentials are imported."
+    after_help = "Configuration: ~/.creance/config.json (override CREANCE_CONFIG; legacy ~/.claude-cage/CLAUDE_CAGE_CONFIG honored).\nEach configuration directory is an independent isolated profile.\nOnly explicitly opened project folders are shared. No host Claude credentials are imported."
 )]
 struct Cli {
     #[command(subcommand)]

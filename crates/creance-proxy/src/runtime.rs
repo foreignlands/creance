@@ -80,7 +80,7 @@ pub fn generate(store: &Store, profile: &str) -> Result<Vec<u8>, String> {
     root.insert("skip-auth-prefixes".into(), Yaml::Sequence(Vec::new()));
     root.insert(
         "authentication".into(),
-        yaml_strings(&[format!("cage:{}", store.auth)]),
+        yaml_strings(&[format!("session:{}", store.auth)]),
     );
     root.insert("mode".into(), Yaml::from("rule"));
     root.insert("ipv6".into(), Yaml::from(false));
@@ -204,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_config_has_cage_boundaries() {
+    fn generated_config_has_session_boundaries() {
         let s = store();
         let yaml = generate(&s, "/tmp/prof").unwrap();
         let v = parse(&yaml);
@@ -217,7 +217,7 @@ mod tests {
         assert_eq!(v["find-process-mode"], "off");
         // Auth is store-backed; anonymous access is impossible.
         let auth = v["authentication"].as_sequence().unwrap();
-        assert!(auth[0].as_str().unwrap().starts_with("cage:"));
+        assert!(auth[0].as_str().unwrap().starts_with("session:"));
         assert!(v["skip-auth-prefixes"].as_sequence().unwrap().is_empty());
         // MATCH routes to the group holding exactly the selected exit.
         assert_eq!(
@@ -236,7 +236,7 @@ mod tests {
         assert!(v["external-controller-unix"]
             .as_str()
             .unwrap()
-            .starts_with("/tmp/cage-proxy-"));
+            .starts_with("/tmp/managed-core-"));
         assert_eq!(v["secret"], Yaml::String(s.auth.clone()));
     }
 

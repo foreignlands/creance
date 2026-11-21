@@ -238,11 +238,7 @@ mod imp {
         let real = paths::join(&state_dir(profile), "lima");
         let _ = std::fs::create_dir_all(&real);
         let digest = Sha256::digest(paths::clean(profile).as_bytes());
-        let link = format!(
-            "/tmp/cage-lima-{}-{}",
-            users_uid(),
-            hex::encode(&digest[..4])
-        );
+        let link = format!("/tmp/vmhome-{}-{}", users_uid(), hex::encode(&digest[..4]));
         // Re-create the link when missing or dangling (a cleared temp dir).
         match std::fs::read_link(&link) {
             Ok(_target) if Path::new(&link).exists() => {}
@@ -690,7 +686,7 @@ mod tests {
             .into_owned();
         let home = lima_home(&profile);
         // Short, hash-spaced link in the temp dir.
-        assert!(home.starts_with("/tmp/cage-lima-"), "{home}");
+        assert!(home.starts_with("/tmp/vmhome-"), "{home}");
         // It resolves to the real state/lima directory.
         let resolved = std::fs::read_link(&home)
             .unwrap()
