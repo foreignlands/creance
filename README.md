@@ -88,6 +88,43 @@ Everything else on [ROADMAP.md](ROADMAP.md).
 | macOS 14+ (Apple Silicon) | Lima (vz) | launchd |
 | Ubuntu Linux (x86_64, KVM) | native QEMU + cloud-init | in-process relay + pidfile |
 
+## Honest boundaries（诚实边界）
+
+隔离降低风险，不把风险归零。这一段写给打算在真实账号上使用 creance
+的人——三条设计地板、两类已知残余、以及我们明确不做的事。
+
+**封号风险的现实**：上游 Claude Cage 的 433 个 issue 显示封号是多因子
+判定（device_id 多设备、请求体 attestation、IP 信誉、遥测元数据），
+社区报告"千分之几仍被封"——隔离容器只能收窄指纹面，无法承诺免封。
+creance 的纯 SOCKS 架构天然免疫 `apiBaseUrlHost` 自曝（我们从不改写
+请求体、不碰 base URL），v0.6.3 起去除了所有常量品牌串（hostname、
+UA、组名——见 docs/BAN-DEFENSE-STUDY-2026-11-21.md）；但 device_id
+绑定是服务端行为，同一账号多环境并发使用仍由服务端裁量。
+
+**设计地板（同 uid 信任边界）**：host 侧的配置、pidfile、gate 记录对
+同一操作系统用户可见可写。防的是 guest 里的 agent 逃逸，不是防你
+自己——同 uid 攻击者的"自伤面"（伪造运行记录、篡改 store）在审查
+中逐项记档于 harness/findings/，不重复立案。
+
+**证据采样的单目的地边界**：gate-open 的出口证据经代理实测
+1.1.1.1 的 trace（IP+国家码，25s 预算）。TLS 不保证同代理对不同目
+的地同路由——出口节点若对 1.1.1.1 差异化路由，现有观测无法检测。
+第二独立数据源（不经同一核心）排在后续版本。
+
+**平台边界**：macOS 14+ Apple Silicon（Lima/vz）与 Ubuntu x86_64
+（QEMU/KVM）。Windows 明确不支持（cfg 幻想分支已清除）。Linux 后端
+较新（v0.6.0），对抗审查覆盖度低于 macOS 侧——攻击面地图 H 节
+（harness/attack-surfaces.md）是其已知未覆盖清单，guest→slirp 宿主
+别名（10.0.2.2）的可达性结论以 Ubuntu 侧实机探针为准。
+
+**工具链是 best-effort**：供给段的 node/claude 安装失败不阻塞隔离
+契约（超时+兜底有界），在 HTTPS 中间人网络下 pinned 下载必然失败，
+apt(http) 兜底可用；全过程日志在 guest 的 /var/log/creance-toolchain.log。
+
+**我们不做的事**：不改写请求体、不伪造 attestation、不注入宿主凭据
+（guest 只持有会话令牌）、不在探针未实现时谎报通过（未实现层如实
+标 SKIP）。诚实性优先于好看——包括这一段本身。
+
 ## License
 
 MIT. Containment research and borrowed ideas are credited in ROADMAP.md.
