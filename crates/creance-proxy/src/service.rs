@@ -21,6 +21,8 @@ use std::time::{Duration, Instant};
 const START_POLL: Duration = Duration::from_millis(100);
 const START_BUDGET: Duration = Duration::from_secs(10);
 /// How long a told-to-die core gets before the stop path escalates.
+/// (Linux's `stop_local` only — macOS stops through launchd.)
+#[cfg(not(target_os = "macos"))]
 const STOP_BUDGET: Duration = Duration::from_secs(5);
 
 /// The bundled core binary. Never searches PATH or another app's bundle.

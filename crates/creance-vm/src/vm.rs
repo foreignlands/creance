@@ -258,7 +258,7 @@ mod imp {
         unsafe { libc::getuid() }
     }
 
-    fn limactl(profile: &str, args: &[std::ffi::OsString]) -> std::process::Command {
+    pub fn limactl(profile: &str, args: &[std::ffi::OsString]) -> std::process::Command {
         let mut cmd = std::process::Command::new("limactl");
         // Strip the inherited environment FIRST, then inject ours: env_remove
         // clears any earlier env() of the same name, and LIMA_HOME itself sits
@@ -294,8 +294,13 @@ mod imp {
     }
 }
 
+// The glob is the API surface: `lima_home` (and friends) were top-level
+// `pub fn`s before the backend split, and lima.rs plus the harness
+// regression tools still reach them as `vm::lima_home`. A private glob
+// re-export is invisible across modules — macOS failed to compile while
+// the Linux CI stayed green, blind to cfg'd-out code it never built.
 #[cfg(target_os = "macos")]
-use imp::*;
+pub use imp::*;
 
 /// Lists this profile's VMs.
 pub fn list(profile: &str) -> i32 {

@@ -14,8 +14,12 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 rand = { workspace = true }
 libc = { workspace = true }
-fatfs = { workspace = true }
 creance-net = { workspace = true }
+
+# vFAT seed images — built by the Linux QEMU backend only (qemu/seed.rs);
+# a plain dependency would draw an unused-dependency lint on every macOS build.
+[target.'cfg(target_os = "linux")'.dependencies]
+fatfs = { workspace = true }
 
 [lints]
 workspace = true
