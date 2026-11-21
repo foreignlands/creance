@@ -101,12 +101,12 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
     //    this probe fail-closes — anything it cannot count (malformed
     //    structure, merge keys) is Escaped, never a silent Contained.
     let instance = vm::instance_name(profile, &vm::environment_dir(profile));
-    let lima_yaml = paths::join(&vm::lima_home(profile), &format!("{instance}/lima.yaml"));
+    let marker = vm::instance_marker(profile, &instance);
     out.push(Probe {
         id: "mounts-workspace-only",
         layer: "filesystem",
-        outcome: if Path::new(&lima_yaml).exists() {
-            match count_declared_mounts(&lima_yaml) {
+        outcome: if Path::new(&marker).exists() {
+            match vm::declared_mount_count(profile, &instance) {
                 Ok(0) | Ok(1) => Outcome::Contained,
                 Ok(n) => Outcome::Escaped(format!("{n} mounts declared")),
                 Err(why) => Outcome::Escaped(why),
@@ -119,7 +119,7 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
     // 5. The gate record (if any) is private, and its daemon actually
     //    serves (F-019: a record left by a SIGKILLed daemon used to pass
     //    as containment while an orphan tunnel kept the wire open).
-    let instance_dir = paths::join(&vm::lima_home(profile), &instance);
+    let instance_dir = paths::join(&vm::instances_root(profile), &instance);
     let gate_json = paths::join(&instance_dir, "cage-gate.json");
     out.push(Probe {
         id: "gate-record-private",
@@ -205,22 +205,10 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
     out
 }
 
-/// Whether the profile's Lima instance is actually running (not merely
-/// created) — `limactl list` is the source of truth, absent limactl means
-/// not running.
+/// Whether the profile's instance is actually running (not merely created)
+/// — the backend's own liveness oracle is the source of truth.
 fn instance_running(profile: &str, instance: &str) -> bool {
-    let Ok(out) = std::process::Command::new("limactl")
-        .env("LIMA_HOME", vm::lima_home(profile))
-        .args(["list", "--json"])
-        .output()
-    else {
-        return false;
-    };
-    String::from_utf8_lossy(&out.stdout).lines().any(|line| {
-        serde_json::from_str::<serde_json::Value>(line)
-            .map(|v| v["name"] == instance && v["status"] == "Running")
-            .unwrap_or(false)
-    })
+    vm::instance_running(profile, instance)
 }
 
 /// One token-shaped run: exactly 48 lowercase hex bytes with non-hex on
@@ -257,7 +245,7 @@ fn scan_unknown_tokens(profile: &str) -> Result<Vec<(String, String)>, String> {
         // showed the scan flagging it on a fully provisioned profile.
         expected.insert(store.revision);
     }
-    let lima = vm::lima_home(profile);
+    let lima = vm::instances_root(profile);
     if let Ok(entries) = std::fs::read_dir(&lima) {
         for entry in entries.flatten() {
             let record = entry.path().join("cage-gate.json");
@@ -321,48 +309,6 @@ fn scan_unknown_tokens(profile: &str) -> Result<Vec<(String, String)>, String> {
     unknown.sort();
     unknown.dedup();
     Ok(unknown)
-}
-
-/// Counts `mounts` entries in a Lima config. Err = the probe cannot judge
-/// this file: malformed YAML, a non-mapping root, non-sequence `mounts`,
-/// non-mapping entries, or YAML merge keys (`<<`) — Lima (go-yaml) expands
-/// merges while serde_yaml does not, so a merged file cannot be counted
-/// honestly (FINDING-016).
-fn count_declared_mounts(lima_yaml: &str) -> Result<usize, String> {
-    let text =
-        std::fs::read_to_string(lima_yaml).map_err(|e| format!("lima.yaml unreadable: {e}"))?;
-    let root: serde_yaml::Value =
-        serde_yaml::from_str(&text).map_err(|_| "lima.yaml is not valid YAML".to_owned())?;
-    let mapping = root
-        .as_mapping()
-        .ok_or_else(|| "lima.yaml root is not a mapping".to_owned())?;
-    if mapping.contains_key("<<") {
-        return Err("lima.yaml uses merge keys; probe cannot count mounts".to_owned());
-    }
-    let Some(mounts) = mapping.get(serde_yaml::Value::String("mounts".into())) else {
-        return Ok(0);
-    };
-    let entries = mounts
-        .as_sequence()
-        .ok_or_else(|| "mounts is not a sequence".to_owned())?;
-    let mut count = 0;
-    for entry in entries {
-        let m = entry
-            .as_mapping()
-            .ok_or_else(|| "mounts entry is not a mapping".to_owned())?;
-        if m.contains_key("<<") {
-            return Err("mounts entry uses merge keys; probe cannot count".to_owned());
-        }
-        count += m
-            .iter()
-            .filter(|(k, _)| {
-                k.as_str()
-                    .map(|key| key.eq_ignore_ascii_case("location"))
-                    .unwrap_or(false)
-            })
-            .count();
-    }
-    Ok(count)
 }
 
 /// The in-guest probe script: run inside the VM, prints one `PROBE id
@@ -529,7 +475,7 @@ mod tests {
         // escape, not containment — the orphan-tunnel shape must not pass.
         let (profile, config_path) = fresh_profile();
         let instance = vm::instance_name(&profile, &vm::environment_dir(&profile));
-        let dir = paths::join(&vm::lima_home(&profile), &instance);
+        let dir = paths::join(&vm::instances_root(&profile), &instance);
         std::fs::create_dir_all(&dir).unwrap();
         let record = serde_json::json!({
             "socket": paths::join(&profile, "dead.sock"),
@@ -757,25 +703,27 @@ mod tests {
         };
         // Honest single mount counts.
         let one = file("mounts:\n  - location: /Users/x/ws\n    writable: true\n");
-        assert_eq!(count_declared_mounts(&one).unwrap(), 1);
+        assert_eq!(creance_vm::vm::count_declared_mounts(&one).unwrap(), 1);
         // No mounts at all.
         let none = file("cpus: 4\n");
-        assert_eq!(count_declared_mounts(&none).unwrap(), 0);
+        assert_eq!(creance_vm::vm::count_declared_mounts(&none).unwrap(), 0);
         // Case-insensitive location, multiple entries.
         let two = file("mounts:\n  - LOCATION: /a\n  - location: /b\n");
-        assert_eq!(count_declared_mounts(&two).unwrap(), 2);
+        assert_eq!(creance_vm::vm::count_declared_mounts(&two).unwrap(), 2);
         // Structural failures -> Err, not Ok.
-        assert!(count_declared_mounts(&file("- just\n- a\n- list\n")).is_err());
-        assert!(count_declared_mounts(&file("42\n")).is_err());
-        assert!(count_declared_mounts(&file("mounts: {location: /a}\n")).is_err());
-        assert!(count_declared_mounts(&file("mounts:\n  - just-a-string\n")).is_err());
+        assert!(creance_vm::vm::count_declared_mounts(&file("- just\n- a\n- list\n")).is_err());
+        assert!(creance_vm::vm::count_declared_mounts(&file("42\n")).is_err());
+        assert!(creance_vm::vm::count_declared_mounts(&file("mounts: {location: /a}\n")).is_err());
+        assert!(
+            creance_vm::vm::count_declared_mounts(&file("mounts:\n  - just-a-string\n")).is_err()
+        );
         // Merge keys — the exact probe-defeating trick.
         let merged =
             file("x-base: &base\n  - location: /evil\nmounts:\n  <<: *base\n  - location: /ws\n");
-        assert!(count_declared_mounts(&merged).is_err());
+        assert!(creance_vm::vm::count_declared_mounts(&merged).is_err());
         let merged_entry =
             file("defaults: &d\n  writable: true\nmounts:\n  - <<: *d\n    location: /ws\n");
-        assert!(count_declared_mounts(&merged_entry).is_err());
+        assert!(creance_vm::vm::count_declared_mounts(&merged_entry).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -810,6 +758,7 @@ mod tests {
     /// A lima.yaml with an extra mount must be caught however it is spelled
     /// (FINDING-011: the old line-prefix counter missed `"-  location:"`,
     /// flow mappings, and dash-on-its-own-line forms).
+    #[cfg(target_os = "macos")]
     #[test]
     fn extra_mount_is_escaped_in_every_yaml_spelling() {
         let spellings: [&str; 4] = [
@@ -825,7 +774,7 @@ mod tests {
         for (i, yaml) in spellings.iter().enumerate() {
             let (profile, config_path) = fresh_profile();
             let instance = vm::instance_name(&profile, &vm::environment_dir(&profile));
-            let dir = paths::join(&vm::lima_home(&profile), &instance);
+            let dir = paths::join(&vm::instances_root(&profile), &instance);
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(paths::join(&dir, "lima.yaml"), yaml).unwrap();
             let probes = host_probes(&profile, &config_path);

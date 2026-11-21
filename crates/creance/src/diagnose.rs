@@ -35,7 +35,9 @@ impl Check {
 pub fn diagnose(profile: &str, config_path: &str) -> Vec<Check> {
     let mut out = Vec::new();
 
-    // Tooling: the VM layer needs limactl, the proxy layer needs the core.
+    // Tooling: the VM layer's backend needs its driver, the proxy layer
+    // needs the core.
+    #[cfg(target_os = "macos")]
     match which("limactl") {
         Some(_) => out.push(Check {
             status: Status::Ok,
@@ -47,6 +49,43 @@ pub fn diagnose(profile: &str, config_path: &str) -> Vec<Check> {
             name: "limactl",
             detail: "not installed; `brew install lima` is required for VM environments".to_owned(),
         }),
+    }
+    #[cfg(not(target_os = "macos"))]
+    for tool in ["qemu-system-x86_64", "qemu-img", "ssh-keygen"] {
+        out.push(Check {
+            status: if which(tool).is_some() {
+                Status::Ok
+            } else {
+                Status::Fail
+            },
+            name: "qemu",
+            detail: if which(tool).is_some() {
+                format!("{tool} available")
+            } else {
+                format!(
+                    "not installed; `sudo apt install qemu-system-x86 qemu-utils` provides {tool}"
+                )
+            },
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // KVM decides whether a VM is usable at all — TCG fallback would be
+        // silent 8–12× pain, so it is judged here, loudly.
+        match std::fs::OpenOptions::new().read(true).write(true).open("/dev/kvm") {
+            Ok(_) => out.push(Check {
+                status: Status::Ok,
+                name: "kvm",
+                detail: "/dev/kvm writable".to_owned(),
+            }),
+            Err(e) => out.push(Check {
+                status: Status::Fail,
+                name: "kvm",
+                detail: format!(
+                    "/dev/kvm unavailable ({e}); enable VT-x/AMD-V in firmware and add the user to the kvm group"
+                ),
+            }),
+        }
     }
     match creance_proxy::service::core_path() {
         Ok(path) => out.push(Check {
@@ -144,8 +183,7 @@ pub fn diagnose(profile: &str, config_path: &str) -> Vec<Check> {
 
     // The environment VM, if it was ever created.
     let instance = vm::instance_name(profile, &vm::environment_dir(profile));
-    let instance_yaml = paths::join(&vm::lima_home(profile), &format!("{instance}/lima.yaml"));
-    if Path::new(&instance_yaml).exists() {
+    if Path::new(&vm::instance_marker(profile, &instance)).exists() {
         out.push(Check {
             status: Status::Ok,
             name: "environment",
@@ -209,7 +247,12 @@ mod tests {
         let checks = diagnose(&profile, &config_path);
         let names: Vec<&str> = checks.iter().map(|c| c.name).collect();
         for required in [
+            #[cfg(target_os = "macos")]
             "limactl",
+            #[cfg(not(target_os = "macos"))]
+            "qemu",
+            #[cfg(not(target_os = "macos"))]
+            "kvm",
             "mihomo core",
             "config",
             "disk",

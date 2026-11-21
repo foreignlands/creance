@@ -10,7 +10,7 @@ use clap::Parser;
 use creance_gate::gate;
 use creance_net::egress::Egress;
 use creance_proxy::{self, service};
-use creance_vm::{config, running, vmname};
+use creance_vm::{config, running};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -196,8 +196,8 @@ fn profile() -> String {
 }
 
 fn instance() -> String {
-    vmname::home_limit(&creance_vm::vm::lima_home(&profile()), false)
-        .name(&creance_vm::vm::environment_dir(&profile()))
+    let profile = profile();
+    creance_vm::vm::instance_name(&profile, &creance_vm::vm::environment_dir(&profile))
 }
 
 fn fail(err: String) -> i32 {
@@ -273,7 +273,8 @@ fn cmd_check() -> i32 {
 fn cmd_gate(open: bool) -> i32 {
     let profile = profile();
     let instance = instance();
-    let instance_dir = creance_vm::paths::join(&creance_vm::vm::lima_home(&profile), &instance);
+    let instance_dir =
+        creance_vm::paths::join(&creance_vm::vm::instances_root(&profile), &instance);
     let outcome = if open {
         // 0.5: a grant needs live exit evidence. Observe the exit through
         // the configured proxy, evaluate it against the anchor (plus the
@@ -355,11 +356,7 @@ fn cmd_escape_test() -> i32 {
     // In-guest probes when the environment exists: stage the script and run
     // it through the VM shell. The flag file on the host is the oracle.
     let instance = instance();
-    let instance_yaml = creance_vm::paths::join(
-        &creance_vm::vm::lima_home(&profile),
-        &format!("{instance}/lima.yaml"),
-    );
-    if std::path::Path::new(&instance_yaml).exists() {
+    if std::path::Path::new(&creance_vm::vm::instance_marker(&profile, &instance)).exists() {
         let flag = format!("{}.escape-flag", creance_vm::vm::environment_dir(&profile));
         let store = creance_proxy::load(&profile).ok();
         let guest = creance_vm::guestprofile::Profile::load_or_create(&profile).ok();
@@ -369,32 +366,16 @@ fn cmd_escape_test() -> i32 {
             store.as_ref().map(|s| s.port).unwrap_or(17896),
             &guest.map(|g| g.username).unwrap_or_default(),
         );
-        let child = std::process::Command::new("limactl")
-            .env("LIMA_HOME", creance_vm::vm::lima_home(&profile))
-            .arg("shell")
-            .arg(&instance)
-            .arg("sh")
-            .arg("-s")
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn();
-        if let Ok(mut child) = child {
-            use std::io::Write;
-            if let Some(stdin) = child.stdin.as_mut() {
-                let _ = stdin.write_all(script.as_bytes());
-            }
-            drop(child.stdin.take());
-            if let Ok(output) = child.wait_with_output() {
-                for line in String::from_utf8_lossy(&output.stdout).lines() {
+        match creance_vm::vm::guest_script(&profile, &instance, &script) {
+            Ok(stdout) => {
+                for line in stdout.lines() {
                     println!("{line}");
                     if line.contains(" ESCAPE") {
                         code = 1;
                     }
                 }
             }
-        } else {
-            eprintln!("cannot run in-guest probes (limactl unavailable)");
+            Err(e) => eprintln!("cannot run in-guest probes: {e}"),
         }
     }
     code
@@ -414,7 +395,7 @@ fn cmd_proxy_start() -> i32 {
 }
 
 fn gate_instance_dir() -> String {
-    creance_vm::paths::join(&creance_vm::vm::lima_home(&profile()), &instance())
+    creance_vm::paths::join(&creance_vm::vm::instances_root(&profile()), &instance())
 }
 
 fn cmd_proxy_status() -> i32 {
@@ -580,15 +561,11 @@ fn cmd_setup(memory: u32, cpus: u32) -> i32 {
         proxy_port: proxy_store_port(&profile),
         guest,
     };
-    // F-051: setup on an existing instance rebuilds it — limactl create
-    // refuses to touch a live directory, and every "re-run setup"
+    // F-051: setup on an existing instance rebuilds it — the backend's
+    // create refuses to touch a live directory, and every "re-run setup"
     // guidance (drift, promise changes) depends on this path existing.
     // The VM disk goes; the host workspace does not.
-    let existing = creance_vm::paths::join(
-        &creance_vm::vm::lima_home(&profile),
-        &format!("{instance}/lima.yaml"),
-    );
-    if Path::new(&existing).exists() {
+    if Path::new(&creance_vm::vm::instance_marker(&profile, &instance)).exists() {
         println!("rebuilding existing instance {instance} (VM disk replaced; workspace untouched)");
         let code = creance_vm::vm::delete(&profile, &instance);
         if code != 0 {
@@ -597,10 +574,10 @@ fn cmd_setup(memory: u32, cpus: u32) -> i32 {
             ));
         }
     }
-    if let Err(e) = creance_vm::lima::setup_instance(&profile, &instance, &options) {
-        return fail(e);
-    }
-    let code = creance_vm::vm::create(&profile, &instance);
+    let code = match creance_vm::vm::setup_instance(&profile, &instance, &options) {
+        Ok(code) => code,
+        Err(e) => return fail(e),
+    };
     if code == 0 {
         // F-033: the fingerprint the VM was promised at creation. The
         // escape probe compares the live config against this snapshot —
@@ -654,15 +631,14 @@ fn cmd_up() -> i32 {
         Err(e) => return fail(e),
     };
     let profile = profile();
-    if let Err(e) = running::check_running(&creance_vm::vm::state_dir(&profile), &cfg) {
+    if let Err(e) = running::check_running(&creance_vm::vm::instances_root(&profile), &cfg) {
         return fail(e);
     }
     // F-044/F-052: the stamp records what the guest was provisioned with,
-    // and a bare `limactl start` never re-provisions. Any stamp read
+    // and a bare backend start never re-provisions. Any stamp read
     // failure (missing, unreadable, a directory) refuses `up` — a missing
-    // stamp used to skip the check, and `limactl start` on a nonexistent
-    // instance name silently clones Lima's default template: an
-    // unprovisioned VM behind a green exit code.
+    // stamp used to skip the check, and starting a nonexistent instance
+    // must never end in an unprovisioned VM behind a green exit code.
     let stamp = creance_vm::paths::join(&creance_vm::vm::state_dir(&profile), "fingerprint.txt");
     match std::fs::read_to_string(&stamp) {
         Ok(pinned) if pinned.trim() == cfg.guest_fingerprint() => {}
@@ -680,14 +656,9 @@ fn cmd_up() -> i32 {
         }
     }
     let instance = instance();
-    // F-052's template trap: `limactl start <unknown-name>` clones the
-    // default template instead of failing. Only an instance this profile
-    // set up may be started.
-    let instance_yaml = creance_vm::paths::join(
-        &creance_vm::vm::lima_home(&profile),
-        &format!("{instance}/lima.yaml"),
-    );
-    if !Path::new(&instance_yaml).exists() {
+    // F-052's template trap: only an instance this profile set up may be
+    // started — a bare start of an unknown name must refuse, not invent.
+    if !Path::new(&creance_vm::vm::instance_marker(&profile, &instance)).exists() {
         return fail(format!(
             "实例 {instance} 不存在（未 setup 或已被删除）；拒绝启动，请先 creance setup"
         ));
@@ -700,7 +671,8 @@ fn cmd_up() -> i32 {
         let port = creance_proxy::load(&profile)
             .map(|s| s.port)
             .unwrap_or(17896);
-        let instance_dir = creance_vm::paths::join(&creance_vm::vm::lima_home(&profile), &instance);
+        let instance_dir =
+            creance_vm::paths::join(&creance_vm::vm::instances_root(&profile), &instance);
         if let Err(e) = gate::spawn_daemon(&profile, &instance, &path, &instance_dir, port) {
             eprintln!("warning: gate daemon not raised: {e}");
             if let Err(e) = creance_vm::tunnel::ensure(&profile, &instance, port) {
@@ -720,7 +692,7 @@ fn cmd_shell(command: Vec<String>) -> i32 {
         Err(e) => return fail(e),
     };
     let profile = profile();
-    if let Err(e) = running::check_running(&creance_vm::vm::state_dir(&profile), &cfg) {
+    if let Err(e) = running::check_running(&creance_vm::vm::instances_root(&profile), &cfg) {
         return fail(e);
     }
     let instance = instance();

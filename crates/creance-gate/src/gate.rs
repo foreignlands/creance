@@ -1089,7 +1089,7 @@ impl GateClient {
 /// (F-019): its daemon is gone, so the record goes too — nothing else
 /// would clean it, and a live-looking corpse would mask a missing gate.
 pub fn close_gates(profile: &str) -> Result<(), String> {
-    let lima = creance_vm::vm::lima_home(profile);
+    let lima = creance_vm::vm::instances_root(profile);
     let mut last = None;
     if let Ok(entries) = std::fs::read_dir(&lima) {
         for entry in entries.flatten() {

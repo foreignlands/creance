@@ -27,6 +27,7 @@ rustls-pki-types = "1"
 webpki-roots = "0.26"
 clap = { version = "4", features = ["derive"] }
 libc = "0.2"
+fatfs = "0.3"
 
 creance-net = { path = "crates/creance-net" }
 creance-vm = { path = "crates/creance-vm" }

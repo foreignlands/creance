@@ -1,17 +1,16 @@
 //! The guest's single route out: an ssh reverse tunnel carrying the guest's
 //! loopback proxy port to the host-side managed core.
 //!
-//! Lima's usernet NAT refuses RFC1918 destinations from the guest (a sound
-//! default that also blocks reaching the host), and vz rejects reverse
-//! portForwards — the standard mechanism that survives both is a plain
-//! `ssh -R` from the host: the guest dials `127.0.0.1:<port>` and lands on
-//! the core's loopback listener. Everything else in the guest is firewalled
+//! The host must reach the guest's sshd (Lima's usernet forward on macOS,
+//! the hostfwd carve-out on QEMU), and the wire back is a plain `ssh -R`
+//! from the host: the guest dials `127.0.0.1:<port>` and lands on the
+//! core's loopback listener. Everything else in the guest is firewalled
 //! off (see the provision script), making this tunnel the only wire out.
 
 #![allow(unsafe_code)] // libc::kill orphan reaping — audited, pgrep-matched pids
 
-use crate::paths;
 use crate::pidfile;
+use crate::vm;
 use std::process::{Command, Stdio};
 
 /// Brings the tunnel up for a running instance (idempotent): a pid file
@@ -22,59 +21,18 @@ pub fn ensure(profile: &str, instance: &str, guest_port: u16) -> Result<(), Stri
     if pidfile::alive(&pid_file) {
         return Ok(());
     }
-    let home = crate::vm::lima_home(profile);
-    let out = Command::new("limactl")
-        .env("LIMA_HOME", &home)
-        .args(["list", "--json"])
-        .output()
-        .map_err(|e| format!("limactl list failed: {e}"))?;
-    let text = String::from_utf8_lossy(&out.stdout).into_owned();
-    let mut ssh_port = None;
-    for line in text.lines() {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-            if v["name"] == instance {
-                ssh_port = v["sshLocalPort"].as_u64().map(|p| p as u16);
-                break;
-            }
-        }
-    }
-    let Some(port) = ssh_port else {
-        return Err(format!("instance {instance} is not running"));
-    };
     // F-022: ssh in as the generated guest identity, never the host user
-    // name lima would mirror by default.
-    let user = crate::guestprofile::Profile::load_or_create(profile)
-        .map_err(|e| format!("guest profile unavailable: {e}"))?
-        .username;
-    let child = Command::new("ssh")
-        .arg("-i")
-        .arg(paths::join(&home, "_config/user"))
-        .arg("-o")
-        .arg("BatchMode=yes")
-        .arg("-o")
-        .arg("IdentitiesOnly=yes")
-        .arg("-o")
-        .arg("StrictHostKeyChecking=yes")
-        .arg("-o")
-        .arg(format!(
-            "UserKnownHostsFile={}",
-            paths::join(&home, &format!("{instance}/ssh.known_hosts"))
-        ))
-        .arg("-o")
-        .arg(format!("HostKeyAlias=lima-{instance}"))
-        .arg("-o")
-        .arg(format!("User={user}"))
-        .arg("-o")
-        .arg("ControlMaster=no")
-        .arg("-o")
-        .arg("ControlPath=none")
+    // name a backend would mirror by default. The ssh coordinates (port,
+    // key, pinned host key, user) come from the backend.
+    let target = vm::ssh_target(profile, instance)?;
+    let mut cmd = Command::new("ssh");
+    vm::apply_ssh_options(&mut cmd, &target);
+    let child = cmd
         .arg("-o")
         .arg("ExitOnForwardFailure=yes")
         .arg("-N")
         .arg("-R")
         .arg(format!("{guest_port}:127.0.0.1:{guest_port}"))
-        .arg("-p")
-        .arg(port.to_string())
         .arg("127.0.0.1")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -106,15 +64,14 @@ pub fn stop(profile: &str) -> Result<(), String> {
 /// write that failed, or a deleted file, would leave an orphan serving the
 /// guest forever). The match needs BOTH the instance's HostKeyAlias AND
 /// the reverse-forward spec: the alias alone also appears in every
-/// `limactl shell` ssh client (learned on the live machine — sessions
+/// interactive `shell` ssh client (learned on the live machine — sessions
 /// died mid-command until the sweep was narrowed), while `-R
 /// <port>:127.0.0.1:<port>` is ours alone. The pid the file owns is spared.
 pub fn reap_orphans(profile: &str, instance: &str, port: u16) {
+    let alias = vm::host_key_alias(instance);
     let Ok(out) = Command::new("pgrep")
         .arg("-f")
-        .arg(format!(
-            "HostKeyAlias=lima-{instance}.*-R {port}:127.0.0.1:{port}"
-        ))
+        .arg(format!("HostKeyAlias={alias}.*-R {port}:127.0.0.1:{port}"))
         .output()
     else {
         return;
@@ -153,7 +110,8 @@ mod tests {
         std::fs::create_dir_all(crate::proxy_dir(&profile)).unwrap();
         let instance = format!("test-inst-{}", crate::token()[..6].to_owned());
         let port: u16 = 18765;
-        let signature = format!("HostKeyAlias=lima-{instance} -N -R {port}:127.0.0.1:{port}");
+        let alias = vm::host_key_alias(&instance);
+        let signature = format!("HostKeyAlias={alias} -N -R {port}:127.0.0.1:{port}");
 
         let mut owned = Command::new("tail")
             .args(["-f", "/dev/null", &signature])
@@ -168,10 +126,10 @@ mod tests {
             .args(["-f", "/dev/null", &signature])
             .spawn()
             .unwrap();
-        // The limactl-shell shape: alias without the reverse-forward spec.
-        // It must never match the sweep.
+        // The interactive-shell shape: alias without the reverse-forward
+        // spec. It must never match the sweep.
         let mut shell_client = Command::new("tail")
-            .args(["-f", "/dev/null", &format!("HostKeyAlias=lima-{instance}")])
+            .args(["-f", "/dev/null", &format!("HostKeyAlias={alias}")])
             .spawn()
             .unwrap();
 

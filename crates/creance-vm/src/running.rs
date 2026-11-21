@@ -86,11 +86,12 @@ pub fn record_running(instance_dir: &str, config: &Config) -> Result<(), String>
 }
 
 /// A live record whose fingerprint differs from `config` means a running VM
-/// still holds the old proxy or locale: stopping comes first.
-pub fn check_running(state_dir: &str, config: &Config) -> Result<(), String> {
+/// still holds the old proxy or locale: stopping comes first. `instances`
+/// is the backend's instance root (`vm::instances_root`).
+pub fn check_running(instances: &str, config: &Config) -> Result<(), String> {
     let own_start_empty = process_start_token(std::process::id() as i32).is_empty();
     let mut found = Vec::new();
-    collect_records(&Path::new(state_dir).join("lima"), &mut found);
+    collect_records(Path::new(instances), &mut found);
     for record_path in found {
         let bytes = std::fs::read(&record_path).map_err(|e| e.to_string())?;
         let record: RunningProfile = serde_json::from_slice(&bytes)
@@ -142,7 +143,7 @@ mod tests {
     fn own_record_never_blocks() {
         let state = temp_state();
         let config = config_with("socks5://1.2.3.4:1080");
-        let instance = format!("{state}/lima/test-vm");
+        let instance = format!("{state}/test-vm");
         std::fs::create_dir_all(&instance).unwrap();
         record_running(&instance, &config).unwrap();
         // Our own fingerprint with a live PID passes.
@@ -153,7 +154,7 @@ mod tests {
     #[test]
     fn changed_fingerprint_with_live_pid_blocks() {
         let state = temp_state();
-        let instance = format!("{state}/lima/test-vm");
+        let instance = format!("{state}/test-vm");
         std::fs::create_dir_all(&instance).unwrap();
         // Forge a record with a live PID (ours) but a different fingerprint.
         let record = serde_json::json!({
@@ -169,7 +170,7 @@ mod tests {
     #[test]
     fn dead_pid_is_ignored() {
         let state = temp_state();
-        let instance = format!("{state}/lima/test-vm");
+        let instance = format!("{state}/test-vm");
         std::fs::create_dir_all(&instance).unwrap();
         // A PID that certainly does not exist: pick one far above pid_max-ish
         // range on this machine via a known-dead marker.

@@ -310,7 +310,7 @@ fn reply<W: std::io::Write>(stream: &mut W, status: u16, message: &str) {
 /// The instance dir of the profile's gate record, for the status panel.
 pub fn gate_instance_dir(profile: &str) -> String {
     creance_vm::paths::join(
-        &vm::lima_home(profile),
+        &vm::instances_root(profile),
         &vm::instance_name(profile, &vm::environment_dir(profile)),
     )
 }

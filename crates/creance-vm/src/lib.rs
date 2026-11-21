@@ -14,6 +14,9 @@ pub mod lima;
 pub mod paths;
 pub mod pidfile;
 pub mod private;
+pub mod provision;
+#[cfg(target_os = "linux")]
+pub mod qemu;
 pub mod running;
 pub mod state;
 pub mod tunnel;
