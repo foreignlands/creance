@@ -24,8 +24,9 @@ echo "== building creance (release) =="
 cargo build --release
 install -m 0755 target/release/creance "$BIN_DIR/creance"
 
-# Bundled core: creance looks next to the binary and in ../proxy-core/.
-CORE_DIR="$(dirname "$BIN_DIR")/share/creance"
+# Bundled core: creance looks next to the binary and in ../proxy-core/
+# (core_path's second candidate), so the prefix layout must match it.
+CORE_DIR="$(dirname "$BIN_DIR")/proxy-core"
 if [ ! -x "$CORE_DIR/mihomo" ] && [ -x target/proxy-core/mihomo ]; then
     mkdir -p "$CORE_DIR"
     install -m 0755 target/proxy-core/mihomo "$CORE_DIR/mihomo"

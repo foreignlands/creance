@@ -76,7 +76,8 @@ fn parse_sum(sums: &str, name: &str) -> Option<String> {
     for line in sums.lines() {
         let mut fields = line.split_whitespace();
         let hash = fields.next()?;
-        let file = fields.next()?;
+        // cloud-images sums use GNU binary-mode spelling: `<hash> *<file>`.
+        let file = fields.next()?.trim_start_matches('*');
         if file == name {
             return Some(hash.to_lowercase());
         }
@@ -146,11 +147,18 @@ mod tests {
 
     #[test]
     fn sums_parse_the_release_spelling() {
-        let sums = "abc0000000000000000000000000000000000000000000000000000000000def  ubuntu-24.04-server-cloudimg-amd64.img\n\
-                    1111111111111111111111111111111111111111111111111111111111111111  ubuntu-24.04-server-cloudimg-arm64.img\n";
+        // The real file uses GNU binary mode: `<hash> *<name>` (captured
+        // from cloud-images.ubuntu.com/releases/24.04/release/SHA256SUMS).
+        let sums = "04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94 *ubuntu-24.04-server-cloudimg-amd64.img\n\
+                    1111111111111111111111111111111111111111111111111111111111111111 ubuntu-24.04-server-cloudimg-arm64.img\n";
         assert_eq!(
             parse_sum(sums, "ubuntu-24.04-server-cloudimg-amd64.img").as_deref(),
-            Some("abc0000000000000000000000000000000000000000000000000000000000def")
+            Some("04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94")
+        );
+        // Text-mode (no asterisk) entries parse too.
+        assert_eq!(
+            parse_sum(sums, "ubuntu-24.04-server-cloudimg-arm64.img").as_deref(),
+            Some("1111111111111111111111111111111111111111111111111111111111111111")
         );
         assert_eq!(
             parse_sum(sums, "ubuntu-24.04-server-cloudimg-s390x.img"),

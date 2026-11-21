@@ -48,17 +48,27 @@ update-locale LANG={locale} >/dev/null 2>&1 || true
 TOOLCHAIN_BUDGET=300
 APT_OPTS="-o Acquire::http::Timeout=20 -o Acquire::Retries=1"
 timeout "$TOOLCHAIN_BUDGET" sh -c '
+  ARCH=$(case "$(uname -m)" in aarch64) echo arm64;; *) echo x64;; esac)
+  # node comes FIRST and with zero extra dependencies — python3 and
+  # tar -z ship in the base cloud image — so a fast nodejs.org wins even
+  # when the apt mirror crawls (a crawling mirror used to eat the whole
+  # budget before the pinned download ever ran). nodejs.org/dist ships
+  # whole tarballs; bin/node is lifted out of the official one.
+  # F-034: land on a temp name and mv into place — a partial corpse in
+  # /usr/local/bin would shadow the apt fallback node.
+  python3 - <<PYEOF 2>/dev/null
+import urllib.request
+urllib.request.urlretrieve("https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-$ARCH.tar.gz", "/tmp/creance-node.tar.gz")
+PYEOF
+  tar -xzf /tmp/creance-node.tar.gz -C /tmp 2>/dev/null \
+    && mv /tmp/node-v22.14.0-linux-$ARCH/bin/node /usr/local/bin/node.new 2>/dev/null \
+    && mv /usr/local/bin/node.new /usr/local/bin/node 2>/dev/null \
+    || rm -f /usr/local/bin/node.new /tmp/creance-node.tar.gz
+  chmod +x /usr/local/bin/node 2>/dev/null || true
   apt-get update -qq || true
   apt-get install '"$APT_OPTS"' -y -qq curl git ca-certificates xz-utils >/dev/null || true
-  ARCH=$(case "$(uname -m)" in aarch64) echo arm64;; *) echo x64;; esac)
-  # F-034: download atomically (tmp + mv) — a partial corpse in
-  # /usr/local/bin shadows the apt fallback node.
-  if curl -fsSL -m 120 https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-$ARCH/bin/node -o /usr/local/bin/node.new 2>/dev/null && mv /usr/local/bin/node.new /usr/local/bin/node 2>/dev/null; then
-    chmod +x /usr/local/bin/node 2>/dev/null || true
-  else
-    rm -f /usr/local/bin/node.new
-    apt-get install '"$APT_OPTS"' -y -qq nodejs npm >/dev/null || true
-  fi
+  # Fallback only when the pinned download did not land.
+  [ -x /usr/local/bin/node ] || apt-get install '"$APT_OPTS"' -y -qq nodejs npm >/dev/null || true
   curl -fsSL -m 120 https://claude.ai/install.sh | bash >/dev/null 2>&1 || true
 ' || true
 
@@ -122,8 +132,31 @@ mod tests {
     #[test]
     fn qemu_inner_arch_variable_survives() {
         // F-055: ARCH is an INNER-script variable — the URL must expand it
-        // inside the single-quoted toolchain block.
+        // inside the toolchain block (heredoc), never through a cross-quote
+        // `'"$ARCH"'` (the outer shell never defined it: empty URL segment).
         let s = script();
-        assert!(s.contains("linux-$ARCH/bin/node"));
+        assert!(
+            s.contains("linux-$ARCH.tar.gz"),
+            "the tarball URL consumes the inner ARCH"
+        );
+        assert!(
+            !s.contains(&format!("'\"{}", "$ARCH")),
+            "no cross-quote expansion of inner variables"
+        );
+    }
+
+    #[test]
+    fn node_download_precedes_apt() {
+        // The live-machine lesson: a slow apt mirror ate the whole toolchain
+        // budget before the (fast) pinned node download ever ran. The
+        // zero-dependency download now runs first, apt is the fallback.
+        let s = script();
+        let node = s.find("urlretrieve").expect("python download present");
+        let apt = s.find("apt-get update").expect("apt leg present");
+        assert!(node < apt, "node download must precede apt");
+        assert!(
+            s.contains("[ -x /usr/local/bin/node ] ||"),
+            "apt node install is a fallback, not the primary"
+        );
     }
 }

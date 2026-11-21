@@ -4,10 +4,12 @@ creance 的定位：**通用的 AI agent 隔离容器**（功能对标 Claude Ca
 
 ## 版本路线（详见 RELEASES.md）
 
-- **0.3 — VM 网络强制面（下一站，最大项）**：guest 流量物理路由经 gate（参考 gvisor-tap-vsock 用户态交换机思路，或 Lima usernet hook 等效点）。完成即把 escape-test 的 net-direct-egress / net-dns-external / net-ipv6 探针从 SKIP 翻为强制。
-- **0.4 — guest profile + 一次性凭据**：per-session 凭据经 gate 注入、可吊销（"逃逸成功但无物可偷"）。
-- **0.5 — 多环境 + 快照**。
-- **0.6 — API 稳定化**（rustdoc、MSRV、semver-checks 入 CI）→ 0.7–0.9 RC → 1.0 GA。
+- **0.3 — VM 网络强制面**：**DONE 2026-11-19**（拓扑 DROP + ssh -R single wire）。
+- **0.4 — guest profile + 一次性凭据**：**DONE 2026-11-19**。
+- **0.5 — 出口证据链**：**DONE 2026-11-19**。
+- **0.6 — Linux 平台支持**：原生 QEMU + cloud-init 后端（无 Lima、无 root），mihomo 进程内托管（无 launchd/systemd 依赖），/proc 级 PID 复用防护。**已知跟进（0.6.x）**：slirp `restrict=on` 在已配置实例上启用（首启的 apt/node 供给需要 NAT，当前与 macOS vz 同姿态、由 guest 防火墙承担强制）；aarch64 主机实测。
+- **0.7 — 多环境 + 快照**（qcow2 覆盖盘天然支持快照）。
+- **0.8 — API 稳定化**（rustdoc、MSRV、semver-checks 入 CI）→ 0.9 RC → 1.0 GA。
 
 ## escape 探针清单（研究A产出，逐步翻绿）
 
@@ -36,12 +38,12 @@ creance 的定位：**通用的 AI agent 隔离容器**（功能对标 Claude Ca
 |---|---|
 | 配置/出口策略/大陆网段 | ✅ creance-vm（对齐 + 修复 Go 版 6 处缺陷） |
 | 纯代理 egress + DoH | ✅ creance-net |
-| 托管代理 + launchd | ✅ creance-proxy（含幂等/回滚/sha256 更新等加固） |
+| 托管代理 | ✅ creance-proxy（macOS: launchd；Linux: 进程内 relay + pidfile） |
 | gate 控制面 | ✅ creance-gate；**强制执行面 0.3** |
-| VM 生命周期 | ✅ creance-vm（limactl + 短路径 lima home；镜像名 arm64 修正） |
+| VM 生命周期 | ✅ macOS: Lima(vz)；**Linux: 原生 QEMU + cloud-init（0.6）** |
 | 订阅导入/URL 拉取 | ✅（键规范化先于计数、ws-headers 并集、SSRF 拒绝——均超 Go 版） |
 | workbench | ✅ 精简版（loopback + CSRF 防护 + 连接上限） |
-| guestprofile/多账号/移动端/desktop | 未实现（0.4+ 按需） |
+| guestprofile/多账号/移动端/desktop | 未实现（0.7+ 按需） |
 
 ## 已知简化
 

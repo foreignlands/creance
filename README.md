@@ -75,10 +75,16 @@ probes (SKIP until the enforcement plane lands — honest by design).
 
 ## Status
 
-v0.2.0 — 114 tests, clippy-clean, live-verified proxy lifecycle + VM chain.
-The big open item is the **VM network enforcement plane** (guest traffic
-physically routed through the gate); everything else on
-[ROADMAP.md](ROADMAP.md).
+v0.6.0 — Linux platform support (Ubuntu/KVM: native QEMU + cloud-init
+backend, in-process proxy supervision, `/proc`-armed PID-reuse guard);
+macOS unchanged. Live-verified on both: the full setup → up → shell →
+escape-test → stop chain, escape-test green on every enforced layer.
+Everything else on [ROADMAP.md](ROADMAP.md).
+
+| Host | VM backend | Proxy supervision |
+|---|---|---|
+| macOS 14+ (Apple Silicon) | Lima (vz) | launchd |
+| Ubuntu Linux (x86_64, KVM) | native QEMU + cloud-init | in-process relay + pidfile |
 
 ## License
 

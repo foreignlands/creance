@@ -91,7 +91,7 @@ pub fn ensure_keypair(dir: &str) -> Result<String, String> {
 }
 
 /// The full QEMU argument vector. Locked by unit tests: the topology
-/// contract (restrict=on, exactly one hostfwd, one 9p share) lives here.
+/// contract (exactly one hostfwd, one 9p share) lives here.
 pub fn build_args(inst: &Instance, dir: &str, state: &str) -> Result<Vec<String>, String> {
     if super::ARCH == "unsupported" {
         return Err("QEMU 后端当前仅支持 x86_64 与 aarch64 Linux 主机".to_owned());
@@ -131,13 +131,16 @@ pub fn build_args(inst: &Instance, dir: &str, state: &str) -> Result<Vec<String>
         format!("file={seed},if=none,id=seed,format=raw,readonly=on"),
         "-device".into(),
         "virtio-blk-pci,drive=seed".into(),
-        // slirp user networking, lockdown included: with restrict=on the
-        // guest cannot reach the host or the internet on its own — the one
-        // opening is the explicit hostfwd below (QEMU docs: restrict "does
-        // not affect any explicitly set forwarding rules").
+        // slirp user networking: unprivileged NAT, same posture as the
+        // macOS backend's usernet — the in-guest OUTPUT DROP firewall
+        // (provision script) is the enforcement plane, so first-boot
+        // provisioning (apt, node) still has a network until the lockdown
+        // lands. slirp-level restrict=on would block that provisioning;
+        // enabling it for already-provisioned instances is tracked as the
+        // next hardening step (ROADMAP 0.6.x).
         "-netdev".into(),
         format!(
-            "user,id=net0,restrict=on,hostfwd=tcp:127.0.0.1:{}-:22",
+            "user,id=net0,hostfwd=tcp:127.0.0.1:{}-:22",
             inst.ssh_local_port
         ),
         "-device".into(),
@@ -181,17 +184,9 @@ pub fn build_args(inst: &Instance, dir: &str, state: &str) -> Result<Vec<String>
 
 /// Spawns the instance's qemu, detached in its own process group and pinned
 /// by a start-token-bound pid file. Nothing is waited for here.
-pub fn start(inst: &Instance, dir: &str) -> Result<(), String> {
+pub fn start(inst: &Instance, dir: &str, state: &str) -> Result<(), String> {
     kvm_available()?;
-    let state = {
-        // instance_dir = <profile>/state/qemu/<name>; state is three levels up.
-        let mut p = Path::new(dir).to_path_buf();
-        for _ in 0..3 {
-            p.pop();
-        }
-        p.to_string_lossy().into_owned()
-    };
-    let args = build_args(inst, dir, &state)?;
+    let args = build_args(inst, dir, state)?;
     let mut cmd = Command::new(qemu_binary());
     vm::strip_env(&mut cmd);
     cmd.args(&args)
@@ -258,10 +253,12 @@ pub fn stop(dir: &str) -> Result<(), String> {
     let qmp = paths::join(dir, "qmp.sock");
     let _ = qmp_powerdown(&qmp);
     if wait_until(|| !alive(), POWERDOWN_BUDGET, SSH_POLL) {
+        let _ = std::fs::remove_file(&pid_file);
         return Ok(());
     }
     pidfile::stop(&pid_file);
     if wait_until(|| !alive(), TERM_BUDGET, SSH_POLL) {
+        let _ = std::fs::remove_file(&pid_file);
         return Ok(());
     }
     if !entry.started.is_empty() && pidfile::process_start_token(entry.pid) == entry.started {
@@ -269,6 +266,7 @@ pub fn stop(dir: &str) -> Result<(), String> {
             libc::kill(entry.pid, libc::SIGKILL);
         }
         if wait_until(|| !alive(), TERM_BUDGET, SSH_POLL) {
+            let _ = std::fs::remove_file(&pid_file);
             return Ok(());
         }
         return Err("qemu 拒绝退出（SIGKILL 后仍存活）".to_owned());
@@ -355,8 +353,7 @@ mod tests {
         let joined = args.join(" ");
         // KVM hard-required, never silent TCG.
         assert!(joined.contains("accel=kvm"), "{joined}");
-        // slirp with restrict=on — the guest has no path of its own.
-        assert!(joined.contains("restrict=on"), "{joined}");
+        // slirp NAT, no restrict until provisioning completes (ROADMAP).
         // Exactly one netdev, one hostfwd: ssh to the guest, nothing else.
         assert_eq!(joined.matches("hostfwd=").count(), 1);
         assert_eq!(joined.matches("-netdev").count(), 1);

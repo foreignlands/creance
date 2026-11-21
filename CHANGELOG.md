@@ -4,6 +4,66 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.6.0] — 2026-11-21
+
+### Added — Linux platform support (Ubuntu, x86_64)
+
+The whole containment stack now runs on Linux hosts, with the macOS
+build byte-for-byte untouched in behavior:
+
+- **Native QEMU + cloud-init VM backend** (`creance-vm/src/qemu/`): the
+  Ubuntu 24.04 cloud image is downloaded once per profile and verified
+  against cloud-images SHA256SUMS; every instance boots a thin qcow2
+  overlay with a pure-Rust vFAT `CIDATA` NoCloud seed (fatfs — no
+  genisoimage on the host), KVM hard-required (silent TCG refused),
+  slirp user networking with exactly one hostfwd (ssh), virtio
+  everywhere, the single 9p workspace share, serial-to-log and a QMP
+  socket for the stop ladder (powerdown → SIGTERM → token-proven
+  SIGKILL). Instance facts live in `instance.json`; the ssh keypair is
+  per-instance; cloud-init never grants the guest user sudo at all.
+- **In-process managed proxy core**: the same log-relay daemon launchd
+  runs, spawned detached in its own process group and pinned by a
+  start-token pid file; stop judges liveness by the control socket.
+  `physical_interface` on Linux resolves the default-route interface
+  from `/proc/net/route` among getifaddrs-reachable non-virtual links.
+- **PID-reuse guard armed on Linux**: `process_start_token` reads
+  `/proc/<pid>/stat` field 22 (after the last `)` — comm may contain
+  delimiters); tunnel/gate/running liveness is start-time-bound again
+  instead of silently pid-only.
+- **Backend-neutral spine**: `vm::instances_root` / `instance_marker` /
+  `SshTarget` / `guest_script` / `instance_running` /
+  `declared_mount_count`; tunnel, gate, escape, diagnose and the CLI
+  ride them, so the Lima backend keeps working unchanged on macOS.
+- `doctor` checks qemu/qemu-img/ssh-keygen and a writable `/dev/kvm` on
+  Linux (with install guidance), limactl as before on macOS.
+
+### Fixed
+
+- The pinned node download pointed at a bare `bin/node` path that
+  nodejs.org/dist does not ship (404 on every arch — the primary path
+  was dead code and slow networks then ate the apt fallback inside the
+  300 s budget). It now fetches the official tar.xz and lifts `bin/node`
+  out atomically (F-034 discipline kept).
+- `install.sh` installed the bundled core into `share/creance/`, a path
+  `core_path()` never reads (`../proxy-core/` is its second candidate) —
+  installed binaries could not find the core.
+- cloud-images SHA256SUMS use GNU binary-mode spelling (`<hash>
+  *<file>`); the verifier now strips the asterisk instead of refusing
+  every image.
+- getifaddrs read the broadcast/peer union on Linux and compared
+  `sa_family` as u8 (macOS shapes) — the code had never compiled on
+  Linux; `ifa_addr` widened-compare fixes both.
+
+### Verified live (Ubuntu 24.04 host, KVM)
+
+setup → up (cloud-init NoCloud from the vFAT seed, 323 s first boot) →
+shell (generated identity, no sudo, 9p workspace rw, direct egress/DNS/
+IPv6 all dropped) → escape-test (7/7 host probes contained; guest
+probes: flag-unreachable, identity, privilege, credentials, sockets,
+direct-egress, dns, ipv6 — all PASS; `proxy-path` requires a real
+subscription node) → stop (ACPI powerdown in 3 s, every process and
+file reaped) → setup rebuild (F-051 path).
+
 ## [0.5.7] — 2026-11-20
 
 ### Fixed — night-13: R11 finding 055

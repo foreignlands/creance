@@ -187,7 +187,7 @@ mod tests {
         // F-034: the node download is atomic — no partial corpse can shadow
         // the apt fallback.
         assert!(
-            script.contains("-o /usr/local/bin/node.new")
+            script.contains("/usr/local/bin/node.new")
                 && script.contains("rm -f /usr/local/bin/node.new"),
             "downloads land on a temp name and clean up on failure"
         );

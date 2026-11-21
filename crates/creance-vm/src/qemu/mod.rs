@@ -103,6 +103,13 @@ pub fn setup_instance(
     let state = vm::state_dir(profile);
     image::ensure_base_image(&state)?;
 
+    // The 9p share is handed to qemu by path — a workspace that does not
+    // exist yet (the fresh `environment.json`-less default) would make the
+    // fsdev refuse to start.
+    if options.workspace.is_empty() || !crate::paths::is_abs(&options.workspace) {
+        return Err("workspace must be an absolute host directory".to_owned());
+    }
+    std::fs::create_dir_all(&options.workspace).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     crate::private::ensure_private_dir(&dir).map_err(|e| e.to_string())?;
     let key = runner::ensure_keypair(&dir)?;
@@ -132,7 +139,11 @@ pub fn up(profile: &str, instance: &str) -> i32 {
             return 1;
         }
     };
-    if let Err(e) = runner::start(&inst, &instance_dir(profile, instance)) {
+    if let Err(e) = runner::start(
+        &inst,
+        &instance_dir(profile, instance),
+        &vm::state_dir(profile),
+    ) {
         eprintln!("{e}");
         return 1;
     }

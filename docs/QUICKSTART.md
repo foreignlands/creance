@@ -11,8 +11,16 @@ sh scripts/install.sh            # 构建并安装 ~/.local/bin/creance
 creance doctor                   # 自检：工具链/核心/磁盘/内存
 ```
 
-要求：macOS 14+ Apple Silicon、`limactl`（`brew install lima`，仅 VM 功能
-需要）。工具链可以完全用仓库内 `.toolchain/`，不污染全局。
+平台要求：
+
+- **macOS 14+ Apple Silicon**：VM 走 Lima(vz)，需 `limactl`
+  （`brew install lima`，仅 VM 功能需要）。工具链可以完全用仓库内
+  `.toolchain/`，不污染全局。
+- **Ubuntu Linux (x86_64)**：VM 走原生 QEMU + cloud-init（无 Lima、无
+  root）。需 `sudo apt install qemu-system-x86 qemu-utils openssh-client
+  curl`，以及可写的 `/dev/kvm`（BIOS 开虚拟化 + `sudo usermod -aG kvm
+  $USER` 后重新登录）。`creance doctor` 会逐项检查。首次 `creance
+  setup` 下载并校验 Ubuntu 24.04 云镜像（~600 MB，每 profile 一次）。
 
 ## 1. 配置代理
 
@@ -30,7 +38,7 @@ creance check                      # 验证传输：失败也不回退直连
 ## 2. 起环境（Ubuntu 24.04 VM）
 
 ```sh
-creance setup        # 生成 Lima 配置并创建实例（首次下载镜像 ~700MB）
+creance setup        # 创建实例（macOS: Lima 配置；Linux: 镜像校验 + cloud-init 种子 + qcow2 覆盖盘）
 creance up           # 启动；guest 时区/语言自动对齐 profile
 creance shell bash   # 进去干活（装 claude code、跑任务）
 ```
