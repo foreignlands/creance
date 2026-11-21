@@ -183,7 +183,7 @@ mod tests {
         std::fs::remove_dir_all(&state).unwrap();
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn start_token_differs_per_launch() {
         // Our own token is non-empty and stable within the process.

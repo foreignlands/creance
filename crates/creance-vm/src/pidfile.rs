@@ -50,7 +50,38 @@ pub fn process_start_token(pid: i32) -> String {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Linux: the start time is field 22 of `/proc/<pid>/stat` — clock ticks
+/// since boot. Stable across a process's life, different for every launch,
+/// which is all the guard needs (same contract as the macOS timeval token).
+#[cfg(target_os = "linux")]
+pub fn process_start_token(pid: i32) -> String {
+    let stat = match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+        Ok(s) => s,
+        Err(_) => return String::new(), // no such pid, or hidden by hidepid
+    };
+    stat_starttime(&stat)
+}
+
+#[cfg(target_os = "linux")]
+fn stat_starttime(stat: &str) -> String {
+    // comm is parenthesized and may itself contain ')' or spaces, so the
+    // numbered fields start after the LAST closing paren.
+    let Some((_head, rest)) = stat.rsplit_once(')') else {
+        return String::new();
+    };
+    // rest begins at field 3 (state): starttime, field 22, is index 19.
+    // Zero means "no start time on record" — treat as unreadable.
+    match rest
+        .split_whitespace()
+        .nth(19)
+        .and_then(|t| t.parse::<u64>().ok())
+    {
+        Some(ticks @ 1..) => ticks.to_string(),
+        _ => String::new(),
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn process_start_token(_pid: i32) -> String {
     String::new()
 }
@@ -241,5 +272,36 @@ mod tests {
         assert_eq!(entry.started, "", "legacy entries carry no start token");
         assert!(!alive(&file), "no such process running");
         std::fs::remove_file(&file).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stat_starttime_survives_parens_and_spaces_in_comm() {
+        // Field 22 (starttime) must come from after the LAST ')': comm can
+        // contain both delimiters (prctl PR_SET_NAME is arbitrary bytes).
+        let stat = "42 (weird )comm( na)me) S 1 0 0 0 -1 4194560 100 0 0 0 7 5 0 0 20 0 1 0 988172";
+        assert_eq!(stat_starttime(stat), "988172");
+        // A plain comm parses to the same field.
+        let plain = "7 (sleep) S 1 0 0 0 -1 64 0 0 0 3 2 0 0 20 0 2 0 0 12345";
+        assert_eq!(stat_starttime(plain), "12345");
+        // Zero means "no start time on record" — treat as unreadable.
+        let zero = "7 (sleep) R 1 0 0 0 -1 64 0 0 0 3 2 0 0 20 0 2 0 0 0";
+        assert_eq!(stat_starttime(zero), "");
+        // Malformed lines never guess.
+        assert_eq!(stat_starttime("no parens at all"), "");
+        assert_eq!(stat_starttime("1 (x) S"), "");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn own_start_token_is_real_and_stable() {
+        // With /proc available the token must be non-empty (arming the
+        // PID-reuse guard) and stable within the process's life.
+        let pid = std::process::id() as i32;
+        let a = process_start_token(pid);
+        assert!(!a.is_empty(), "own /proc stat yields a start token");
+        assert_eq!(a, process_start_token(pid));
+        // A nonexistent pid yields none.
+        assert_eq!(process_start_token(i32::MAX), "");
     }
 }
