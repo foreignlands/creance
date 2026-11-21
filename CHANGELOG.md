@@ -56,13 +56,18 @@ build byte-for-byte untouched in behavior:
 
 ### Verified live (Ubuntu 24.04 host, KVM)
 
-setup → up (cloud-init NoCloud from the vFAT seed, 323 s first boot) →
-shell (generated identity, no sudo, 9p workspace rw, direct egress/DNS/
-IPv6 all dropped) → escape-test (7/7 host probes contained; guest
-probes: flag-unreachable, identity, privilege, credentials, sockets,
-direct-egress, dns, ipv6 — all PASS; `proxy-path` requires a real
-subscription node) → stop (ACPI powerdown in 3 s, every process and
-file reaped) → setup rebuild (F-051 path).
+Seven unattended setup→up→shell→escape-test→stop→rebuild cycles: the
+vFAT seed is picked up as DataSourceNoCloud, the guest comes up as the
+generated identity with no sudo, the 9p workspace is rw, node v22.14.0
+lands at /usr/local/bin/node, direct egress/DNS/IPv6 are all dropped,
+stop is an ACPI powerdown in seconds with every process reaped, and
+escape-test reports 7/7 host probes contained plus every guest probe
+PASS except `proxy-path` (the positive control — it needs a real
+subscription node). The live network also taught three toolchain
+lessons, now guarded by tests: embedded-script quote parity (a lone
+apostrophe killed the whole leg in one second), curl-over-urllib on
+TLS-fingerprinting networks, and fallback-before-extras ordering under
+the 300 s budget.
 
 ## [0.5.7] — 2026-11-20
 
