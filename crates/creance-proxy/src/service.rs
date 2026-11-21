@@ -500,12 +500,13 @@ unsafe fn collect_interfaces() -> Result<std::collections::HashSet<String>, Stri
         let ifa = &*cursor;
         let flags = ifa.ifa_flags as u32;
         if flags & libc::IFF_UP as u32 != 0 && flags & libc::IFF_LOOPBACK as u32 == 0 {
-            // macOS spells the address `ifa_addr`; Linux nests it in a union.
-            #[cfg(target_os = "macos")]
+            // `ifa_addr` is the interface's own address on every unix — the
+            // `ifa_ifu` union is broadcast/point-to-point peer, not this.
             let addr_ptr = ifa.ifa_addr;
-            #[cfg(all(unix, not(target_os = "macos")))]
-            let addr_ptr = unsafe { ifa.ifa_ifu.ifu_addr };
-            if !addr_ptr.is_null() && unsafe { (*addr_ptr).sa_family } == libc::AF_INET as u8 {
+            // sa_family_t is u8 on macOS and u16 on Linux — compare widened.
+            if !addr_ptr.is_null()
+                && unsafe { (*addr_ptr).sa_family as libc::c_int } == libc::AF_INET
+            {
                 let sin = addr_ptr as *const libc::sockaddr_in;
                 let octets = unsafe { (*sin).sin_addr.s_addr.to_ne_bytes() };
                 let ip = Ipv4Addr::from(octets);

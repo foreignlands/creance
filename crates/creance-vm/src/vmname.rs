@@ -212,7 +212,8 @@ mod tests {
     #[test]
     fn home_limit_fits_socket_budget() {
         // Lima's exact formula: UnixPathMax - 1 - home - '/' - '/' + sock.
-        let expected = |home: usize| 104usize.saturating_sub(1 + home + 1 + 1 + LONGEST_SOCK.len());
+        let max = unix_path_max();
+        let expected = |home: usize| max.saturating_sub(1 + home + 1 + 1 + LONGEST_SOCK.len());
         assert_eq!(home_limit("/tmp/lima", false).0, expected(9));
         let deep = format!("/{}", "d".repeat(60));
         assert_eq!(home_limit(&deep, false).0, expected(deep.len()));
@@ -224,7 +225,7 @@ mod tests {
         let home = home_limit(&deep, false);
         let name = home.name("/workspace/project");
         let socket_len = deep.len() + 1 + name.len() + 1 + LONGEST_SOCK.len();
-        assert!(socket_len < 104, "socket path {socket_len} must fit");
+        assert!(socket_len < max, "socket path {socket_len} must fit");
     }
 
     #[test]

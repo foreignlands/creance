@@ -339,10 +339,16 @@ mod tests {
         assert_eq!(v["memory"], "8GiB");
         assert_eq!(v["disk"], "24GiB");
         let images = v["images"].as_sequence().unwrap();
+        // Ubuntu cloud images spell the arch "arm64"; the host decides which.
+        let image_arch = if cfg!(target_arch = "aarch64") {
+            "arm64"
+        } else {
+            "amd64"
+        };
         assert!(images[0]["location"]
             .as_str()
             .unwrap()
-            .contains("ubuntu-24.04-server-cloudimg-arm64"));
+            .contains(&format!("ubuntu-24.04-server-cloudimg-{image_arch}")));
         let mounts = v["mounts"].as_sequence().unwrap();
         assert_eq!(mounts[0]["location"], "/Users/me/project");
         assert_eq!(mounts[0]["writable"], Yaml::Bool(true));
