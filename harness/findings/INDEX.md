@@ -3,6 +3,7 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 064 | S5 | F-062 缺行网漏掉 probe() 助手路由的 fs-flag-readable：提取器只枚举字面 `echo "PROBE <id>` 发射点并把 `$` 参数化发射连同该探针一起放弃（escape.rs:332 调用点的 id 本可静态枚举，main.rs:379-382 豁免注释"not statically knowable"名不符实）——该探针行可被单独致盲而 transport ESCAPE 不触发；其余 11 探针缺行网、子串碰撞矩阵、up 守门真值表经 r14-convergence 全实证 fail-closed | R14（F-062 修复面回归） | 待修复（night-16 候选：提取器补 `probe <id>` 调用点枚举或脚本内联字面发射；r14-convergence [A]/[E] 节可作裁判） |
 | 062 | S4 | guest_script 传输层 stdout 全权受 guest 控制（Ubuntu bash 非交互 source ~/.bashrc，实机实证）：PATH 影子/全盲 exec-redirect/整份 PROBE 伪造三形态——up 守门 `Ok(_)=>{}` 与 escape-test 缺行不计失败双消费点 fail-open，假绿（吞 tcp-open）与假红（echo tcp-open 杀健康 VM，实机验证）皆可；containment 内核侧未破，破坏的是守门/验收监控语义 | R13.5（F-059/F-011 修复面回归） | 已修复（night-15：守门改正向证据（tcp-blocked 必须在场，缺失=拒交+停机）；escape-test 探针行计数缺行=transport ESCAPE；探针脚本 PATH 硬重置+绝对路径；README 边界段如实降格"guest 探针=遥测，安全控制在宿主侧"。双向实机：致盲 .bashrc 下 up rc=1 拒交、escape 报 transport ESCAPE；健康路径零假报） |
 | 063 | S5 | ROADMAP.md:16 探针清单未随 E5 同步：仍列已删的 proxy-numeric-endpoint、缺新增的 net-icmp-external（E5 执行清单三处同步漏第三处）——与 F-058 同病（改名/删改后无 grep 门禁） | E5 执行面 | 已修复（night-15：随 ROADMAP v2 落地同步——探针清单去 proxy-numeric-endpoint、补 net-icmp-external） |
 | 061 | S4 | 基础镜像信任根弱于 fetch-proxy-core：SHA256SUMS 与镜像同通道取回、SHA256SUMS.gpg 不拉不验，注释自称 "signed-by-construction" 名不符实——MITM 同时给 img+量身 sums 即通过；对照钉版哈希有仓库 git 第二通道 | H7 | 已修复（night-14：谎言注释改为如实信任模型声明——同通道 TLS 防损坏不防双文件 MITM；GPG 验签留 Ubuntu 侧跟进，STATE-r13 F-061 记录；R13.5 复核裁定：注释-only=文档诚实化+接受风险记档，非代码修复，裁定见 STATE-r135） |
