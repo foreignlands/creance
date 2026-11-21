@@ -43,7 +43,7 @@
 | # | 条目 | 入口 | 状态 |
 |---|---|---|---|
 | D1 | 实例名注入：workspace 含 `../`、空格、unicode、512 字节 | creance-vm/src/vmname.rs + vm.rs | 已穷尽（审查）：非字母数字折叠单 `-`+路径 hash 后缀；fit 的 char_boundary/never-empty 正确；控制字符在 abs_dir 拒绝；"base" 保留名碰撞不可能（hash 后缀恒在） |
-| D2 | lima_home 符号链接：预占 /tmp/cage-lima-* 指向敏感目录 | vm.rs `lima_home` | 已穷尽 5 场景：**FINDING-010 S2**——limactl() 自删 LIMA_HOME，VM 操作全落全局 ~/.lima（profile 隔离失效、探针脱节）；link 预占不校验目标（read_link 即采用），当前被 #1 意外屏蔽、修 #1 时必须同修 |
+| D2 | lima_home 符号链接：预占 /tmp/vmhome-*（0.6.3 前叫 /tmp/cage-lima-*）指向敏感目录 | vm.rs `lima_home` | 已穷尽 5 场景：**FINDING-010 S2**——limactl() 自删 LIMA_HOME，VM 操作全落全局 ~/.lima（profile 隔离失效、探针脱节）；link 预占不校验目标（read_link 即采用），当前被 #1 意外屏蔽、修 #1 时必须同修。2026-11-21 冒烟观察：链接从不回收（cargo test 的 workbench 临时 profile 会在 /tmp 留下指向已删目录的死链，实测 4 条）——卫生问题非洞，记档 |
 | D3 | environment_dir 伪造：environment.json/workbench.json 恶意值 | vm.rs | 已穷尽（审查）：directory 需绝对路径+文件写权限=同 uid；影响 instance_name/gate_dir/探针路径（hash 名兜底）——自伤面记档；workbench.json 分支要求 lima.yaml 存在 |
 | D4 | state 标记文件名碰撞：vm 名 == "base" 等保留名 | creance-vm/src/state.rs | 已穷尽（审查）：instance_name 恒带 hash 后缀 ≠ "base"；vmname 折叠使名字不可能含 "."→标记文件（.agent-vm-base-*）碰撞不可能 |
 | D5 | export_policy 数值边界：/0、/33、255.255.255.255/0 | exit_policy.rs `masked` + 网段库 | 已穷尽：bits<8 fail-closed（整库拒绝）；data 文件 bits≤32 实测；masked 对 bits>32 移位 panic 地雷不可达（data 编译期固定）；用户面无 CIDR 输入（ip 只收单 IP） |
@@ -56,6 +56,7 @@
 | E2 | guest_script oracle：PATH 劫持 sh、只读 flag、宿主 flag 在挂载内 | escape.rs `guest_script` | 已覆盖（F-011/F-022 修复面 + R5 复核）：探针命令全用绝对路径（/usr/bin/id、/usr/bin/sudo）抗 PATH 污染；`_API_KEY=` grep 误报项=共同窄设计记档不变；flag 路径由 CLI 从 environment_dir 推导（D3 已覆盖伪造面）；escape-test 的宿主侧探针（credentials/mounts/fingerprint）R5 已分别回归（F-032/F-033） |
 | E3 | workbench CSRF/权限：Origin 大小写、端口直觉、GET 触发变更 | creance/src/serve.rs | 已覆盖（R5 审查）：CSRF=POST 且非空 Origin 必须精确等于 `http://127.0.0.1:{bound port}`（大小写不折叠、端口绑实值）；GET 仅读（/,/api/status,/api/nodes）✓；DNS rebinding 场景 Origin=attacker 域→403；无 Origin 本地客户端=文档化信任边界（loopback+同 uid）；/api/proxy/import 的任意 url 经 fetch_subscription 继承 B4 全套守卫（SSRF 不逃逸）；/api/check 固定 URL 无参数注入；chunked 无空格绕过无危害（body 解析 400）已 F2 记档 |
 | E4 | 环境剥离完整性：vm.rs STRIPPED 清单 vs Go main.go:537 清单 diff | vm.rs `sanitized_env` | 已穷尽：Rust=Go 12 项+5 个 cage 自有传递变量（多剥更保守）；但那 5 个含 LIMA_HOME 在 limactl 路径自删→FINDING-010；非 Anthropic *_API_KEY 两边共同不剥（探针误报项） |
+| E5 | 探针 3（proxy-numeric-endpoint）是空探针：两 match 臂都返回 Contained | escape.rs | **已知空洞，未覆盖**（AUDIT-2026-11-21 待审 #1，裁定"实现或删除"缓做）：它在宿主强制清单里恒绿，虚增"已强制探针"计数。下轮审计应先逼出一个裁定：非数字主机名=逃逸的真校验，或删探针改计数 |
 
 ## F. 资源与健壮性
 
@@ -71,7 +72,23 @@
 |---|---|---|
 | G1 | egress.go vs egress.rs 逐分支 diff（错误文案、时序） | 已穷尽：socks5/CONNECT/TLS/DNS/deadline 分支已对照；已知差异集合=F-006（响应宽容 5 类）、F-013（凭据截断）、F-004（URL 校验 3 处）；no-fallback 文案一致 |
 | G2 | import.go vs import.rs 拒绝矩阵逐条 | 已穷尽：拒绝矩阵/optionKey/ssh/hysteria2/wsHeaders/unsafeOption 逐行一致；差异=F-002/003（数字）+F-012（非字符串键）|
-| G3 | gate*.go vs gate.rs 状态迁移与租期 | 已穷尽：Grant 五重判定（Checking/epoch/CheckID/时间戳/Authorizes 签名）vs Rust 单查 authorizes → F-008；lease 90s 值一致；fault 条件一致；RunID 绑定 night-08 已落 ✓；**Configuration 绑定+Renew 重授权+24h 硬顶+预铸下界仍缺 → R7 设计审查文档 harness/go-authz-alignment.md（0.6 对齐面，含三维绑定落点与 F-041/042 交互）** |
+| G3 | gate*.go vs gate.rs 状态迁移与租期 | 已穷尽：Grant 五重判定（Checking/epoch/CheckID/时间戳/Authorizes 签名）vs Rust 单查 authorizes → F-008；lease 90s 值一致；fault 条件一致；RunID 绑定 night-08 已落 ✓；**Configuration 绑定+Renew 重授权+24h 硬顶+预铸下界仍缺 → R7 设计审查文档 harness/go-authz-alignment.md（对齐面待重排 0.7/0.8，0.6 被 Linux 移植占用）** |
 | G4 | store.go vs store.rs Route/Import 语义 | 已覆盖：route() 的 chain/环/缺失判定一致（C2 矩阵 15 变体全对）；Import 的 refresh 保留语义有 repo 测试；**R7 select 语义对照：Go applyProxy 每次 select/restart/route 同步 closeProxyGate（proxy.go:334），Rust select_and_apply 不触碰 gate → FINDING-043 S5**（night-09 两入口已同步撤 gate）。**R8 收尾抽查 → FINDING-047 S5**：close 失败分支 Go 事务性（中止+defer 回滚）vs Rust 先落地后 `let _` 吞错（窗口 ≤90s lease 有界+再 open 被 selection 对账拒）；Go validateProxyCore 在 select 前拒坏节点、Rust 延迟到 proxy-start（fail-closed UX 漂移，不立案）；route/链式切换无 Rust 缺口（workbench 无独立 route 动作，select 覆盖）；Go store.go 其余（Import 校验/unsafeOption/Runtime 生成）逐行结论与 G2/F3 一致 |
+
+## H. Linux QEMU 后端（v0.6.0 新面，全部未覆盖——下轮夜间审计的主攻区）
+
+条目按"guest 视角可达性"排序：guest 真正够得着的面优先于同 uid 自伤面。
+
+| # | 条目 | 入口 | 状态 |
+|---|---|---|---|
+| H1 | **guest→宿主 slirp 可达面**：user 网络下 guest 可拨 10.0.2.2（=宿主回环）；`restrict=on` 未启用（runner.rs:147 注释称供给期需要），ROADMAP 挂"按启停状态启用"——隔离契约（guest 只经 ssh -R 隧道出网）在 hostfwd 之外的这条平行通路是否真的被 iptables 封死、供给完成后是否有窗口 | crates/creance-vm/src/qemu/runner.rs（netdev 参数组装）+ provision.rs（guest 侧 OUTPUT 链） | 未覆盖（**最高优先**：这是 containment 主张在 Linux 后端的直接考验；对照 macOS 侧 usernet 拒 RFC1918 的先例） |
+| H2 | hostfwd 唯一性绑定：`hostfwd=tcp:127.0.0.1:{port}-:22` 端口在 setup 分配冻结进 instance.json——同 uid 预占端口/改写 instance.json 换端口的后果；wait_ssh 早退（H2 修复）后的 TOCTOU 残窗 | qemu/runner.rs + qemu/mod.rs `Instance` | 未覆盖 |
+| H3 | vFAT 种子链：seed.img 由 fatfs 原地构建（CIDATA 标签）；同 uid 在 stop→up 之间改写 seed.img = 下次开机注入任意 cloud-init（供给脚本在 containment 之前以 root 跑）——写入面=实例目录权限；user-data 经 Yaml→cloud-init 双跳的引号/结构保真 | qemu/seed.rs + qemu/provision.rs | 未覆盖（对照 F-052 家族：同 uid 改文件洗绿/注入） |
+| H4 | QMP 控制通道：qmp.sock 在实例目录（0700 目录内），全功能 QMP（device_add/nbd 级）对同 uid 开放=自伤面；停机梯 QMP powerdown→SIGTERM(token)→SIGKILL(token) 的 token 判定与"qemu 拒绝退出"报错的可达性 | qemu/runner.rs `qmp_powerdown`/`stop_ladder` | 未覆盖 |
+| H5 | /proc starttime 令牌：stat_starttime 按"最后一个右括号"切分（comm 含括号/空格有测试）；hidepid 下 token="" 时 pidfile 守卫退化语义（空 token 恒过还是恒拒？）；PID 复用窗口在 Linux 侧的实际宽度 | creance-vm/src/pidfile.rs `process_start_token`(linux) | 未覆盖（对照 C6 的 macOS kinfo_proc 面） |
+| H6 | 进程内核心监督（Linux 侧 service.rs）：relay 分离进程组+env_clear 后靠 pidfile（记的是 relay 的 pid）+控制 socket 活性双判；孤儿收割 `reap_orphan_cores` 的签名匹配（`<dir>/mihomo -d <dir>`）与 ppid==1 判定的误杀/漏杀面（2026-11-21 新代码，理应被审） | creance-proxy/src/service.rs `launch_supervised`/`stop_local`/`reap_orphan_cores` | 未覆盖 |
+| H7 | 镜像供给链：ensure_base_image 从 cloud-images.ubuntu.com 拉 img+SHA256SUMS 校验——SUMS 文件本身的来源信任（同 HTTPS 通道）、部分下载残尸的原子性、release_dir 拼写的路径注入 | qemu/image.rs `ensure_base_image`/`parse_sum`/`fetch` | 未覆盖（对照 fetch-proxy-core 钉版+哈希的信任模型差异：一个信 release 附带校验和，一个信仓库自录） |
+
+> 状态由审查员更新（本文件是 harness 中唯一允许审查员写的非 findings 文件）。
 
 > 状态由审查员更新（本文件是 harness 中唯一允许审查员写的非 findings 文件）。
