@@ -1,4 +1,5 @@
-//! The proxy core's lifecycle: bundled mihomo, launchd-managed on macOS,
+//! The proxy core's lifecycle: bundled mihomo, supervised by launchd on
+//! macOS and by an in-process detached relay + pid file on Linux,
 //! health-checked through its private control socket.
 //!
 //! The core is never searched for on PATH — only the application bundle
@@ -8,7 +9,7 @@
 #![allow(unsafe_code)] // FFI to libc: statfs/sysctl/signal — audited, no unchecked input
 use crate::runtime::{bind_interface, bound_interface};
 use crate::{dir, socket, write_private, Store, GROUP};
-use sha2::{Digest, Sha256};
+use sha2::Digest;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpListener};
 use std::os::unix::fs::PermissionsExt;
@@ -19,6 +20,8 @@ use std::time::{Duration, Instant};
 /// The start-readiness poll cadence and budget.
 const START_POLL: Duration = Duration::from_millis(100);
 const START_BUDGET: Duration = Duration::from_secs(10);
+/// How long a told-to-die core gets before the stop path escalates.
+const STOP_BUDGET: Duration = Duration::from_secs(5);
 
 /// The bundled core binary. Never searches PATH or another app's bundle.
 pub fn core_path() -> Result<String, String> {
@@ -172,11 +175,13 @@ pub fn running(profile: &str, store: &Store) -> bool {
     check_running(profile, store).is_ok()
 }
 
+#[cfg(target_os = "macos")]
 fn service_label(profile: &str) -> String {
-    let h = Sha256::digest(profile.as_bytes());
+    let h = sha2::Sha256::digest(profile.as_bytes());
     format!("local.claude-cage.managed-proxy.{}", hex::encode(&h[..4]))
 }
 
+#[cfg(target_os = "macos")]
 fn service_path(profile: &str) -> String {
     Path::new(&dir(profile))
         .join("managed-service.plist")
@@ -186,9 +191,14 @@ fn service_path(profile: &str) -> String {
 
 /// Stops the managed core. A missing service means nothing to stop.
 pub fn stop(profile: &str) -> Result<(), String> {
-    if cfg!(not(target_os = "macos")) {
-        return Err("内置代理当前支持 macOS".to_owned());
-    }
+    #[cfg(target_os = "macos")]
+    return stop_launchd(profile);
+    #[cfg(not(target_os = "macos"))]
+    return stop_local(profile);
+}
+
+#[cfg(target_os = "macos")]
+fn stop_launchd(profile: &str) -> Result<(), String> {
     if !Path::new(&service_path(profile)).exists() {
         return Ok(());
     }
@@ -205,11 +215,49 @@ pub fn stop(profile: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Linux stop: the pid file's owner gets a SIGTERM (only when the start
+/// token proves it is ours, FINDING-021), then a bounded wait judged by
+/// the control socket — the one oracle that never lies about a core.
+#[cfg(not(target_os = "macos"))]
+fn stop_local(profile: &str) -> Result<(), String> {
+    use creance_vm::pidfile;
+    let pid_file = pidfile::proxy_pid_file(profile, "core.pid");
+    let entry = pidfile::load(&pid_file);
+    pidfile::stop(&pid_file);
+    if let Some(entry) = entry {
+        let deadline = Instant::now() + STOP_BUDGET;
+        while Instant::now() < deadline && core_socket_alive(profile) {
+            std::thread::sleep(START_POLL);
+        }
+        if core_socket_alive(profile) {
+            // Escalate to SIGKILL only when the entry's start token still
+            // matches the live holder of that pid — the same discipline
+            // pidfile::stop applies to its SIGTERM.
+            if !entry.started.is_empty() && pidfile::process_start_token(entry.pid) == entry.started
+            {
+                unsafe {
+                    libc::kill(entry.pid, libc::SIGKILL);
+                }
+                let deadline = Instant::now() + STOP_BUDGET;
+                while Instant::now() < deadline && core_socket_alive(profile) {
+                    std::thread::sleep(START_POLL);
+                }
+            }
+        }
+    }
+    let _ = std::fs::remove_file(socket(profile));
+    Ok(())
+}
+
+/// Whether the core's private control socket still answers connections —
+/// liveness without trusting pids, files, or self-reported state.
+#[cfg(not(target_os = "macos"))]
+fn core_socket_alive(profile: &str) -> bool {
+    std::os::unix::net::UnixStream::connect(socket(profile)).is_ok()
+}
+
 /// Starts (or refreshes) the managed core for this profile's applied node.
 pub fn start(profile: &str, store: &Store) -> Result<(), String> {
-    if cfg!(not(target_os = "macos")) {
-        return Err("内置代理当前支持 macOS".to_owned());
-    }
     let name = physical_interface()?;
     let path = Path::new(&dir(profile))
         .join("config.yaml")
@@ -238,10 +286,10 @@ pub fn start(profile: &str, store: &Store) -> Result<(), String> {
     write_private(&path, &bytes)?;
     let _ = std::fs::remove_file(&sock);
 
-    // The launchd job runs fully self-contained inside the proxy directory:
-    // a copy of this binary as the relay, and the bundled core beside it.
-    // Release bundles install both next to each other anyway, and a copy
-    // keeps the job independent of a moving build directory.
+    // The supervised job runs fully self-contained inside the proxy
+    // directory: a copy of this binary as the relay, and the bundled core
+    // beside it. Release bundles install both next to each other anyway,
+    // and a copy keeps the job independent of a moving build directory.
     let exe = std::env::current_exe()
         .map_err(|e| e.to_string())?
         .to_string_lossy()
@@ -255,6 +303,23 @@ pub fn start(profile: &str, store: &Store) -> Result<(), String> {
         Ok(p) if !p.is_empty() => p,
         _ => format!("{profile}/config.json"),
     };
+    launch_supervised(profile, &relay_bin.to_string_lossy(), &config_path)?;
+    let deadline = Instant::now() + START_BUDGET;
+    while Instant::now() < deadline {
+        if running(profile, store) {
+            std::fs::set_permissions(&sock, std::fs::Permissions::from_mode(0o600))
+                .map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+        std::thread::sleep(START_POLL);
+    }
+    let _ = stop(profile);
+    Err("代理核心启动超时，请查看私有代理日志".to_owned())
+}
+
+/// macOS launch: a generated plist, bootstrapped into the user's gui domain.
+#[cfg(target_os = "macos")]
+fn launch_supervised(profile: &str, relay_bin: &str, config_path: &str) -> Result<(), String> {
     let plist = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\
@@ -270,10 +335,10 @@ pub fn start(profile: &str, store: &Store) -> Result<(), String> {
 <key>StandardErrorPath</key><string>{}</string>\
 <key>RunAtLoad</key><true/></dict></plist>",
         xml_escape(&service_label(profile)),
-        xml_escape(&relay_bin.to_string_lossy()),
+        xml_escape(relay_bin),
         xml_escape(&dir(profile)),
         creance_vm::config::CONFIG_ENV,
-        xml_escape(&config_path),
+        xml_escape(config_path),
         xml_escape(&Path::new(&dir(profile)).join("launchd-stdout.log").to_string_lossy()),
         xml_escape(&Path::new(&dir(profile)).join("launchd-stderr.log").to_string_lossy()),
     );
@@ -285,17 +350,44 @@ pub fn start(profile: &str, store: &Store) -> Result<(), String> {
         let _ = std::fs::remove_file(service_path(profile));
         return Err("无法启动 Cage 自带代理核心".to_owned());
     }
-    let deadline = Instant::now() + START_BUDGET;
-    while Instant::now() < deadline {
-        if running(profile, store) {
-            std::fs::set_permissions(&sock, std::fs::Permissions::from_mode(0o600))
-                .map_err(|e| e.to_string())?;
-            return Ok(());
+    Ok(())
+}
+
+/// Linux launch: the same relay job launchd runs, spawned detached in its
+/// own process group and pinned by a start-token-bound pid file. The relay
+/// owns the core's logs and signal forwarding; this process never waits.
+#[cfg(not(target_os = "macos"))]
+fn launch_supervised(profile: &str, relay_bin: &str, config_path: &str) -> Result<(), String> {
+    use creance_vm::pidfile;
+    use std::os::unix::process::CommandExt as _;
+    let mut child = std::process::Command::new(relay_bin)
+        .args(["log-relay", "proxy"])
+        // Same hygiene as the plist: nothing of the caller's shell follows
+        // the daemon — only what it needs to find the profile again.
+        .env_clear()
+        .env("HOME", dir(profile))
+        .env("PATH", "/usr/bin:/bin")
+        .env(creance_vm::config::CONFIG_ENV, config_path)
+        // Own process group: a terminal hangup or Ctrl-C at the CLI must
+        // not reach the daemon.
+        .process_group(0)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("无法启动 Cage 自带代理核心：{e}"))?;
+    let pid_file = pidfile::proxy_pid_file(profile, "core.pid");
+    if let Err(e) = pidfile::write(&pid_file, child.id() as i32) {
+        // A daemon we cannot pin must not outlive the call as unknown.
+        unsafe {
+            libc::kill(child.id() as i32, libc::SIGKILL);
         }
-        std::thread::sleep(START_POLL);
+        let _ = child.wait();
+        return Err(format!("无法记录代理守护进程：{e}"));
     }
-    let _ = stop(profile);
-    Err("代理核心启动超时，请查看私有代理日志".to_owned())
+    // Deliberately neither wait nor kill-on-drop: the child is the daemon.
+    std::mem::forget(child);
+    Ok(())
 }
 
 /// The `cage log-relay proxy` entry: owns the core's stdout/stderr capture so
@@ -425,10 +517,12 @@ fn run_command(program: &str, args: &[&str]) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+#[cfg(target_os = "macos")]
 fn uid() -> u32 {
     unsafe { libc::getuid() }
 }
 
+#[cfg(target_os = "macos")]
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -460,9 +554,14 @@ fn copy_executable_if_changed(src: &str, dst: &str) -> Result<(), String> {
 /// The system's preferred reachable IPv4 hardware port. A route through utun
 /// is not a physical uplink, even when it is the default.
 pub fn physical_interface() -> Result<String, String> {
-    if !cfg!(target_os = "macos") {
-        return Err("物理网卡识别当前支持 macOS".to_owned());
-    }
+    #[cfg(target_os = "macos")]
+    return physical_interface_macos();
+    #[cfg(not(target_os = "macos"))]
+    return physical_interface_linux();
+}
+
+#[cfg(target_os = "macos")]
+fn physical_interface_macos() -> Result<String, String> {
     let hardware = std::process::Command::new("/usr/sbin/networksetup")
         .arg("-listallhardwareports")
         .output()
@@ -480,6 +579,81 @@ pub fn physical_interface() -> Result<String, String> {
         .unwrap_or_default();
     let usable = usable_interfaces()?;
     select_physical_interface(&route, &hardware, &nwi, &usable)
+}
+
+/// Linux: the default route's interface (from `/proc/net/route`, the same
+/// table `ip route` prints) among the reachable non-virtual ones.
+#[cfg(not(target_os = "macos"))]
+fn physical_interface_linux() -> Result<String, String> {
+    let usable = usable_interfaces()?;
+    let table = std::fs::read_to_string("/proc/net/route").unwrap_or_default();
+    let default = default_route_iface(&table);
+    let mut candidates: Vec<String> = usable
+        .iter()
+        .filter(|n| !is_virtual_linux_interface(n))
+        .cloned()
+        .collect();
+    candidates.sort();
+    if let Some(default) = default {
+        if candidates.iter().any(|c| c == &default) {
+            return Ok(default);
+        }
+    }
+    candidates
+        .into_iter()
+        .next()
+        .ok_or_else(|| "未找到可用的物理 IPv4 网卡；Cage 外网保持关闭，请连接网络后重试".to_owned())
+}
+
+/// The lowest-metric default-route interface from a `/proc/net/route`
+/// dump; None when the table has no default route at all.
+#[cfg(not(target_os = "macos"))]
+fn default_route_iface(table: &str) -> Option<String> {
+    let mut best: Option<(u32, String)> = None;
+    for line in table.lines().skip(1) {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        // Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT
+        if fields.len() >= 7 && fields[1] == "00000000" {
+            let Ok(metric) = fields[6].parse::<u32>() else {
+                continue;
+            };
+            if best.as_ref().is_none_or(|(m, _)| metric < *m) {
+                best = Some((metric, fields[0].to_owned()));
+            }
+        }
+    }
+    best.map(|(_, name)| name)
+}
+
+/// Linux virtual links: tunnels, bridges, veth pairs, container and VM
+/// plumbing. Names carry a kernel prefix; wireless (wl*) and ethernet
+/// (en*/eth*/ens*/enp*) are physical and absent from this list.
+#[cfg(not(target_os = "macos"))]
+fn is_virtual_linux_interface(name: &str) -> bool {
+    const PREFIXES: &[&str] = &[
+        "lo",
+        "docker",
+        "br-",
+        "veth",
+        "virbr",
+        "tap",
+        "tun",
+        "vmnet",
+        "lima",
+        "podman",
+        "kube",
+        "flannel",
+        "cni",
+        "tailscale",
+        "wg",
+        "zt",
+        "pan",
+        "ipoib",
+        "ppp",
+        "slip",
+    ];
+    let lower = name.to_lowercase();
+    PREFIXES.iter().any(|p| lower.starts_with(p))
 }
 
 /// Interfaces that are up, not loopback, and carry a global IPv4 address.
@@ -525,6 +699,7 @@ unsafe fn collect_interfaces() -> Result<std::collections::HashSet<String>, Stri
 /// macOS also exposes packet tunnels, bridges, VM links, AWDL and other
 /// service interfaces. They can carry an IPv4 address, but they are not a
 /// physical uplink and must not become the proxy's binding.
+#[cfg(target_os = "macos")]
 fn is_virtual_mac_interface(name: &str) -> bool {
     const PREFIXES: &[&str] = &[
         "utun", "bridge", "vmen", "vmenet", "vmnet", "tap", "lima", "awdl", "llw", "p2p", "gif",
@@ -537,6 +712,7 @@ fn is_virtual_mac_interface(name: &str) -> bool {
 
 /// Chooses the default route's interface among the reachable physical ones,
 /// preferring scutil's network-priority order.
+#[cfg(target_os = "macos")]
 fn select_physical_interface(
     route: &str,
     hardware: &str,
@@ -599,6 +775,7 @@ fn select_physical_interface(
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn virtual_interface_detection() {
         for name in [
@@ -617,6 +794,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn select_prefers_default_route_on_reachable_physical() {
         let mut usable = std::collections::HashSet::new();
@@ -631,6 +809,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn select_falls_back_to_first_reachable() {
         let mut usable = std::collections::HashSet::new();
@@ -643,12 +822,14 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn select_fails_closed() {
         let usable = std::collections::HashSet::new();
         assert!(select_physical_interface("", "Device: en0\n", "", &usable).is_err());
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn xml_escaping() {
         assert_eq!(xml_escape("a<b>&\"c\""), "a&lt;b&gt;&amp;&quot;c&quot;");
@@ -660,6 +841,69 @@ mod tests {
         // pointer to the fetch script.
         let err = core_path().unwrap_err();
         assert!(err.contains("fetch-proxy-core.sh") || err.contains("重新安装"));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn linux_virtual_interface_detection() {
+        for name in [
+            "lo",
+            "docker0",
+            "br-1234abcd",
+            "veth3f2a1b",
+            "virbr0",
+            "tap0",
+            "tun0",
+            "wg0",
+            "tailscale0",
+            "cni0",
+            "flannel.1",
+            "podman0",
+            "zt0",
+        ] {
+            assert!(is_virtual_linux_interface(name), "{name}");
+        }
+        // Physical spellings stay candidates — udev predictable names, legacy
+        // eth*, and wireless included.
+        for name in ["eth0", "ens18", "enp3s0", "wlan0", "wlp2s0", "usb0"] {
+            assert!(!is_virtual_linux_interface(name), "{name}");
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn default_route_picks_lowest_metric() {
+        let table =
+            "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n\
+                     enp3s0\t00000000\t010A0A0A\t0003\t0\t0\t100\t00000000\t0\t0\t0\n\
+                     wg0\t00000000\t00000000\t0001\t0\t0\t50\t00000000\t0\t0\t0\n\
+                     enp3s0\t010A0A0A\t00000000\t0001\t0\t0\t0\tFFFFFFFF\t0\t0\t0\n";
+        // wg0 has the lower metric but is virtual — the parse itself must
+        // report the lowest metric regardless; selection filters later.
+        assert_eq!(default_route_iface(table).as_deref(), Some("wg0"));
+        // No default route at all.
+        assert_eq!(
+            default_route_iface("Iface\tDestination\neth0\t010A0A0A\n"),
+            None
+        );
+        // Real-world shape: header only.
+        assert_eq!(default_route_iface("Iface\tDestination\n"), None);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn stop_without_any_core_is_a_clean_noop() {
+        // A profile that never started has no pid file and no socket: stop
+        // must succeed without inventing work (parity with the missing-plist
+        // fast path of the launchd build).
+        let dir = std::env::temp_dir().join(format!(
+            "creance-stop-noop-{}",
+            crate::token()[..8].to_owned()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let profile = dir.to_string_lossy().into_owned();
+        stop(&profile).expect("stop with nothing running is Ok");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
 
