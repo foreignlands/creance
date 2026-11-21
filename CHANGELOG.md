@@ -4,6 +4,20 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.6.6] — 2026-11-21
+
+### Fixed — night-16 (R14 convergence round)
+
+- F-064 (S5): the escape-test missing-line net covered 11 of 12 probes
+  — fs-flag-readable emitted through a parameterized shell helper was
+  invisible to the expected-id extractor, so that one probe line could
+  be swallowed without triggering PROBE transport ESCAPE. The helper is
+  gone: the probe emits literally like every other peer and lands in
+  the net (r14-convergence [A]/[E] judge green, flipped to post-fix
+  assertions).
+- (Changelog gap acknowledged: 0.6.2–0.6.5 shipped without entries;
+  see git log, docs/AUDIT-2026-11-21.md and harness/findings/.)
+
 ## [0.6.1] — 2026-11-21
 
 ### Fixed — full-project audit round
