@@ -14,6 +14,7 @@ use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpListener};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::process::Command;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::{Duration, Instant};
 
@@ -185,9 +186,76 @@ fn service_path(profile: &str) -> String {
 /// Stops the managed core. A missing service means nothing to stop.
 pub fn stop(profile: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    return stop_launchd(profile);
+    let outcome = stop_launchd(profile);
     #[cfg(not(target_os = "macos"))]
-    return stop_local(profile);
+    let outcome = stop_local(profile);
+    // Belt and suspenders: a relay that died without forwarding (SIGKILL,
+    // OOM) leaves a re-parented core no path can stop — the pid file's
+    // owner is gone and launchd never saw the core. Sweep here so
+    // "stopped" is true even then, and the next start doesn't wedge on
+    // "port occupied" (2026-11-21 audit #2; the tunnel got the same
+    // safety net as F-026).
+    reap_orphan_cores(profile);
+    outcome
+}
+
+/// Kills mihomo cores of THIS profile that no live process owns. Match =
+/// the profile's own core copy path in argv (each profile gets its own
+/// `<proxy-dir>/mihomo`, so the path cannot hit another profile's core
+/// or a system mihomo); orphan = re-parented to pid 1, because a
+/// supervised core's parent is the relay, alive or being stopped by the
+/// caller above.
+fn reap_orphan_cores(profile: &str) {
+    let d = dir(profile);
+    let signature = format!("{d}/mihomo -d {d}");
+    let Ok(out) = Command::new("pgrep").arg("-f").arg(&signature).output() else {
+        return;
+    };
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let mut orphans: Vec<i32> = Vec::new();
+    for pid in text
+        .split_whitespace()
+        .filter_map(|p| p.parse::<i32>().ok())
+    {
+        let Ok(ppid_out) = Command::new("ps")
+            .args(["-o", "ppid=", "-p", &pid.to_string()])
+            .output()
+        else {
+            continue;
+        };
+        let ppid = String::from_utf8_lossy(&ppid_out.stdout)
+            .trim()
+            .parse::<i32>()
+            .unwrap_or(-1);
+        if ppid == 1 {
+            orphans.push(pid);
+        }
+    }
+    if orphans.is_empty() {
+        return;
+    }
+    for pid in &orphans {
+        unsafe {
+            libc::kill(*pid, libc::SIGTERM);
+        }
+    }
+    // Give the TERMed cores a beat to release the port before the caller's
+    // bind probe could mistake them for a stranger; escalate after that.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        if !orphans
+            .iter()
+            .any(|p| creance_vm::pidfile::process_alive(*p))
+        {
+            return;
+        }
+        std::thread::sleep(START_POLL);
+    }
+    for pid in orphans {
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
