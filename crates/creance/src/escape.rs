@@ -391,7 +391,10 @@ else
   echo "PROBE net-ipv6 PASS"
 fi
 # Positive control: the ONLY route (loopback tunnel to the host core) works.
-if curl -m 8 -s --socks5-hostname "cage:{auth}"@127.0.0.1:{port} https://1.1.1.1/cdn-cgi/trace | grep -q ip=; then
+# The username must match the core's configured auth (store::endpoint's
+# 'session' — a drift here fails the probe honestly, as the 2026-11-21
+# sweep's first live round demonstrated).
+if curl -m 8 -s --socks5-hostname "session:{auth}"@127.0.0.1:{port} https://1.1.1.1/cdn-cgi/trace | grep -q ip=; then
   echo "PROBE proxy-path PASS"
 else
   echo "PROBE proxy-path ESCAPE"

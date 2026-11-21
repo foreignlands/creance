@@ -477,13 +477,13 @@ impl Egress {
         if response.status == 429 || response.status >= 500 {
             return Err((
                 true,
-                format!("cage DNS upstream returned HTTP {}", response.status),
+                format!("managed DNS upstream returned HTTP {}", response.status),
             ));
         }
         if response.status != 200 {
             return Err((
                 false,
-                format!("cage DNS upstream returned HTTP {}", response.status),
+                format!("managed DNS upstream returned HTTP {}", response.status),
             ));
         }
         let msg = Message::unpack(&response.body)
@@ -496,7 +496,7 @@ impl Egress {
 }
 
 fn dns_unavailable() -> String {
-    "cage DNS upstream unavailable; check the configured DoH endpoint through the selected proxy"
+    "managed DNS upstream unavailable; check the configured DoH endpoint through the selected proxy"
         .to_owned()
 }
 
