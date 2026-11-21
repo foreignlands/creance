@@ -78,24 +78,12 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
         },
     });
 
-    // 3. The proxy endpoint is a numeric loopback/IP address (no DNS
-    //    bootstrap that could bypass the egress).
-    out.push(Probe {
-        id: "proxy-numeric-endpoint",
-        layer: "network",
-        outcome: match &cfg {
-            Ok(c) => match c.proxy_url.split_once("://").map(|(_, rest)| rest) {
-                Some(rest) if rest.starts_with("127.0.0.1:") || rest.contains("@127.0.0.1:") => {
-                    Outcome::Contained
-                }
-                // Non-loopback numeric endpoints are valid too; anything
-                // host-shaped is caught by config validation already.
-                Some(_) => Outcome::Contained,
-                None => Outcome::Escaped("unparsable proxy URL".to_owned()),
-            },
-            Err(e) => Outcome::Escaped(e.clone()),
-        },
-    });
+    // 3. (deleted 2026-11-21, R13's E5 verdict) The former
+    //    `proxy-numeric-endpoint` probe was hollow — both match arms
+    //    returned Contained, so it could never go red. The real checks
+    //    live in config validation and the store's `applied()`; a green
+    //    counter with a permanent-PASS entry is a small lie, and the
+    //    honest fix is removal, not a vestigial constant.
 
     // 4. Only the environment directory is shared: no Lima mounts beyond
     //    the workspace mount in the staged/instance config. FINDING-016:
@@ -389,6 +377,18 @@ if ip -6 addr show scope global 2>/dev/null | grep -q inet6; then
   echo "PROBE net-ipv6 ESCAPE"
 else
   echo "PROBE net-ipv6 PASS"
+fi
+# F-060: ICMP used to be allowed to ANY destination — an echo channel the
+# TCP/DNS probes never watched. External echoes must die (only the NAT
+# subnets keep ICMP for path-MTU); no ping binary = honestly SKIP.
+if command -v ping >/dev/null 2>&1; then
+  if timeout 3 ping -c1 -W2 1.1.1.1 >/dev/null 2>&1; then
+    echo "PROBE net-icmp-external ESCAPE"
+  else
+    echo "PROBE net-icmp-external PASS"
+  fi
+else
+  echo "PROBE net-icmp-external SKIP"
 fi
 # Positive control: the ONLY route (loopback tunnel to the host core) works.
 # The username must match the core's configured auth (store::endpoint's

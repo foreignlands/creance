@@ -18,13 +18,13 @@ tok() { jq -r .token "$RECORD" 2>/dev/null; }
 ctl() {
   S=$(sock); T=$(tok)
   [ -n "$S" ] && [ -S "$S" ] || { echo "NOSOCK"; return; }
-  curl -s --max-time 6 --unix-socket "$S" -H "Host: cage" -H "Authorization: Bearer $T" \
+  curl -s --max-time 6 --unix-socket "$S" -H "Host: gate" -H "Authorization: Bearer $T" \
        -X POST -d "$1" http://cage/control 2>/dev/null
 }
 state() {
   S=$(sock); T=$(tok)
   [ -n "$S" ] && [ -S "$S" ] || { echo "NOSOCK"; return; }
-  curl -s --max-time 6 --unix-socket "$S" -H "Host: cage" -H "Authorization: Bearer $T" \
+  curl -s --max-time 6 --unix-socket "$S" -H "Host: gate" -H "Authorization: Bearer $T" \
        http://cage/status 2>/dev/null | jq -r '.state // "ERR"'
 }
 tunnels() { pgrep -f "HostKeyAlias=lima-$INST" 2>/dev/null | while read -r p; do

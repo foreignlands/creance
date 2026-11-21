@@ -199,24 +199,64 @@ pub fn stop(profile: &str) -> Result<(), String> {
     outcome
 }
 
-/// Kills mihomo cores of THIS profile that no live process owns. Match =
+/// Kills mihomo cores of THIS profile that no live relay owns. Match =
 /// the profile's own core copy path in argv (each profile gets its own
 /// `<proxy-dir>/mihomo`, so the path cannot hit another profile's core
-/// or a system mihomo); orphan = re-parented to pid 1, because a
-/// supervised core's parent is the relay, alive or being stopped by the
-/// caller above.
+/// or a system mihomo); orphan = NOT parented by the pid file's live
+/// relay. The relay writes `core.pid` itself at startup, so the judgment
+/// is platform-neutral: ppid==1 was a launchd special case — under
+/// systemd user managers (PR_SET_CHILD_SUBREAPER) orphans re-parent to
+/// the user manager, and the old check never fired on Linux (F-057).
+/// A pid file whose relay is dead owns nothing: every matching core is
+/// an orphan, including one re-parented to a live subreaper.
 fn reap_orphan_cores(profile: &str) {
     let d = dir(profile);
-    let signature = format!("{d}/mihomo -d {d}");
-    let Ok(out) = Command::new("pgrep").arg("-f").arg(&signature).output() else {
-        return;
+    // F-056: pgrep -f takes an ERE, and the profile path is arbitrary
+    // user input — a literal `+` quantifies (path never matches), `(`x`
+    // mis-hits neighbors, an unclosed paren makes regcomp fail and
+    // pgrep exit 2, which `.output()` would silently fold into a no-op.
+    // Escape every metacharacter, and treat exit 2 as loud.
+    let escaped: String =
+        d.chars()
+            .map(|c| match c {
+                '\\' | '.' | '[' | ']' | '{' | '}' | '(' | ')' | '*' | '+' | '?' | '^' | '$'
+                | '|' => format!("\\{c}"),
+                _ => c.to_string(),
+            })
+            .collect();
+    let signature = format!("{escaped}/mihomo -d {escaped}");
+    let out = match Command::new("pgrep").arg("-f").arg(&signature).output() {
+        Ok(o) => o,
+        Err(_) => return,
     };
+    match out.status.code() {
+        Some(0) | Some(1) => {}
+        other => {
+            eprintln!(
+                "warning: orphan-core pattern failed to compile (pgrep exit {other:?}); sweep skipped"
+            );
+            return;
+        }
+    }
+    // The one parent a matching core may keep: the pid file's live relay.
+    let relay_pid =
+        creance_vm::pidfile::load(&creance_vm::pidfile::proxy_pid_file(profile, "core.pid"))
+            .filter(|e| {
+                !e.started.is_empty()
+                    && creance_vm::pidfile::process_start_token(e.pid) == e.started
+                    && creance_vm::pidfile::process_alive(e.pid)
+            })
+            .map(|e| e.pid);
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     let mut orphans: Vec<i32> = Vec::new();
     for pid in text
         .split_whitespace()
         .filter_map(|p| p.parse::<i32>().ok())
     {
+        let Some(relay) = relay_pid else {
+            orphans.push(pid);
+            continue;
+        };
         let Ok(ppid_out) = Command::new("ps")
             .args(["-o", "ppid=", "-p", &pid.to_string()])
             .output()
@@ -227,7 +267,7 @@ fn reap_orphan_cores(profile: &str) {
             .trim()
             .parse::<i32>()
             .unwrap_or(-1);
-        if ppid == 1 {
+        if ppid != relay {
             orphans.push(pid);
         }
     }
@@ -483,6 +523,19 @@ pub fn log_relay_proxy(profile: &str) -> i32 {
         return 1;
     };
     let config = Path::new(&proxy_dir).join("config.yaml");
+    // F-057: the relay pins ITSELF here, before anything else can fail.
+    // The orphan sweep's judgment ("matching core parented by the live
+    // pid-file relay = healthy") needs the relay's pid on BOTH platforms —
+    // launchd spawns this entry too, and Linux's launch_supervised write
+    // raced a relay that died before its first line. Overwritten on every
+    // (re)spawn, so the file always names the current relay.
+    let own = std::process::id() as i32;
+    if let Err(e) = creance_vm::pidfile::write(
+        &creance_vm::pidfile::proxy_pid_file(profile, "core.pid"),
+        own,
+    ) {
+        report(&format!("cannot pin relay pid: {e}"));
+    }
     // Signal disposition is installed BEFORE the child exists: a SIGTERM
     // arriving between spawn and handler setup would otherwise kill the
     // relay and orphan mihomo.

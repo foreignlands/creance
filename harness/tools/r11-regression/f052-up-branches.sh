@@ -54,7 +54,7 @@ say "case3 戳对+实例缺失                      预测=rc1+实例缺失文�
 # case4 戳对 + 实例在（假 lima home）+ 假 limactl → 绿路径恰一次 start
 UID_=$(id -u)
 H=$(printf '%s' "$TD/profile" | shasum -a 256 | cut -c1-8)
-LH="/tmp/cage-lima-${UID_}-${H}"
+LH="/tmp/vmhome-${UID_}-${H}"
 mkdir -p "$LH/$INSTANCE"
 touch "$LH/$INSTANCE/lima.yaml"
 mkdir -p "$TD/fakebin"

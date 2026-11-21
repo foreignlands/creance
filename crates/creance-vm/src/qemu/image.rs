@@ -47,8 +47,13 @@ pub fn ensure_base_image(state: &str) -> Result<PathBuf, String> {
     let tmp = dir.join(format!("{name}.part"));
     fetch(&format!("{base_url}/{name}"), &tmp)?;
 
-    // Verify against the release's signed-by-construction checksum file
-    // before the bytes are allowed to become a boot disk.
+    // Verify the bytes against the release's checksum file before they
+    // may become a boot disk. Honest scope (F-061): SHA256SUMS rides the
+    // SAME TLS channel as the image and carries no signature — this
+    // catches corruption and stale mirrors, not a network attacker who
+    // controls both files. It is not "signed by construction"; raising
+    // the trust root to Ubuntu's release GPG key is the Ubuntu-side
+    // follow-up (see harness/state/STATE-r13.md, F-061).
     let sums_tmp = dir.join("SHA256SUMS.part");
     fetch(&format!("{base_url}/SHA256SUMS"), &sums_tmp)?;
     let sums = std::fs::read_to_string(&sums_tmp).map_err(|e| e.to_string())?;

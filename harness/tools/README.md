@@ -13,6 +13,15 @@ cargo 小工程。**都是历史工件**：它们冻结在各自轮次的目标�
 - **平台限定（#11）**：`r11-regression`、`r9-regression`、
   `r8-regression`、`r7-sync-matrix`、`r5-race-probe` 调
   `vm::lima_home`（v0.6 起 macOS-only）——Linux 上编不过，属预期。
+- **退休（F-058，2026-11-21）**：`r8-regression`（主体
+  `refresh_fingerprint_stamp` 已被 F-044 修复**有意删除**，探针失去了
+ 测试对象）；`r9-regression`、`r12-provision-real`（依赖 v0.6.x 有意
+  私有化的 `lima::SetupOptions` pub 面——不为探针放宽产品 API）。
+  这三个目录保留存档，但不再是任何回归的裁判。
+- **修复保活（F-058，2026-11-21）**：`r7-sync-matrix`、`c3-gate-hammer`、
+  `r6-evidence-probe` 的手拼 `Host: cage` 全部改 `Host: gate`（去集群化
+  改名的第二波隐藏消费者）；`r11-regression/f052-up-branches.sh` 夹具
+  路径 `/tmp/cage-lima-*` 跟随现名 `/tmp/vmhome-*`。
 - **陈旧快照（#12）**：`a6-dns-probe` 用 2026-11-18 的 dnsmsg
   字节快照，缺 F-005 修复——它测的是不再发布的代码，仅存档。
 

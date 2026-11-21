@@ -90,7 +90,7 @@ mod tests {
             workspace: "/home/me/ws".to_owned(),
             guest: crate::guestprofile::Profile {
                 version: 1,
-                hostname: "cage-abc12345".to_owned(),
+                hostname: "nitro-abc1".to_owned(),
                 username: "devabc12345".to_owned(),
                 session_token: "ab".repeat(24),
             },
@@ -118,8 +118,8 @@ mod tests {
 
     #[test]
     fn meta_data_carries_a_fresh_instance_id() {
-        let md = meta_data("iid-123", "cage-abc12345");
-        assert_eq!(md, "instance-id: iid-123\nlocal-hostname: cage-abc12345\n");
+        let md = meta_data("iid-123", "nitro-abc1");
+        assert_eq!(md, "instance-id: iid-123\nlocal-hostname: nitro-abc1\n");
     }
 
     #[test]

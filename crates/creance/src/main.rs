@@ -679,6 +679,28 @@ fn cmd_up() -> i32 {
             }
         }
         let _ = running::record_running(&instance_dir, &cfg);
+        // F-059's universal guard: whatever the backend did on THIS boot,
+        // the guest must not reach the internet directly. Behavior, not
+        // artifacts — a missing boot replay (or a backend that stopped
+        // replaying) fails `up` loudly instead of shipping an open VM.
+        // TCP is the hard gate; ICMP is checked when ping exists (F-060
+        // scoped it to the NAT subnets, so external echoes must die).
+        let probe = "timeout 5 bash -c '</dev/tcp/1.1.1.1/443' 2>/dev/null && echo tcp-open || echo tcp-blocked\n\
+                     command -v ping >/dev/null 2>&1 && { timeout 3 ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo icmp-open || echo icmp-blocked; } || echo icmp-unknown\n";
+        match creance_vm::vm::guest_script(&profile, &instance, probe) {
+            Ok(out) if out.contains("tcp-open") || out.contains("icmp-open") => {
+                let _ = creance_vm::vm::stop_vm(&profile, &instance);
+                return fail(
+                    "guest 防火墙未生效（直连可达），VM 已停止；请 creance stop 后 creance setup 重建环境"
+                        .to_owned(),
+                );
+            }
+            Ok(_) => {}
+            Err(e) => {
+                let _ = creance_vm::vm::stop_vm(&profile, &instance);
+                return fail(format!("无法在 guest 内验证防火墙状态，VM 已停止：{e}"));
+            }
+        }
         println!("Environment is up. The guest's only route out is the managed core (`creance escape-test` proves it).");
     }
     code

@@ -137,7 +137,7 @@ fn call_raw(record_socket: &str, token: &str, body: &str) -> Result<(String, ser
     let mut s = UnixStream::connect(record_socket).map_err(|e| e.to_string())?;
     let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(5)));
     let req = format!(
-        "POST /control HTTP/1.1\r\nHost: cage\r\nAuthorization: Bearer {token}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "POST /control HTTP/1.1\r\nHost: gate\r\nAuthorization: Bearer {token}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     s.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
@@ -220,7 +220,7 @@ fn h2_empty_bearer_fail_open() {
 
     // status：无 token GET /status 仍泄漏状态面
     let mut s = UnixStream::connect(&record.socket).unwrap();
-    let req = "GET /status HTTP/1.1\r\nHost: cage\r\nAuthorization: Bearer \r\nConnection: close\r\n\r\n";
+    let req = "GET /status HTTP/1.1\r\nHost: gate\r\nAuthorization: Bearer \r\nConnection: close\r\n\r\n";
     s.write_all(req.as_bytes()).unwrap();
     let mut raw = Vec::new();
     s.read_to_end(&mut raw).unwrap();

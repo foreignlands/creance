@@ -141,7 +141,7 @@ fn open_gate(rig: &Rig, record: &GateRecord) {
 fn call_raw(record: &GateRecord, body: &str) -> Result<(String, serde_json::Value), String> {
     let mut stream = UnixStream::connect(&record.socket).map_err(|e| e.to_string())?;
     let request = format!(
-        "POST /control HTTP/1.1\r\nHost: cage\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "POST /control HTTP/1.1\r\nHost: gate\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         record.token,
         body.len(),
         body
@@ -165,7 +165,7 @@ fn call_raw(record: &GateRecord, body: &str) -> Result<(String, serde_json::Valu
 fn get_status(record: &GateRecord) -> Result<(String, serde_json::Value), String> {
     let mut stream = UnixStream::connect(&record.socket).map_err(|e| e.to_string())?;
     let request = format!(
-        "GET /status HTTP/1.1\r\nHost: cage\r\nAuthorization: Bearer {}\r\nConnection: close\r\n\r\n",
+        "GET /status HTTP/1.1\r\nHost: gate\r\nAuthorization: Bearer {}\r\nConnection: close\r\n\r\n",
         record.token
     );
     stream.write_all(request.as_bytes()).map_err(|e| e.to_string())?;

@@ -90,14 +90,56 @@ timeout "$TOOLCHAIN_BUDGET" sh -c '
 # 0.3 TOPOLOGY LOCKDOWN — the guest's only wire out is the ssh -R tunnel to
 # the host-side core on this machine's own loopback (managed from the host
 # after boot). Everything else, including DNS and IPv6, is dropped.
+#
+# F-059: iptables state lives in kernel RAM. A reboot (host stop->up is the
+# daily cycle) used to hand back a wide-open guest behind a green exit:
+# runcmd is per-instance on cloud-init and nothing replayed the rules. Two
+# durable layers now hold the line — the rules file, and a boot-time unit
+# that restores it before the network comes up — making the lockdown an
+# instance property instead of a first-boot event. (`up` additionally
+# verifies behaviorally; see main.rs.)
+#
+# F-060: the DHCP and ICMP allowances exist for the virtual NAT gateway
+# (lease renewal, path-MTU signals). Scoped to the NAT subnets — slirp's
+# 10.0.2.0/24, Lima usernet's 192.168.5.0/24, plus DHCP broadcast — so
+# neither can carry traffic to a real destination. Subnet-scoped rather
+# than a guessed gateway IP.
 sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null
 printf 'net.ipv6.conf.all.disable_ipv6=1\n' > /etc/sysctl.d/99-creance-noipv6.conf
-iptables -A OUTPUT -o lo -j ACCEPT
-iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-iptables -A OUTPUT -p udp --dport 67 -j ACCEPT
-iptables -A OUTPUT -p icmp -j ACCEPT
+# Idempotent add: Lima replays boot scripts on every start; -C||-A keeps
+# the replay from stacking duplicate rules.
+addrule() {{ iptables -C OUTPUT "$@" 2>/dev/null || iptables -A OUTPUT "$@"; }}
+addrule -o lo -j ACCEPT
+addrule -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+addrule -p udp --dport 67 -d 10.0.2.0/24 -j ACCEPT
+addrule -p udp --dport 67 -d 192.168.5.0/24 -j ACCEPT
+addrule -p udp --dport 67 -d 255.255.255.255 -j ACCEPT
+addrule -p icmp -d 10.0.2.0/24 -j ACCEPT
+addrule -p icmp -d 192.168.5.0/24 -j ACCEPT
 iptables -P OUTPUT DROP
-iptables-save > /etc/iptables/rules.v4 2>/dev/null || iptables-save > /etc/iptables.up.rules
+mkdir -p /etc/iptables
+iptables-save > /etc/iptables/rules.v4
+# The boot replay: restore the saved set before the network is up, so no
+# boot window exists with an open egress. Neutral name — the unit list is
+# guest-visible.
+cat > /etc/systemd/system/egress-lock.service <<'LOCKUNIT'
+[Unit]
+Description=Network egress policy
+DefaultDependencies=no
+After=systemd-modules-load.service
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/iptables-restore /etc/iptables/rules.v4
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+LOCKUNIT
+systemctl daemon-reload
+systemctl enable egress-lock.service >/dev/null
 
 # 020 PRIVILEGE RETIREMENT — cloud-init unconditionally grants the guest
 # user sudo (NOPASSWD, or a random password parked in ~/password when
@@ -126,6 +168,42 @@ mod tests {
             "nitro-012a",
             "dev0123abcd",
         )
+    }
+
+    #[test]
+    fn lockdown_survives_reboots_and_scopes_its_allows() {
+        // F-059: the lockdown must be an instance property — a boot-time
+        // unit replays the saved rules, or a stop->up cycle hands back a
+        // wide-open guest behind a green exit.
+        let s = script();
+        assert!(
+            s.contains("iptables-restore /etc/iptables/rules.v4"),
+            "a boot replay unit restores the rules"
+        );
+        assert!(
+            s.contains("systemctl enable egress-lock.service"),
+            "the replay unit is enabled"
+        );
+        // Unit semantics carry the ordering: Before=network-pre.target
+        // makes the restore precede the network (textual order inside the
+        // unit file is irrelevant — [Unit] precedes [Service] by format).
+        assert!(
+            s.contains("Before=network-pre.target"),
+            "the restore unit orders itself before the network"
+        );
+        // F-060: DHCP and ICMP allows are destination-scoped to the NAT
+        // subnets — no bare allowance may remain.
+        for bare in ["-p udp --dport 67 -j ACCEPT", "-p icmp -j ACCEPT"] {
+            assert!(!s.contains(bare), "bare allowance leaked: {bare}");
+        }
+        assert!(s.contains("-p icmp -d 10.0.2.0/24 -j ACCEPT"));
+        assert!(s.contains("-p udp --dport 67 -d 192.168.5.0/24 -j ACCEPT"));
+        // Replayed adds are idempotent — Lima re-runs boot scripts every
+        // start; duplicate stacking would be cosmetic rot at best.
+        assert!(
+            s.contains("iptables -C OUTPUT"),
+            "rule adds check-before-append"
+        );
     }
 
     #[test]
