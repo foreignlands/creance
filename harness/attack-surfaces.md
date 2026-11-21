@@ -65,7 +65,7 @@
 | F2 | 慢速 DoS：半开连接占满 serve 64 槽位后的行为 | serve.rs | 已穷尽（审查）：loopback-only+本机可信进程架构下自伤面；64 槽 TOCTOU 轻微超限一次性；chunked 检测对 "Transfer-Encoding:chunked"（无空格）绕过但无后续危害（S5 记档）；CSRF Origin 精确匹配/GET 只读/1MiB body 上限全部正确 |
 | F3 | mihomo 控制通道：假 core.sock、慢应答、>1MiB 应答 | creance-proxy/src/service.rs `api` | 已覆盖（R4 审查：应答上限/读界正确；假 core.sock=同 uid 预占=自伤面，无 fail-open；慢应答受读界与预算约束。**R7 真核心在环完成（R6 未验证想法兑现）→ FINDING-042 S4**：external-controller-unix 零认证，PATCH mode=direct / SAFE_PATHS 内 yaml 重载实测成立，出口证据预言机被无痕劫持；guest 不可达；Go 同形非漂移；night-09 修复=secret 保留+gate-open 前置 check_running 对账，负对照实测 mode=direct 被拒 ✓）。**R8 残余面 → FINDING-046 S4**：对账集五字段+组选择不含 /rules（假核心在环实证盲区）——保 mode+伪装组选择的规则级重载自述穿透；TOCTOU 不独立成洞；SAFE_PATHS 同 uid 设计地板；unix 免鉴已结案（文件权限即鉴权，mihomo 设计） |
 
-## G. 与 Go 原版语义对照（只读 /Users/shenyiyu/Documents/zcode/claude-cage-ref）
+## G. 与 Go 原版语义对照（只读 Go 参考仓库 <path-to-the-Go-reference-checkout>）
 
 | # | 条目 | 状态 |
 |---|---|---|

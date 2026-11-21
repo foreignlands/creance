@@ -3,14 +3,14 @@
 //! provisioned with the guest fingerprint (timezone, locale) the profile
 //! promises and the tool chain Claude Code needs.
 //!
-//! The generated YAML is written to `<state>/lima/<instance>/lima.yaml` and
-//! consumed by `limactl create`; instance naming stays compatible with the
-//! Go build.
+//! The generated YAML is staged at `<state>/setup/<instance>.yaml` and handed
+//! to `limactl create`, which owns the instance directory; instance naming
+//! stays compatible with the Go build.
 
 use crate::provision::{guest_bootstrap, UBUNTU_RELEASE};
 use serde_yaml::{Mapping, Value as Yaml};
 
-pub use crate::vm::SetupOptions;
+use crate::vm::SetupOptions;
 
 /// Builds the Lima YAML for a fresh instance.
 pub fn generate_lima_yaml(options: &SetupOptions) -> Result<Vec<u8>, String> {

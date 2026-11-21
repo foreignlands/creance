@@ -31,8 +31,6 @@ pub struct SetupOptions {
     pub timezone: String,
     pub locale: String,
     pub browser_language: String,
-    /// Host-side managed-core port; the guest loopback forwards back to it.
-    pub proxy_port: u16,
     /// Generated guest identity (hostname/username/session token).
     pub guest: crate::guestprofile::Profile,
 }
@@ -47,7 +45,6 @@ impl Default for SetupOptions {
             timezone: "Etc/UTC".to_owned(),
             locale: "en_US.UTF-8".to_owned(),
             browser_language: "en-US".to_owned(),
-            proxy_port: 17896,
             guest: crate::guestprofile::Profile::generate(),
         }
     }
@@ -427,7 +424,13 @@ pub fn ssh_target(profile: &str, instance: &str) -> Result<SshTarget, String> {
     #[cfg(target_os = "macos")]
     {
         let home = lima_home(profile);
-        let out = std::process::Command::new("limactl")
+        // FINDING-010 discipline, same as the imp::limactl helper: strip
+        // the inherited environment FIRST, then set LIMA_HOME — a user
+        // shell exporting LIMA_HOME would otherwise send this query to
+        // the global Lima home while every other operation used ours.
+        let mut cmd = std::process::Command::new("limactl");
+        strip_env(&mut cmd);
+        let out = cmd
             .env("LIMA_HOME", &home)
             .args(["list", "--json"])
             .output()
@@ -537,7 +540,10 @@ pub fn doctor(profile: &str, _instance: &str) -> i32 {
 pub fn instance_running(profile: &str, instance: &str) -> bool {
     #[cfg(target_os = "macos")]
     {
-        let out = std::process::Command::new("limactl")
+        // Same FINDING-010 discipline as every other limactl spawn.
+        let mut cmd = std::process::Command::new("limactl");
+        strip_env(&mut cmd);
+        let out = cmd
             .env("LIMA_HOME", lima_home(profile))
             .args(["list", "--json"])
             .output();

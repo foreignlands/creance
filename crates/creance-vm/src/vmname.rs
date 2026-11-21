@@ -5,12 +5,8 @@
 //! Names are cut to fit the longest UNIX socket path Lima uses in a given
 //! home, so every Cage environment keeps a reachable socket.
 
-use crate::paths;
 use sha2::{Digest, Sha256};
 use std::path::Path;
-
-/// The base template every project VM is cloned from.
-pub const TEMPLATE: &str = "base";
 
 /// The instance-name length a Lima home supports, derived from its socket
 /// budget. `0` selects Lima's normal 76-byte cap.
@@ -62,9 +58,8 @@ fn resolve_existing(home: &str) -> Option<String> {
 impl Limit {
     /// The VM name of the project directory `dir`.
     pub fn name(&self, dir: &str) -> String {
-        let dir = paths::guest(dir);
         let sum: [u8; 32] = Sha256::digest(dir.as_bytes()).into();
-        let base = base_name(&dir, 0).unwrap_or_else(|| "project".to_owned());
+        let base = base_name(dir, 0).unwrap_or_else(|| "project".to_owned());
         self.fit(&base, &format!("-{}", hex::encode(&sum[..4])))
     }
 
@@ -87,28 +82,6 @@ impl Limit {
         }
         base + suffix
     }
-
-    /// A fresh `--scratch` name for `dir`, never the folder's own VM.
-    pub fn scratch(&self, dir: &str) -> String {
-        let mut b = [0u8; 4];
-        rand::fill(&mut b);
-        let name = base_name(dir, 20).unwrap_or_else(|| "project".to_owned());
-        self.fit(&name, &format!("-scratch-{}", hex::encode(b)))
-    }
-}
-
-/// Whether `name` looks like a scratch name. Note: a folder literally named
-/// `x-scratch` yields `x-scratch-<hash>`, which matches too.
-pub fn is_scratch(name: &str) -> bool {
-    let Some((head, tail)) = name.rsplit_once("-scratch-") else {
-        return false;
-    };
-    !head.is_empty()
-        && head.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
-        && tail.len() == 8
-        && tail
-            .bytes()
-            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
 }
 
 /// The last element of `dir`, every run of bytes other than ASCII letters and
@@ -146,26 +119,6 @@ fn basename_bytes(p: &str) -> &[u8] {
         None if t.is_empty() => &[],
         None => t.as_bytes(),
     }
-}
-
-/// `dir` (the current directory when empty) as commands that start a VM spell
-/// theirs: absolute, cleaned, existing, without control characters.
-pub fn abs_dir(dir: &str) -> Result<String, String> {
-    let dir = if dir.is_empty() || !Path::new(dir).is_absolute() {
-        let wd = std::env::current_dir().map_err(|e| e.to_string())?;
-        paths::join(&wd.to_string_lossy(), dir)
-    } else {
-        dir.to_owned()
-    };
-    let dir = paths::clean(&dir);
-    match Path::new(&dir).metadata() {
-        Ok(st) if st.is_dir() => {}
-        _ => return Err(format!("no such directory: {dir}")),
-    }
-    if dir.chars().any(|c| c < ' ' || c == '\x7f') {
-        return Err("the directory name contains a control character".to_owned());
-    }
-    Ok(paths::host(&dir))
 }
 
 #[cfg(test)]
@@ -226,13 +179,5 @@ mod tests {
         let name = home.name("/workspace/project");
         let socket_len = deep.len() + 1 + name.len() + 1 + LONGEST_SOCK.len();
         assert!(socket_len < max, "socket path {socket_len} must fit");
-    }
-
-    #[test]
-    fn scratch_matches_only_its_shape() {
-        let n = Limit(0).scratch("/tmp/proj");
-        assert!(n.starts_with("proj-scratch-"));
-        assert!(is_scratch(&n));
-        assert!(!is_scratch("base"));
     }
 }

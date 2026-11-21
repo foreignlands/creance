@@ -1,4 +1,4 @@
-//! `cage doctor`: one report of everything the environment needs, each item
+//! `creance doctor`: one report of everything the environment needs, each item
 //! judged ok / warn / fail with an actionable hint.
 
 use creance_proxy::{self};
@@ -51,7 +51,12 @@ pub fn diagnose(profile: &str, config_path: &str) -> Vec<Check> {
         }),
     }
     #[cfg(not(target_os = "macos"))]
-    for tool in ["qemu-system-x86_64", "qemu-img", "ssh-keygen"] {
+    for tool in [
+        creance_vm::qemu::runner::qemu_binary(),
+        "qemu-img",
+        "ssh-keygen",
+        "pgrep",
+    ] {
         out.push(Check {
             status: if which(tool).is_some() {
                 Status::Ok
@@ -63,7 +68,7 @@ pub fn diagnose(profile: &str, config_path: &str) -> Vec<Check> {
                 format!("{tool} available")
             } else {
                 format!(
-                    "not installed; `sudo apt install qemu-system-x86 qemu-utils` provides {tool}"
+                    "not installed; `sudo apt install qemu-system-x86 qemu-utils procps` provides {tool}"
                 )
             },
         });
@@ -125,7 +130,7 @@ pub fn diagnose(profile: &str, config_path: &str) -> Vec<Check> {
                         detail: if creance_proxy::service::running(profile, &store) {
                             "running and matching the applied store".to_owned()
                         } else {
-                            "not running; `cage proxy-start` brings it up".to_owned()
+                            "not running; `creance proxy-start` brings it up".to_owned()
                         },
                     });
                 }
@@ -193,7 +198,7 @@ pub fn diagnose(profile: &str, config_path: &str) -> Vec<Check> {
         out.push(Check {
             status: Status::Warn,
             name: "environment",
-            detail: format!("no instance yet; `cage setup` creates {instance}"),
+            detail: format!("no instance yet; `creance setup` creates {instance}"),
         });
     }
     out
@@ -202,7 +207,9 @@ pub fn diagnose(profile: &str, config_path: &str) -> Vec<Check> {
 fn which(program: &str) -> Option<String> {
     for dir in std::env::var("PATH").unwrap_or_default().split(':') {
         let candidate = paths::join(dir, program);
-        if Path::new(&candidate).exists() {
+        // is_file, not exists: a directory named like the tool on PATH is
+        // not an executable (same rule as runner::require_tools).
+        if Path::new(&candidate).is_file() {
             return Some(candidate);
         }
     }

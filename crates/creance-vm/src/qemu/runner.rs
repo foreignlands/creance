@@ -31,13 +31,22 @@ pub fn qemu_binary() -> &'static str {
 /// The host tools the backend drives. Missing ones are setup-time fatals,
 /// not runtime surprises.
 pub fn require_tools() -> Result<(), String> {
-    for tool in [qemu_binary(), "qemu-img", "ssh", "ssh-keygen", "curl"] {
+    // pgrep too: the tunnel's orphan sweep (F-026) silently no-ops without
+    // it, so its absence must be a setup-time fatal, not a live surprise.
+    for tool in [
+        qemu_binary(),
+        "qemu-img",
+        "ssh",
+        "ssh-keygen",
+        "curl",
+        "pgrep",
+    ] {
         let found = std::env::var_os("PATH")
             .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join(tool).is_file()))
             .unwrap_or(false);
         if !found {
             return Err(format!(
-                "缺少 {tool}（Ubuntu: sudo apt install qemu-system-x86 qemu-utils openssh-client curl）"
+                "缺少 {tool}（Ubuntu: sudo apt install qemu-system-x86 qemu-utils openssh-client procps curl）"
             ));
         }
     }
@@ -211,10 +220,19 @@ pub fn start(inst: &Instance, dir: &str, state: &str) -> Result<(), String> {
 /// Polls until an ssh `true` lands (or the budget dies). The first
 /// successful connect pins the guest host key into the instance's
 /// known_hosts — every later consumer uses StrictHostKeyChecking=yes.
-pub fn wait_ssh(target: &SshTarget, budget: Duration) -> Result<(), String> {
+/// A qemu that dies at any point aborts the wait immediately — a
+/// hostfwd bind race kills the process at spawn, and nobody should
+/// poll a corpse for ten minutes.
+pub fn wait_ssh(target: &SshTarget, pid_file: &str, budget: Duration) -> Result<(), String> {
     let deadline = Instant::now() + budget;
     let mut last: String;
     loop {
+        if !pidfile::alive(pid_file) {
+            return Err(
+                "qemu 进程已退出（hostfwd 端口被占用或启动即败）；请查看实例目录 serial.log"
+                    .to_owned(),
+            );
+        }
         let mut cmd = Command::new("ssh");
         vm::apply_ssh_options(&mut cmd, target);
         cmd.arg("-o")
@@ -239,15 +257,19 @@ pub fn wait_ssh(target: &SshTarget, budget: Duration) -> Result<(), String> {
 }
 
 /// The stop ladder: QMP powerdown (guest acpid) → SIGTERM (token-proven) →
-/// SIGKILL (token-proven). A dead instance is a no-op.
+/// SIGKILL (token-proven). A dead instance is a no-op. Waits judge the
+/// PROCESS (kill(pid,0)), never the pid file — pidfile::stop removes the
+/// file, so a file-based wait would vacuously succeed on the first tick
+/// and let delete() unlink a live instance directory.
 pub fn stop(dir: &str) -> Result<(), String> {
     let pid_file = paths::join(dir, "qemu.pid");
     let entry = pidfile::load(&pid_file);
     let Some(entry) = entry else {
         return Ok(());
     };
-    let alive = || pidfile::alive(&pid_file);
+    let alive = || pidfile::process_alive(entry.pid);
     if !alive() {
+        let _ = std::fs::remove_file(&pid_file);
         return Ok(());
     }
     let qmp = paths::join(dir, "qmp.sock");

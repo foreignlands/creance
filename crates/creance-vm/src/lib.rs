@@ -2,7 +2,7 @@
 //!
 //! The profile (its `config.json` and directory layout), host path and
 //! naming semantics, per-VM state markers, running records with PID-reuse
-//! guards, host facts, and the Lima-driven environment lifecycle. Guest
+//! guards, host facts, the Lima-driven environment lifecycle on macOS and the native QEMU + cloud-init backend on Linux. Guest
 //! fingerprint policy (exit anchoring) lives here too: it is profile data
 //! the whole stack reads.
 
@@ -18,7 +18,6 @@ pub mod provision;
 #[cfg(target_os = "linux")]
 pub mod qemu;
 pub mod running;
-pub mod state;
 pub mod tunnel;
 pub mod vm;
 pub mod vmname;

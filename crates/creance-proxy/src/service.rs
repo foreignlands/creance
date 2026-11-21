@@ -6,7 +6,7 @@
 //! carries it. Readiness is judged by the control socket, not by process
 //! existence.
 
-#![allow(unsafe_code)] // FFI to libc: statfs/sysctl/signal — audited, no unchecked input
+#![allow(unsafe_code)] // FFI to libc: kill/getuid/getifaddrs — audited, no unchecked input
 use crate::runtime::{bind_interface, bound_interface};
 use crate::{dir, socket, write_private, Store, GROUP};
 use sha2::Digest;
@@ -33,11 +33,8 @@ pub fn core_path() -> Result<String, String> {
         .parent()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let name = if cfg!(windows) {
-        "mihomo.exe"
-    } else {
-        "mihomo"
-    };
+    // unix-only product (macOS + Linux): the core binary is always `mihomo`
+    let name = "mihomo";
     for candidate in [
         format!("{exe_dir}/{name}"),
         format!("{exe_dir}/../proxy-core/{name}"),
@@ -47,12 +44,6 @@ pub fn core_path() -> Result<String, String> {
             {
                 use std::os::unix::fs::PermissionsExt;
                 if info.is_file() && info.permissions().mode() & 0o111 != 0 {
-                    return Ok(candidate);
-                }
-            }
-            #[cfg(not(unix))]
-            {
-                if info.is_file() {
                     return Ok(candidate);
                 }
             }

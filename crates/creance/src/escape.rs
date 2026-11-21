@@ -6,7 +6,8 @@
 //!   credentials in the guest env, only the workspace mounted, gate record
 //!   private, fingerprint consistency. These are hard assertions.
 //! - **In-guest probes**: a generated script the CLI runs inside the VM via
-//!   `limactl shell`; each probe reports PASS (contained) or ESCAPE. Network
+//!   the backend shell (limactl on macOS, ssh on Linux); each probe
+//!   reports PASS (contained) or ESCAPE. Network
 //!   probes are marked `pending-enforcement` until the VM network plane
 //!   routes through the gate (ROADMAP), so the suite reports them as
 //!   "not enforced" rather than lying about containment.
@@ -170,7 +171,7 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
         },
     });
 
-    // 6. Guest fingerprint consistency: the timezone the VM was promised is
+    // 7. Guest fingerprint consistency: the timezone the VM was promised is
     //    the one the profile still carries (drift means stale config).
     out.push(Probe {
         id: "fingerprint-consistent",
@@ -316,7 +317,6 @@ fn scan_unknown_tokens(profile: &str) -> Result<Vec<(String, String)>, String> {
 /// runs on any guest. `expected_user` is the generated guest identity the
 /// VM must be running as (F-022).
 pub fn guest_script(flag_path: &str, auth: &str, port: u16, expected_user: &str) -> String {
-    let _ = auth;
     format!(
         r#"#!/bin/sh
 # creance escape probes (in-guest). A flag file placed on the host is the

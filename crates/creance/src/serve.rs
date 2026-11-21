@@ -1,4 +1,4 @@
-//! `cage serve` — the lean workbench: a loopback-only HTTP service with a
+//! `creance serve` — the lean workbench: a loopback-only HTTP service with a
 //! single-page UI for the control plane (status, subscriptions, node
 //! selection, core lifecycle, transport check).
 //!
@@ -12,7 +12,6 @@ use creance_vm::vm;
 use serde_json::json;
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::path::Path;
 use std::time::{Duration, Instant};
 
 /// Concurrent connection ceiling for the loopback workbench.
@@ -313,19 +312,4 @@ pub fn gate_instance_dir(profile: &str) -> String {
         &vm::instances_root(profile),
         &vm::instance_name(profile, &vm::environment_dir(profile)),
     )
-}
-
-/// Whether a gate record exists and its state, for the workbench panel.
-pub fn gate_state(profile: &str) -> Option<String> {
-    let client = creance_gate::gate::GateClient::open(&gate_instance_dir(profile)).ok()?;
-    let status = client.status().ok()?;
-    Some(format!("{:?}", status.state).trim_matches('"').to_owned())
-}
-
-/// Path helper re-exported for the workbench HTML host.
-pub fn config_parent(config_path: &str) -> String {
-    Path::new(config_path)
-        .parent()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_default()
 }

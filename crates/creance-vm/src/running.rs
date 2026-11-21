@@ -5,7 +5,7 @@
 //! PID can belong to an unrelated process. Records therefore carry the
 //! process's start time, and liveness requires both.
 
-#![allow(unsafe_code)] // FFI to libc: statfs/sysctl/signal — audited, no unchecked input
+#![allow(unsafe_code)] // libc::kill liveness probes on our own recorded pids — audited
 use crate::config::Config;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -18,8 +18,6 @@ struct RunningProfile {
     #[serde(default)]
     started: String,
     fingerprint: String,
-    #[serde(default)]
-    job_id: String,
 }
 
 /// The recorded process's start-time token: stable across a process's life,
@@ -73,7 +71,6 @@ pub fn record_running(instance_dir: &str, config: &Config) -> Result<(), String>
         pid,
         started: process_start_token(pid),
         fingerprint: config.fingerprint(),
-        job_id: std::env::var("CAGE_JOB").unwrap_or_default(),
     };
     let bytes = serde_json::to_vec(&record).map_err(|e| e.to_string())?;
     let target = Path::new(instance_dir).join(RECORD_FILE);

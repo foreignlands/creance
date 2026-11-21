@@ -1,7 +1,7 @@
 #!/bin/sh
 # Fetch the bundled mihomo core for development builds.
 #
-# CorePath looks next to the cage binary and in ../proxy-core/, so a dev
+# core_path() looks next to the creance binary and in ../proxy-core/, so a dev
 # checkout installs it at target/proxy-core/mihomo. Release bundles ship the
 # core inside the app; this script is not needed there.
 #

@@ -95,7 +95,7 @@ fn main() {
     name = "creance",
     version,
     about = "creance — a contained workspace for AI agents",
-    after_help = "Configuration: ~/.claude-cage/config.json (override CLAUDE_CAGE_CONFIG).\nEach configuration directory is an independent cage profile.\nOnly explicitly opened project folders are shared. No host Claude credentials are imported."
+    after_help = "Configuration: ~/.creance/config.json (override CREANCE_CONFIG; legacy ~/.claude-cage/CLAUDE_CAGE_CONFIG honored).\nEach configuration directory is an independent cage profile.\nOnly explicitly opened project folders are shared. No host Claude credentials are imported."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -171,7 +171,7 @@ enum Commands {
     },
     /// Print this build's version.
     Version,
-    /// Internal: own the proxy core's output for launchd. Not for direct use.
+    /// Internal: own the proxy core's output as the supervised daemon. Not for direct use.
     #[command(hide = true)]
     LogRelay {
         kind: String,
@@ -550,7 +550,7 @@ fn cmd_setup(memory: u32, cpus: u32) -> i32 {
         Ok(g) => g,
         Err(e) => return fail(e),
     };
-    let options = creance_vm::lima::SetupOptions {
+    let options = creance_vm::vm::SetupOptions {
         memory_gib: memory,
         cpus,
         disk_gib: 24,
@@ -558,7 +558,6 @@ fn cmd_setup(memory: u32, cpus: u32) -> i32 {
         timezone: cfg.timezone.clone(),
         locale: cfg.locale.clone(),
         browser_language: cfg.browser_language.clone(),
-        proxy_port: proxy_store_port(&profile),
         guest,
     };
     // F-051: setup on an existing instance rebuilds it — the backend's

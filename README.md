@@ -39,8 +39,8 @@ with an automated escape-probe suite. Rust, layer-decoupled, no black magic.
 | Crate | Owns |
 |---|---|
 | `creance-net` | egress tunnels (SOCKS5/CONNECT/TLS), DoH, DNS wire codec, wire helpers |
-| `creance-vm` | profile config, paths/naming/state, PID-reuse guards, host facts, Lima lifecycle, exit-policy data |
-| `creance-proxy` | subscription store + import, mihomo runtime config, launchd-managed core |
+| `creance-vm` | profile config, paths/naming, PID-reuse guards, host facts, Lima lifecycle (macOS) / native QEMU backend (Linux), exit-policy data |
+| `creance-proxy` | subscription store + import, mihomo runtime config, supervised core (launchd on macOS, in-process relay on Linux) |
 | `creance-gate` | gate control plane (unix-socket HTTP state machine) |
 | `creance` | CLI + workbench + diagnostics + escape suite (assembly) |
 
@@ -68,10 +68,12 @@ existing `~/.claude-cage` profiles keep working).
 ## Escape-test: the acceptance harness
 
 `creance escape-test` reports per-probe: ✅ contained · ❌ escaped (exit 1) ·
-⏭️ not-enforced (its layer ships in 0.3). Current enforced set: profile
-validity, no host credentials in child env, numeric proxy endpoint. With a
-VM: filesystem flag oracle, guest env/SSH/socket probes, and the network
-probes (SKIP until the enforcement plane lands — honest by design).
+⏭️ not-enforced. Enforced since 0.3/0.4/0.5: profile validity, no host
+credentials in child env, numeric proxy endpoint, workspace-only mounts,
+private live-served gate record, session-only credentials, fingerprint
+consistency — and, with a VM, the guest probes: filesystem flag oracle,
+guest identity/privilege/env, socket exposure, and the network probes
+(direct egress, external DNS, IPv6 — all enforced live).
 
 ## Status
 

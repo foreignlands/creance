@@ -4,6 +4,43 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.6.1] — 2026-11-21
+
+### Fixed — full-project audit round
+
+Correctness (details in docs/AUDIT-2026-11-21.md):
+- the qemu stop ladder's SIGTERM wait judged liveness by the pid file
+  that `pidfile::stop` had just deleted — it vacuously succeeded on the
+  first tick, the SIGKILL leg was unreachable, and `delete()` could
+  unlink the directory of a still-running instance. Waits now probe the
+  process (`pidfile::process_alive`).
+- `wait_ssh` polled a dead qemu for the full 10-minute budget (hostfwd
+  port race kills qemu at spawn) — it now aborts the moment the pid
+  file says the process is gone; a failed `up` also stops the half-booted
+  VM it leave behind.
+- two raw `limactl` queries on macOS bypassed the FINDING-010
+  strip-then-set environment discipline (a user-shell LIMA_HOME sent
+  them to the global Lima home).
+- doctor on aarch64 demanded qemu-system-x86_64; pgrep (the orphan
+  sweep's dependency) joined the required-tools checks.
+- workspace arguments are validated (absolute, quote-free) BEFORE the
+  ~600 MB image download; the image hash is streamed in 8 MiB chunks
+  instead of one 600 MB allocation; the gate daemon now gets the relay's
+  detach discipline (own process group, stripped environment).
+
+Dead code removed (~500 lines, every claim grep-verified): the whole
+`state.rs` ~/.agent-vm legacy, vmname scratch/template machinery, the
+never-consumed `SetupOptions.proxy_port`, eleven uncalled paths.rs
+helpers plus every fantasy Windows branch (the unix imports at crate
+tops made those uncompilable anyway), `Egress::allows`, `credential_env`,
+`CAGE_JOB` bookkeeping, three serve.rs leftovers.
+
+Consistency: stale help texts and doc comments thawed to 0.6 reality
+(backend split, config resolution order, probe numbering), user-visible
+`cage` command names became `creance`, README/ROADMAP/QUICKSTART escape
+probe claims updated, harness run-loop now honors the documented
+"建议停止" stop verdict, prompts de-personalized.
+
 ## [0.6.0] — 2026-11-21
 
 ### Added — Linux platform support (Ubuntu, x86_64)

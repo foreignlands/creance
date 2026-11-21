@@ -86,8 +86,20 @@ fn parse_sum(sums: &str, name: &str) -> Option<String> {
 }
 
 fn sha256_file(path: &Path) -> Result<String, String> {
-    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-    Ok(hex::encode(Sha256::digest(&bytes)))
+    // Streamed in chunks: the base image is ~600 MB and a whole-file read
+    // would copy it all into RAM just to hash it.
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 8 << 20];
+    loop {
+        let n = file.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex::encode(hasher.finalize()))
 }
 
 /// One https fetch via curl, into `dst`, with the cage environment hygiene

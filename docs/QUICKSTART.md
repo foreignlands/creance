@@ -29,7 +29,7 @@ export CREANCE_CONFIG=~/.creance/config.json   # 默认即此，可省
 creance init
 creance proxy-import --name 我的订阅 --url https://example.com/sub.yaml
 creance proxy-select "香港-01"     # 按名字或 ID
-creance proxy-start                # 启动托管核心（launchd，幂等）
+creance proxy-start                # 启动托管核心（macOS: launchd；Linux: 进程内守护，幂等）
 creance check                      # 验证传输：失败也不回退直连
 ```
 
@@ -70,8 +70,9 @@ creance gate-open     # 出口证据通过后开闸（90s 租期，wire 跟随�
 creance escape-test
 ```
 
-输出 ✅（已强制层全过）/ ⏭️（未实现层如实标注）。0.3 版之前，VM 内
-网络"物理唯一出口"尚未落地（见 ROADMAP），网络类探针显示 SKIP。
+输出 ✅（已强制层全过）/ ❌（逃逸，exit 1）/ ⏭️（未实现层如实标注）。
+宿主 7 项探针与 guest 的身份/权限/网络类探针（直连、外部 DNS、IPv6）
+均已强制；出口正向控制探针（proxy-path）需真实订阅节点。
 
 ## 4. 工作台（可选）
 

@@ -103,10 +103,6 @@ fn users_uid() -> u32 {
     {
         unsafe { libc::getuid() }
     }
-    #[cfg(not(unix))]
-    {
-        0
-    }
 }
 
 /// Loads the store, yielding a fresh one when absent. A malformed store
@@ -369,9 +365,6 @@ pub fn applied(profile: &str, endpoint: &str, revision: &str) -> Result<Store, S
     Ok(store)
 }
 
-/// Applies `node_id` as the selected exit end-to-end: store selection,
-/// revision rotation, and the config.json fields that [`applied`] later
-/// verifies.
 /// Applies the named (or hashed) node as the selected exit end-to-end: store
 /// selection, revision rotation, and the config.json fields that [`applied`]
 /// later verifies.

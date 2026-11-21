@@ -544,7 +544,6 @@ impl Gate {
                 // carry it back, tying the report to this window (Go's
                 // CheckID binding).
                 inner.check_id = creance_vm::token()[..16].to_owned();
-                let _ = &command;
                 (
                     200,
                     serde_json::to_vec(&inner.status(&self.run_id)).expect("status"),
@@ -810,8 +809,8 @@ pub fn spawn_daemon(
         .append(true)
         .open(&log)
         .ok();
-    let child = Command::new(exe)
-        .arg("gate-daemon")
+    let mut cmd = Command::new(exe);
+    cmd.arg("gate-daemon")
         .arg(profile_dir)
         .arg(instance)
         .arg(config_path)
@@ -822,7 +821,17 @@ pub fn spawn_daemon(
         .stderr(match &log {
             Some(f) => Stdio::from(f.try_clone().map_err(|e| e.to_string())?),
             None => Stdio::null(),
-        })
+        });
+    // Same daemon discipline the proxy relay got: the daemon outlives the
+    // CLI, so it inherits nothing of the caller's shell (hygiene) and sits
+    // in its own process group (a terminal hangup must not reach it).
+    creance_vm::vm::strip_env(&mut cmd);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        cmd.process_group(0);
+    }
+    let child = cmd
         .spawn()
         .map_err(|e| format!("cannot spawn gate daemon: {e}"))?;
     creance_vm::pidfile::write(&pid_file, child.id() as i32)?;
@@ -1083,7 +1092,7 @@ impl GateClient {
     }
 }
 
-/// Closes every gate recorded under the profile's Lima instances — the
+/// Closes every gate recorded under the profile's instance root (per backend) — the
 /// `creance proxy-stop` companion so VMs drop their networking the moment
 /// the core goes away. A record whose socket no longer answers is stale
 /// (F-019): its daemon is gone, so the record goes too — nothing else

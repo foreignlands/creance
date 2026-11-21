@@ -13,8 +13,9 @@ use serde_yaml::{Mapping, Value as Yaml};
 /// The generated core configuration. `MATCH` always resolves to the select
 /// group holding the applied exit.
 pub fn generate(store: &Store, profile: &str) -> Result<Vec<u8>, String> {
-    // Route() is the gate: no route, no config.
-    let route = store.route()?;
+    // Route() is the gate, not the value: a store without a resolvable
+    // route refuses to generate a config at all.
+    store.route()?;
     // Explicit chains override node-level dialers at runtime without touching
     // subscription nodes or their credentials.
     let mut dialers = std::collections::HashMap::new();
@@ -44,7 +45,6 @@ pub fn generate(store: &Store, profile: &str) -> Result<Vec<u8>, String> {
             proxies.push(serde_yaml::to_value(Value::Object(config)).map_err(|e| e.to_string())?);
         }
     }
-    let _ = route;
 
     let bootstrap = crate::bootstrap_dns_urls();
     let mut dns = Mapping::new();

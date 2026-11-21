@@ -15,7 +15,7 @@ cd "$(dirname "$0")/.."
 MAX_SESSIONS="${MAX_SESSIONS:-40}"
 i=0
 while [ "$i" -lt "$MAX_SESSIONS" ]; do
-    if grep -q "^# STOP" harness/state/STATE.md 2>/dev/null; then
+    if grep -qE '^# STOP|建议停止' harness/state/STATE.md 2>/dev/null; then
         echo "run-loop: STATE.md requests stop."
         break
     fi
@@ -25,7 +25,7 @@ while [ "$i" -lt "$MAX_SESSIONS" ]; do
         echo "run-loop: agent exited nonzero; cooling down 30s"
         sleep 30
     fi
-    # The operator writes "# STOP" into STATE.md at budget exhaustion.
+    # The operator writes "# STOP" (or the verdict 建议停止) into STATE.md at budget exhaustion.
 done
 echo "run-loop: done ($i sessions). Findings:"
 cat harness/findings/INDEX.md

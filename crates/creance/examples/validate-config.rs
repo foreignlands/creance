@@ -1,5 +1,5 @@
 //! Validates the generated mihomo config with the real bundled core:
-//! `cargo run -p cage-core --example validate-config <profile-dir>`
+//! `cargo run -p creance --example validate-config <profile-dir>`
 //!
 //! Requires `scripts/fetch-proxy-core.sh` to have installed the core at
 //! `target/proxy-core/mihomo`. This exercises the same code path as

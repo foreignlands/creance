@@ -13,8 +13,8 @@ creance 的定位：**通用的 AI agent 隔离容器**（功能对标 Claude Ca
 
 ## escape 探针清单（研究A产出，逐步翻绿）
 
-已强制：config-valid / env-no-host-credentials / proxy-numeric-endpoint。
-待强制面落地后翻绿：fs-flag-readable（VM 内旗标 oracle）/ net-direct-egress（杀掉 mihomo 后 curl 必须失败）/ net-dns-external（dig @8.8.8.8 拒）/ net-ipv6 / 大陆出口命中拒 / AAAA-本地名围栏 / 挂载点扫描 / ssh-material / docker.sock·lima socket / 供应链探针（恶意 postinstall 外传被拦）/ 时区-出口一致性。
+已强制（0.3–0.6）：config-valid / env-no-host-credentials / proxy-numeric-endpoint / mounts-workspace-only / gate-record-private / credentials-are-session-only / fingerprint-consistent，以及 VM 内的 fs-flag-readable（旗标 oracle）/ guest-identity / guest-privilege / env-credentials / env-hex-tokens / ssh-material / sock-docker·lima-guestagent / net-direct-egress / net-dns-external / net-ipv6。
+待做：大陆出口命中拒（依赖出口证据链的 gate 联动）/ AAAA-本地名围栏 / 供应链探针（恶意 postinstall 外传被拦）/ 时区-出口一致性。
 红队方法论参考 sandbox_escape_bench 的「宿主旗标 + 场景 setup」结构。
 
 ## 架构参考（研究A结论，已采纳/计划）
@@ -29,7 +29,7 @@ creance 的定位：**通用的 AI agent 隔离容器**（功能对标 Claude Ca
 
 - **creance**：训鹰长绳（任其飞翔、不容逃逸）；crates.io 与 GitHub 双空闲；repo=crate=bin 同名（zellij 模式）。
 - 多 crate：creance-net/-vm/-proxy/-gate + 根 crate creance；共享 [workspace.package]/[workspace.lints]；暂不拆 creance-core（勿提前）。
-- 发布：Keep-a-Changelog CHANGELOG + semver 0.x（破坏性升 minor）+ cargo-release（计划）+ git-cliff；edition 2024 与 rust-version 留待 0.6 API 稳定时一并声明。
+- 发布：Keep-a-Changelog CHANGELOG + semver 0.x（破坏性升 minor）+ cargo-release（计划）+ git-cliff；edition 2024 与 rust-version 留待 0.8 API 稳定时一并声明。
 - 注意：MetaCubeX/mihomo 源码在 **Alpha 分支**（main 被无关项目占用）；release 资产 URL 不受影响。
 
 ## 与 Claude Cage (Go) 的对齐状态
@@ -47,6 +47,6 @@ creance 的定位：**通用的 AI agent 隔离容器**（功能对标 Claude Ca
 
 ## 已知简化
 
-- escape-test 的网络探针待 0.3 强制面；gate 诊断端口（198.18.0.254:80）未实现。
+- gate 诊断端口（198.18.0.254:80）未实现。
 - `environment_dir` 未实现嵌套 profile 相对路径特判；workbench 为单页最小实现。
 - 在线冒烟测试需 `CAGE_ONLINE_PROXY=<真实节点> cargo test -- --ignored`。

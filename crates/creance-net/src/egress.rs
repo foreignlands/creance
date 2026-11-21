@@ -238,17 +238,6 @@ impl Egress {
         })
     }
 
-    /// Whether this egress would carry a connection: TCP only, IPv4 only —
-    /// UDP and ICMP have no fallback, and guest IPv6 offers no measured route.
-    pub fn allows(&self, network: &str, host: &str) -> bool {
-        if network != "tcp" {
-            return false;
-        }
-        host.rsplit_once(':')
-            .and_then(|(h, _)| h.parse::<IpAddr>().ok())
-            .is_some_and(|ip| matches!(ip, IpAddr::V4(_)))
-    }
-
     /// Opens a TCP connection to `addr` (`host:port`) through the upstream
     /// with the default dial budget. The host is never resolved locally.
     pub fn dial(&self, addr: &str) -> Result<Channel, String> {
@@ -957,15 +946,6 @@ mod tests {
         ] {
             assert!(split_addr(hostile).is_err(), "must refuse {hostile:?}");
         }
-    }
-
-    #[test]
-    fn allows_is_tcp_ipv4_only() {
-        let e = Egress::new("socks5://127.0.0.1:17896", "https://1.1.1.1/dns-query").unwrap();
-        assert!(e.allows("tcp", "1.2.3.4:443"));
-        assert!(!e.allows("udp", "1.2.3.4:53"));
-        assert!(!e.allows("tcp", "[2001:db8::1]:443"));
-        assert!(!e.allows("icmp", "1.2.3.4"));
     }
 
     #[test]

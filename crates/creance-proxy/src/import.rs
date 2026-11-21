@@ -92,6 +92,7 @@ fn precheck_depth(data: &[u8]) -> Result<(), String> {
 /// reading or counting them.
 const CANONICAL_KEYS: &[&str] = &["name", "type", "server", "udp", "dialer-proxy"];
 
+/// The protocols the bundled core supports for imports.
 const SUPPORTED_TYPES: &[&str] = &[
     "direct",
     "http",

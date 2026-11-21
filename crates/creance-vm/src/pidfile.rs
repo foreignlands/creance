@@ -86,6 +86,14 @@ pub fn process_start_token(_pid: i32) -> String {
     String::new()
 }
 
+/// Whether the pid itself answers signals — kill(pid,0) semantics, no
+/// file involved. Stop ladders wait on THIS, not on `alive(path)`: their
+/// own pidfile::stop removes the file, and a file-based wait would read
+/// dead the instant the file goes away, vacuously.
+pub fn process_alive(pid: i32) -> bool {
+    signal_alive(pid)
+}
+
 fn signal_alive(pid: i32) -> bool {
     if pid <= 0 {
         return false;

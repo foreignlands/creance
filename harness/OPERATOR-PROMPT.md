@@ -71,7 +71,7 @@
 - **S3 资源耗尽/DoS**：无界内存、FD 泄漏、可无限阻塞。
 - **S4 正确性**：结果错误但不违反安全契约。
 - **S5 质量**：不一致文案、与 Go 原版语义漂移（对照
-  `/Users/shenyiyu/Documents/zcode/claude-cage-ref`，只读）。
+  `<path-to-the-Go-reference-checkout>`，只读）。
 
 ## 压缩协议（上下文将满时执行）
 
@@ -102,6 +102,6 @@
 - 在线冒烟核（真实出网、无需节点）：
   `target/proxy-core/mihomo` + `/tmp` 下的 direct 配置（参考
   `docs/QUICKSTART.md` "在线冒烟" 节），本地 socks5://127.0.0.1:7891。
-- Go 原版在 `/Users/shenyiyu/Documents/zcode/claude-cage-ref`（只读对照）。
+- Go 原版在 `<path-to-the-Go-reference-checkout>`（只读对照）。
 - VM 全链已实测可用（setup→up→shell→stop），VM 测试请用临时 profile：
   `CREANCE_CONFIG=$(mktemp -d)/config.json`，结束务必 `creance stop`。

@@ -99,16 +99,22 @@ pub fn setup_instance(
     if ARCH == "unsupported" {
         return Err("QEMU 后端当前仅支持 x86_64 与 aarch64 Linux 主机".to_owned());
     }
-    let dir = instance_dir(profile, instance);
-    let state = vm::state_dir(profile);
-    image::ensure_base_image(&state)?;
-
-    // The 9p share is handed to qemu by path — a workspace that does not
-    // exist yet (the fresh `environment.json`-less default) would make the
-    // fsdev refuse to start.
+    // Validate the arguments BEFORE the ~600 MB image download: the 9p
+    // share is handed to qemu by path (a missing dir makes the fsdev
+    // refuse to start), and the guest mount script quotes the path in
+    // single quotes — a quote in the path would break provisioning.
     if options.workspace.is_empty() || !crate::paths::is_abs(&options.workspace) {
         return Err("workspace must be an absolute host directory".to_owned());
     }
+    if options.workspace.contains('\'') {
+        return Err(format!(
+            "workspace 路径含单引号，guest 挂载脚本无法安全引用：{}",
+            options.workspace
+        ));
+    }
+    let dir = instance_dir(profile, instance);
+    let state = vm::state_dir(profile);
+    image::ensure_base_image(&state)?;
     std::fs::create_dir_all(&options.workspace).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     crate::private::ensure_private_dir(&dir).map_err(|e| e.to_string())?;
@@ -154,12 +160,17 @@ pub fn up(profile: &str, instance: &str) -> i32 {
             return 1;
         }
     };
+    let dir = instance_dir(profile, instance);
+    let pid_file = paths::join(&dir, "qemu.pid");
     // First boots download nothing (image is pre-seeded) but cloud-init
     // still takes minutes; later boots answer in seconds.
-    match runner::wait_ssh(&target, std::time::Duration::from_secs(600)) {
+    match runner::wait_ssh(&target, &pid_file, std::time::Duration::from_secs(600)) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("{e}");
+            // Never leave a half-booted qemu behind a failed up — the
+            // next up would lose the hostfwd bind race to this corpse.
+            let _ = runner::stop(&dir);
             1
         }
     }
