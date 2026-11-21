@@ -7,8 +7,8 @@ creance 的定位：**通用的 AI agent 隔离容器**（功能对标 Claude Ca
 - **0.3 — VM 网络强制面**：**DONE 2026-11-19**（拓扑 DROP + ssh -R single wire）。
 - **0.4 — guest profile + 一次性凭据**：**DONE 2026-11-19**。
 - **0.5 — 出口证据链**：**DONE 2026-11-19**。
-- **0.6 — Linux 平台支持**：原生 QEMU + cloud-init 后端（无 Lima、无 root），mihomo 进程内托管（无 launchd/systemd 依赖），/proc 级 PID 复用防护。**已知跟进（0.6.x）**：slirp `restrict=on` 在已配置实例上启用（首启的 apt/node 供给需要 NAT，当前与 macOS vz 同姿态、由 guest 防火墙承担强制）；aarch64 主机实测。
-- **0.7 — 多环境 + 快照**（qcow2 覆盖盘天然支持快照）。
+- **0.6 — Linux 平台支持**：原生 QEMU + cloud-init 后端（无 Lima、无 root），mihomo 进程内托管（无 launchd/systemd 依赖），/proc 级 PID 复用防护。**已知跟进（0.6.x）**：slirp `restrict=on` 在已配置实例上启用（首启的 apt/node 供给需要 NAT，当前与 macOS vz 同姿态、由 guest 防火墙承担强制）；aarch64 主机实测；**封号防御三件套**（去集群化清扫 + Datadog 无损拒绝 + 诚实边界声明，依据 docs/BAN-DEFENSE-STUDY-2026-11-21.md）。
+- **0.7 — 多环境 + 快照 + Identity Bundles**（qcow2 覆盖盘天然支持快照；per-identity 持久 device_id + 账号↔出口锁定 + 时区跟随实测出口——封号防御研究的缺口 1/3）。
 - **0.8 — API 稳定化**（rustdoc、MSRV、semver-checks 入 CI）→ 0.9 RC → 1.0 GA。
 
 ## escape 探针清单（研究A产出，逐步翻绿）
