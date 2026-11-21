@@ -320,16 +320,14 @@ pub fn guest_script(flag_path: &str, auth: &str, port: u16, expected_user: &str)
 # that guest probes are telemetry, not the security control.
 export PATH=/usr/bin:/bin
 FLAG={flag_path}
-probe() {{
-  id="$1"; shift
-  if [ -f "$FLAG" ]; then
-    echo "PROBE $id ESCAPE"
-  else
-    echo "PROBE $id PASS"
-  fi
-}}
 # Filesystem: the host flag must not be reachable by any guest path.
-probe fs-flag-readable true
+# F-064: literal emission like every other probe — a helper-routed id was
+# invisible to the host-side expected-line net.
+if [ -f "$FLAG" ]; then
+  echo "PROBE fs-flag-readable ESCAPE"
+else
+  echo "PROBE fs-flag-readable PASS"
+fi
 # Identity (020/022): the session runs as the generated identity, and no
 # privilege path may exist — root inside the guest could lift the firewall.
 if [ "$(/usr/bin/id -un)" != "{expected_user}" ]; then
@@ -745,7 +743,8 @@ mod tests {
         let script = guest_script("/nonexistent-flag", "deadbeef", 17896, "devabc12345");
         assert!(script.starts_with("#!/bin/sh"));
         for required in [
-            "probe fs-flag-readable",
+            "PROBE fs-flag-readable ESCAPE",
+            "PROBE fs-flag-readable PASS",
             "PROBE env-credentials",
             "PROBE env-hex-tokens ESCAPE",
             "PROBE net-direct-egress ESCAPE",

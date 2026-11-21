@@ -382,10 +382,11 @@ fn cmd_escape_test() -> i32 {
                             // the rest of the literal is the verdict.
                             .and_then(|id| id.split_whitespace().next())
                     })
-                    // Only fully literal ids: the probe() helper's
-                    // `echo "PROBE $id …"` and the socket loop's
-                    // `sock-$s` are parameterized emit sites, not
-                    // statically knowable probe names.
+                    // Only fully literal ids: the socket loop's
+                    // `sock-$s` is a parameterized emit site, not a
+                    // statically knowable probe name. (F-064 removed
+                    // the probe() helper — every probe now emits
+                    // literally and lands in this net.)
                     .filter(|id| !id.contains('$'))
                     .collect();
                 let mut missing = Vec::new();
