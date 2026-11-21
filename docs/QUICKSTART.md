@@ -15,7 +15,17 @@ creance doctor                   # 自检：工具链/核心/磁盘/内存
 
 - **macOS 14+ Apple Silicon**：VM 走 Lima(vz)，需 `limactl`
   （`brew install lima`，仅 VM 功能需要）。工具链可以完全用仓库内
-  `.toolchain/`，不污染全局。
+  `.toolchain/`，不污染全局——首次自建（一次性）：
+
+  ```sh
+  mkdir -p .toolchain && cd .toolchain
+  curl -fsSL https://static.rust-lang.org/rustup/dist/$( \
+    uname -m)-apple-darwin/rustup-init -o rustup-init && chmod +x rustup-init
+  CARGO_HOME=$PWD/cargo RUSTUP_HOME=$PWD/rustup ./rustup-init \
+    -y --no-modify-path --profile minimal
+  cd .. && export CARGO_HOME=$PWD/.toolchain/cargo RUSTUP_HOME=$PWD/.toolchain/rustup
+  export PATH="$CARGO_HOME/bin:$PATH"     # 之后 cargo/ci.sh 全走仓库内工具链
+  ```
 - **Ubuntu Linux (x86_64)**：VM 走原生 QEMU + cloud-init（无 Lima、无
   root）。需 `sudo apt install qemu-system-x86 qemu-utils openssh-client
   curl`，以及可写的 `/dev/kvm`（BIOS 开虚拟化 + `sudo usermod -aG kvm
