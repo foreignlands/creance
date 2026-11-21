@@ -47,29 +47,44 @@ update-locale LANG={locale} >/dev/null 2>&1 || true
 # is always reached.
 TOOLCHAIN_BUDGET=300
 APT_OPTS="-o Acquire::http::Timeout=20 -o Acquire::Retries=1"
+# The toolchain leg is best-effort, but never invisible: every step's
+# outcome lands in /var/log/creance-toolchain.log so a missing binary is
+# diagnosable after the lockdown makes the guest unreachable.
+TLLOG=/var/log/creance-toolchain.log
+: >"$TLLOG" 2>/dev/null || true
 timeout "$TOOLCHAIN_BUDGET" sh -c '
+  echo "toolchain start $(date -u +%FT%TZ)" >> /var/log/creance-toolchain.log
   ARCH=$(case "$(uname -m)" in aarch64) echo arm64;; *) echo x64;; esac)
-  # node comes FIRST and with zero extra dependencies — python3 and
-  # tar -z ship in the base cloud image — so a fast nodejs.org wins even
-  # when the apt mirror crawls (a crawling mirror used to eat the whole
-  # budget before the pinned download ever ran). nodejs.org/dist ships
-  # whole tarballs; bin/node is lifted out of the official one.
+  echo "arch=$ARCH" >> /var/log/creance-toolchain.log
+  # node comes FIRST and with zero extra dependencies — curl and tar -z
+  # ship in the base cloud image — so a fast nodejs.org wins even when the
+  # apt mirror crawls (a crawling mirror used to eat the whole budget
+  # before the pinned download ever ran). nodejs.org/dist ships whole
+  # tarballs; bin/node is lifted out of the official one.
   # F-034: land on a temp name and mv into place — a partial corpse in
   # /usr/local/bin would shadow the apt fallback node.
-  python3 - <<PYEOF 2>/dev/null
-import urllib.request
-urllib.request.urlretrieve("https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-$ARCH.tar.gz", "/tmp/creance-node.tar.gz")
-PYEOF
-  tar -xzf /tmp/creance-node.tar.gz -C /tmp 2>/dev/null \
-    && mv /tmp/node-v22.14.0-linux-$ARCH/bin/node /usr/local/bin/node.new 2>/dev/null \
-    && mv /usr/local/bin/node.new /usr/local/bin/node 2>/dev/null \
+  # curl ships in the base cloud image and its TLS stack survives
+  # networks that fingerprint-filter python (live lesson: urllib died
+  # with UNEXPECTED_EOF where curl sailed through).
+  curl -fsSL -m 240 -o /tmp/creance-node.tar.gz https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-$ARCH.tar.gz >> /var/log/creance-toolchain.log 2>&1
+  echo "node download rc=$?" >> /var/log/creance-toolchain.log
+  tar -xzf /tmp/creance-node.tar.gz -C /tmp >> /var/log/creance-toolchain.log 2>&1 \
+    && mv /tmp/node-v22.14.0-linux-$ARCH/bin/node /usr/local/bin/node.new 2>> /var/log/creance-toolchain.log \
+    && mv /usr/local/bin/node.new /usr/local/bin/node 2>> /var/log/creance-toolchain.log \
     || rm -f /usr/local/bin/node.new /tmp/creance-node.tar.gz
+  echo "node install rc=$? path=$(command -v /usr/local/bin/node 2>/dev/null || echo none)" >> /var/log/creance-toolchain.log
   chmod +x /usr/local/bin/node 2>/dev/null || true
-  apt-get update -qq || true
-  apt-get install '"$APT_OPTS"' -y -qq curl git ca-certificates xz-utils >/dev/null || true
-  # Fallback only when the pinned download did not land.
-  [ -x /usr/local/bin/node ] || apt-get install '"$APT_OPTS"' -y -qq nodejs npm >/dev/null || true
-  curl -fsSL -m 120 https://claude.ai/install.sh | bash >/dev/null 2>&1 || true
+  # The pinned download dies fast on MITM-intercepting networks; the
+  # apt fallback must therefore run EARLY — the base extras (git, xz —
+  # curl and ca-certificates already ship in the image) sink to the end
+  # so they can never eat the budget the node fallback needs.
+  apt-get update -qq >> /var/log/creance-toolchain.log 2>&1 || true
+  echo "apt update rc=$?" >> /var/log/creance-toolchain.log
+  [ -x /usr/local/bin/node ] || apt-get install '"$APT_OPTS"' -y -qq nodejs npm >> /var/log/creance-toolchain.log 2>&1 || true
+  echo "node fallback rc=$? node=$(command -v node || echo missing)" >> /var/log/creance-toolchain.log
+  curl -fsSL -m 120 https://claude.ai/install.sh | bash >> /var/log/creance-toolchain.log 2>&1 || true
+  apt-get install '"$APT_OPTS"' -y -qq git xz-utils >> /var/log/creance-toolchain.log 2>&1 || true
+  echo "toolchain end node=$(/usr/local/bin/node -v 2>/dev/null || command -v node || echo missing) claude=$(command -v claude || echo missing)" >> /var/log/creance-toolchain.log
 ' || true
 
 # 0.3 TOPOLOGY LOCKDOWN — the guest's only wire out is the ssh -R tunnel to
@@ -146,17 +161,41 @@ mod tests {
     }
 
     #[test]
+    fn single_quotes_stay_paired_for_the_sh_c_wrapper() {
+        // The bootstrap rides cloud-init as ["sh", "-c", script]: a lone
+        // apostrophe inside a comment closed the wrapper early and dash
+        // aborted the whole leg in one second (live lesson — the guest
+        // came up toolchain-less behind a green cloud-init "done").
+        // The deliberate cross-quoting pairs ("'"$VAR"'") are fine; a
+        // stray unpaired quote is not. Parity must hold.
+        let s = script();
+        assert_eq!(
+            s.matches('\'').count() % 2,
+            0,
+            "unpaired single quote would close the sh -c wrapper"
+        );
+    }
+
+    #[test]
     fn node_download_precedes_apt() {
         // The live-machine lesson: a slow apt mirror ate the whole toolchain
         // budget before the (fast) pinned node download ever ran. The
         // zero-dependency download now runs first, apt is the fallback.
         let s = script();
-        let node = s.find("urlretrieve").expect("python download present");
+        let node = s
+            .find("node-v22.14.0-linux-$ARCH.tar.gz")
+            .expect("pinned node download present");
         let apt = s.find("apt-get update").expect("apt leg present");
         assert!(node < apt, "node download must precede apt");
         assert!(
             s.contains("[ -x /usr/local/bin/node ] ||"),
             "apt node install is a fallback, not the primary"
+        );
+        let fallback = s.find("node fallback rc=").expect("fallback marker");
+        let extras = s.find("git xz-utils").expect("base extras");
+        assert!(
+            fallback < extras,
+            "the node fallback must precede the base extras"
         );
     }
 }

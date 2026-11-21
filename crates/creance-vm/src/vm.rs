@@ -356,7 +356,10 @@ pub fn guest_script(profile: &str, instance: &str, script: &str) -> Result<Strin
         let target = ssh_target(profile, instance)?;
         let mut cmd = Command::new("ssh");
         apply_ssh_options(&mut cmd, &target);
-        cmd.arg("127.0.0.1").args(["sh", "-s"]);
+        cmd.arg("-o")
+            .arg("StrictHostKeyChecking=yes")
+            .arg("127.0.0.1")
+            .args(["sh", "-s"]);
         cmd
     };
     cmd.stdin(Stdio::piped())
@@ -389,8 +392,6 @@ pub fn apply_ssh_options(cmd: &mut std::process::Command, target: &SshTarget) {
         .arg("-o")
         .arg("IdentitiesOnly=yes")
         .arg("-o")
-        .arg("StrictHostKeyChecking=yes")
-        .arg("-o")
         .arg(format!("UserKnownHostsFile={}", target.known_hosts))
         .arg("-o")
         .arg(format!("HostKeyAlias={}", target.host_key_alias))
@@ -402,6 +403,10 @@ pub fn apply_ssh_options(cmd: &mut std::process::Command, target: &SshTarget) {
         .arg("ControlPath=none")
         .arg("-o")
         .arg("ConnectTimeout=10");
+    // Deliberately NO StrictHostKeyChecking here: OpenSSH honors the FIRST
+    // -o for a name, so a caller's later override would be silently dead.
+    // The first-ever connect (runner::wait_ssh) passes accept-new to pin
+    // the key; every later consumer passes yes.
 }
 
 /// The ssh host-key alias for an instance — pining identity, not address.

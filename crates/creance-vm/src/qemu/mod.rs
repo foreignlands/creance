@@ -176,7 +176,10 @@ pub fn shell(profile: &str, instance: &str, command: &[&str]) -> i32 {
     };
     let mut cmd = std::process::Command::new("ssh");
     vm::apply_ssh_options(&mut cmd, &target);
-    cmd.arg("127.0.0.1").args(command);
+    cmd.arg("-o")
+        .arg("StrictHostKeyChecking=yes")
+        .arg("127.0.0.1")
+        .args(command);
     match cmd.status() {
         Ok(status) => status.code().unwrap_or(1),
         Err(e) => {

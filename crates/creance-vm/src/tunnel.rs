@@ -29,6 +29,8 @@ pub fn ensure(profile: &str, instance: &str, guest_port: u16) -> Result<(), Stri
     vm::apply_ssh_options(&mut cmd, &target);
     let child = cmd
         .arg("-o")
+        .arg("StrictHostKeyChecking=yes")
+        .arg("-o")
         .arg("ExitOnForwardFailure=yes")
         .arg("-N")
         .arg("-R")

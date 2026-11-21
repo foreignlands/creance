@@ -117,4 +117,9 @@ kill %1
 - **`proxy-start` 报端口占用**：换个 store 端口或找到占用者；creance 绝不
   附加到未知监听者。
 - **VM 起不来**：`creance doctor`；镜像下载失败重跑 `creance setup`。
+- **首启后 `node`/`claude` 没装上**：工具链腿是 best-effort（不阻塞隔离
+  契约）。在 HTTPS 中间人网络（自签证书劫持直连）下，guest 的 pinned
+  下载与 claude 安装必然失败，apt(http) 后备仍可装 nodejs。全过程日志在
+  guest 的 `/var/log/creance-toolchain.log`。宿主代理凭证按设计**永不**进
+  guest。
 - **想彻底重来**：`creance stop` 后删 profile 目录（默认 `~/.creance`）。

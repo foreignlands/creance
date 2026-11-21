@@ -181,7 +181,7 @@ mod tests {
         // F-031: installation failures must not abort the script before the
         // lockdown and privilege retirement land.
         assert!(
-            script.contains("apt-get update -qq || true"),
+            script.contains("apt-get update -qq >> /var/log/creance-toolchain.log 2>&1 || true"),
             "installs are best-effort, containment is mandatory"
         );
         // F-034: the node download is atomic — no partial corpse can shadow
