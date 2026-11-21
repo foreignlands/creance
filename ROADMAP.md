@@ -2,18 +2,40 @@
 
 creance 的定位：**通用的 AI agent 隔离容器**（功能对标 Claude Cage，防范对象当前以 Claude 为主，架构不绑定任何单一模型）。
 
-## 版本路线（详见 RELEASES.md）
+## v0.6.x — 硬化收尾（当前）
 
-- **0.3 — VM 网络强制面**：**DONE 2026-11-19**（拓扑 DROP + ssh -R single wire）。
-- **0.4 — guest profile + 一次性凭据**：**DONE 2026-11-19**。
-- **0.5 — 出口证据链**：**DONE 2026-11-19**。
-- **0.6 — Linux 平台支持**：原生 QEMU + cloud-init 后端（无 Lima、无 root），mihomo 进程内托管（无 launchd/systemd 依赖），/proc 级 PID 复用防护。**已知跟进（0.6.x）**：slirp `restrict=on` 在已配置实例上启用（首启的 apt/node 供给需要 NAT，当前与 macOS vz 同姿态、由 guest 防火墙承担强制）；aarch64 主机实测；**封号防御三件套**（去集群化清扫 + Datadog 无损拒绝 + 诚实边界声明，依据 docs/BAN-DEFENSE-STUDY-2026-11-21.md）。
-- **0.7 — 多环境 + 快照 + Identity Bundles**（qcow2 覆盖盘天然支持快照；per-identity 持久 device_id + 账号↔出口锁定 + 时区跟随实测出口——封号防御研究的缺口 1/3）。
-- **0.8 — API 稳定化**（rustdoc、MSRV、semver-checks 入 CI）→ 0.9 RC → 1.0 GA。
+新排两项（验收标准先行）：
+- **运行时常驻巡检/自动熔断**：常驻守护在 gate 租期内周期性经核心采样出口证据（IP/国别/核心存活），异常即自动关闸。**验收指标：断代理→切断 guest 出口的端到端延迟 ≤2s 且零泄漏**（把 0.5 的"开闸一次取证"升级为"租期持续取证"）。
+- **浏览器进 guest**：官方 Chromium 预装。**定位先行**（0.6.x 内定案）：按需拉起的 OAuth/验证通道（用完即毁）vs 常驻——倾向按需。架构红利：浏览器在 guest 内，OAuth 的 localhost 回调天然闭环（第三方提示的剪贴板/回调割裂主要发生在宿主浏览器方案，我们天然规避）；成本约束=内存预算。**验收指标：出口国别↔时区↔语言↔浏览器 locale 四元组一致性校验（探针化，杜绝"US IP+中文语言+东八区"穿帮组合）**。
+- **防探测层残余（新，源自第三方审视②）**：guest 内品牌串已清（v0.6.3 sweep），剩余=虚拟硬件特征审计与洗白——Linux/QEMU 的 virtio vendor、SMBIOS/DMI、/proc/cpuinfo hypervisor flag；macOS/vz 呈现 Apple 硬件属天然伪装（待审计确认）。进 attack-surfaces 新条目，0.6.x 排期。
+- 存量：slirp restrict=on 按启停状态、aarch64 实测、错误语言统一（缓）、harness 编译门（缓）。
+- **长期循环项（单 Mac 现实，不阻塞主线）**：每版发布后 Ubuntu 侧 CI + U1–U5 类实机回填 + GPG 镜像验签 + Linux 长跑。
+
+## v0.7 — 用户安心功能批（讨论清楚+完善；最后一个 0.7 版本全部收口，v0.8 前告一段落）
+
+专项讨论议题（0.7 启动时逐个出技术方案，v0.8 冻结特性前全部定案）：
+1. **Identity Bundles / 多账号接力**（核心卖点）：账号↔专属出口↔持久 device_id 原子切换，物理隔离账号身份（规避 Cage 同 VM 串联坑）。**Bundle 导出格式=双层加密容器**（第三方审视③采纳）：内层=虚拟指纹明文打包（跨设备一致），外层=主密码/手机审批动态解封——"换电脑不换虚拟指纹，没授权打不开包"。
+2. **时区/指纹自动跟随实测出口** + **指纹一键重置**（re-setup 产品化）+ **一键切换 machine-id/user-id 类身份字段**（安心项）。
+3. **整机迁移/多设备**：带身份迁移语义（与 Bundle 容器格式一体设计）。
+4. **桌面打包**：**Tauri 优先**（复用 Rust 核心、小包体、托盘+巡检状态展示）——第三方审视④采纳。
+5. **手机远程审批**：0.7 阶段**复用成熟通道**（Telegram Bot/飞书/Web Push+端到端签名回调），独立 App 推迟到 1.0 后——采纳。
+6. **插件市场**：MCP 宿主受控执行，严格按 gate 证据/审批纪律（每次宿主调用=一次微型 gate-open），不做原生弹窗一键放行。
+7. **访问控制（两层拆分，第三方审视②采纳）**：
+   - **防越权层**（防非管理员用户）：二进制属主锁定+socket 0600+配置目录 0700+安装期属主绑定；
+   - **防探测层**（防官方客户端在管理员权限下扫描本机）：guest 零残留（已部分完成）+虚拟硬件特征洗白（0.6.x 起步）+宿主通信通道隐蔽化。如实边界：管理员权限下的官方客户端扫描无法被"权限"挡住，只能靠特征卫生与架构隔离。
+8. 技术债并行：Go 授权集 11 项对齐+config 指纹三维绑定、出口证据二源交叉。
+
+## v0.8 — 外部 LLM 审核版（一）+ API 稳定化
+其他 LLM 对抗审计+修复；rustdoc/MSRV/semver-checks 入 CI（发布准备）。特性冻结。
+
+## v0.9 — 跨部门试用版
+外部 LLM 审核轮（二）+ 用户点名的全量质量轮（bug/冗余/屎山一次清）。出口标准=跨部门同事可直接使用。
+
+## v1.0.0 — GA + 付费宣发投流，直面市场。
 
 ## escape 探针清单（研究A产出，逐步翻绿）
 
-已强制（0.3–0.6）：config-valid / env-no-host-credentials / proxy-numeric-endpoint / mounts-workspace-only / gate-record-private / credentials-are-session-only / fingerprint-consistent，以及 VM 内的 fs-flag-readable（旗标 oracle）/ guest-identity / guest-privilege / env-credentials / env-hex-tokens / ssh-material / sock-docker·lima-guestagent / net-direct-egress / net-dns-external / net-ipv6。
+已强制（0.3–0.6.5）：config-valid / env-no-host-credentials / mounts-workspace-only / gate-record-private / credentials-are-session-only / fingerprint-consistent，以及 VM 内的 fs-flag-readable（旗标 oracle）/ guest-identity / guest-privilege / env-credentials / env-hex-tokens / ssh-material / sock-docker·lima-guestagent / net-direct-egress / net-dns-external / net-ipv6 / net-icmp-external（0.6.4 新增）。（原 proxy-numeric-endpoint 是永久绿的空探针，2026-11-21 E5 裁定删除。）
 待做：大陆出口命中拒（依赖出口证据链的 gate 联动）/ AAAA-本地名围栏 / 供应链探针（恶意 postinstall 外传被拦）/ 时区-出口一致性。
 红队方法论参考 sandbox_escape_bench 的「宿主旗标 + 场景 setup」结构。
 

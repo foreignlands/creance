@@ -368,6 +368,41 @@ fn cmd_escape_test() -> i32 {
         );
         match creance_vm::vm::guest_script(&profile, &instance, &script) {
             Ok(stdout) => {
+                // F-062: the transport is under guest control (Ubuntu's
+                // patched bash sources ~/.bashrc for non-interactive ssh
+                // sessions — rc files can swallow or forge output). A
+                // missing probe line is therefore NOT a pass: every probe
+                // the script defines must answer, with a known verdict.
+                let expected: Vec<&str> = script
+                    .lines()
+                    .filter_map(|l| {
+                        l.split_once("echo \"PROBE ")
+                            .and_then(|(_, rest)| rest.split('"').next())
+                            // The first token after "PROBE " is the id;
+                            // the rest of the literal is the verdict.
+                            .and_then(|id| id.split_whitespace().next())
+                    })
+                    // Only fully literal ids: the probe() helper's
+                    // `echo "PROBE $id …"` and the socket loop's
+                    // `sock-$s` are parameterized emit sites, not
+                    // statically knowable probe names.
+                    .filter(|id| !id.contains('$'))
+                    .collect();
+                let mut missing = Vec::new();
+                for id in &expected {
+                    let answered = stdout
+                        .lines()
+                        .any(|l| l.starts_with("PROBE ") && l.contains(id));
+                    if !answered {
+                        missing.push(*id);
+                    }
+                }
+                if !missing.is_empty() {
+                    println!(
+                        "PROBE transport ESCAPE — 探针行缺失（传输可能被 guest 致盲）：{missing:?}"
+                    );
+                    code = 1;
+                }
                 for line in stdout.lines() {
                     println!("{line}");
                     if line.contains(" ESCAPE") {
@@ -685,17 +720,35 @@ fn cmd_up() -> i32 {
         // replaying) fails `up` loudly instead of shipping an open VM.
         // TCP is the hard gate; ICMP is checked when ping exists (F-060
         // scoped it to the NAT subnets, so external echoes must die).
-        let probe = "timeout 5 bash -c '</dev/tcp/1.1.1.1/443' 2>/dev/null && echo tcp-open || echo tcp-blocked\n\
-                     command -v ping >/dev/null 2>&1 && { timeout 3 ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo icmp-open || echo icmp-blocked; } || echo icmp-unknown\n";
+        //
+        // F-062: positive evidence only. The transport (guest login shell
+        // sourcing ~/.bashrc on Ubuntu's patched bash) is under guest
+        // control — empty or mangled output used to fall through `Ok(_)`
+        // as a green light. The PATH reset at the top defeats PATH
+        // shadowing of the probe's commands; absolute paths for the rest.
+        // (Not defeatable from here: stdout redirection in rc files and
+        // interpreter shadowing — the README's honest-boundaries section
+        // says so; the host-side gate evidence is the security control.)
+        let probe = "export PATH=/usr/bin:/bin\n\
+                     /usr/bin/timeout 5 /bin/bash -c '</dev/tcp/1.1.1.1/443' 2>/dev/null && echo tcp-open || echo tcp-blocked\n\
+                     if [ -x /usr/bin/ping ]; then /usr/bin/timeout 3 /usr/bin/ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo icmp-open || echo icmp-blocked; else echo icmp-unknown; fi\n";
         match creance_vm::vm::guest_script(&profile, &instance, probe) {
-            Ok(out) if out.contains("tcp-open") || out.contains("icmp-open") => {
-                let _ = creance_vm::vm::stop_vm(&profile, &instance);
-                return fail(
-                    "guest 防火墙未生效（直连可达），VM 已停止；请 creance stop 后 creance setup 重建环境"
-                        .to_owned(),
-                );
+            Ok(out) => {
+                let tcp_ok = out.contains("tcp-blocked") && !out.contains("tcp-open");
+                let icmp_ok = out.contains("icmp-blocked")
+                    || (out.contains("icmp-unknown") && !out.contains("icmp-open"));
+                if !tcp_ok || !icmp_ok {
+                    let _ = creance_vm::vm::stop_vm(&profile, &instance);
+                    let reason = if out.contains("tcp-open") || out.contains("icmp-open") {
+                        "guest 防火墙未生效（直连可达）"
+                    } else {
+                        "无法取得防火墙正向证据（探针输出缺失或被干扰，按未验证拒绝交付）"
+                    };
+                    return fail(format!(
+                        "{reason}，VM 已停止；请 creance stop 后 creance setup 重建环境。探针原始输出：{out:?}"
+                    ));
+                }
             }
-            Ok(_) => {}
             Err(e) => {
                 let _ = creance_vm::vm::stop_vm(&profile, &instance);
                 return fail(format!("无法在 guest 内验证防火墙状态，VM 已停止：{e}"));

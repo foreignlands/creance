@@ -125,6 +125,12 @@ apt(http) 兜底可用；全过程日志在 guest 的 /var/log/creance-toolchain
 （guest 只持有会话令牌）、不在探针未实现时谎报通过（未实现层如实
 标 SKIP）。诚实性优先于好看——包括这一段本身。
 
+**探针的定位**：guest 内探针（escape-test 的 PROBE 行、up 的防火墙
+守门）走 guest 登录 shell 传输，Ubuntu 的 bash 补丁使非交互会话也
+source `~/.bashrc`——被监控方理论上可致盲或伪造这些行。消费端已按
+"缺行即失败"处理，但**安全控制面是宿主侧的 gate 证据链与内核态防
+火墙**，guest 探针是遥测与验收辅助（F-062 的如实结论）。
+
 ## License
 
 MIT. Containment research and borrowed ideas are credited in ROADMAP.md.

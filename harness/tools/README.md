@@ -22,6 +22,11 @@ cargo 小工程。**都是历史工件**：它们冻结在各自轮次的目标�
   `r6-evidence-probe` 的手拼 `Host: cage` 全部改 `Host: gate`（去集群化
   改名的第二波隐藏消费者）；`r11-regression/f052-up-branches.sh` 夹具
   路径 `/tmp/cage-lima-*` 跟随现名 `/tmp/vmhome-*`。
+- **裁判分级（R13.5 实测，2026-11-21）**：`r7-sync-matrix` 全 PASS
+  无 panic，可作回归裁判；`r6-evidence-probe` 可编译可运行，但其 7 处
+  断言仍是修复前形态（如 status 无 token 期望 200、实际 403——泄漏已闭；
+  grant 期望直 Open、实际 409 Checking——语义已 fail-closed 演化），
+  **不能作回归裁判**，仅作修复对照存档。
 - **陈旧快照（#12）**：`a6-dns-probe` 用 2026-11-18 的 dnsmsg
   字节快照，缺 F-005 修复——它测的是不再发布的代码，仅存档。
 

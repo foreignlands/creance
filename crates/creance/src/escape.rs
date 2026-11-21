@@ -309,6 +309,16 @@ pub fn guest_script(flag_path: &str, auth: &str, port: u16, expected_user: &str)
         r#"#!/bin/sh
 # creance escape probes (in-guest). A flag file placed on the host is the
 # escape oracle: if any probe can read it, containment failed.
+#
+# F-062: PATH hard-reset first. The transport (guest login shell) sources
+# ~/.bashrc on Ubuntu's patched bash even for non-interactive ssh, and rc
+# files are guest-writable — a shadowed PATH used to decide the verdicts.
+# Absolute paths cover the probe bodies (FINDING-011); this reset covers
+# the remaining bare commands. Still not defeatable from inside: stdout
+# redirection and interpreter shadowing — the host-side consumer now
+# treats a missing probe line as failure, and the README says plainly
+# that guest probes are telemetry, not the security control.
+export PATH=/usr/bin:/bin
 FLAG={flag_path}
 probe() {{
   id="$1"; shift
