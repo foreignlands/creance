@@ -52,6 +52,40 @@ pub fn read_header_block<R: Read>(
     ))
 }
 
+/// Splits a header block into the request/status line and the header
+/// fields as (name, value) pairs — names verbatim, values trimmed.
+/// Shared by the gate, the workbench, and tunnel readers so the
+/// per-field iteration lives in exactly one place.
+pub fn parse_header_block(block: &[u8]) -> (String, Vec<(String, String)>) {
+    let text = String::from_utf8_lossy(block);
+    let mut lines = text.lines();
+    let first = lines.next().unwrap_or_default().to_owned();
+    let fields = lines
+        .filter_map(|line| {
+            line.split_once(':')
+                .map(|(k, v)| (k.trim().to_owned(), v.trim().to_owned()))
+        })
+        .collect();
+    (first, fields)
+}
+
+/// FINDING-006 over parsed fields: at most one `Content-Length`, and it
+/// must be a valid usize. `Ok(None)` is absent, `Ok(Some(n))` one valid
+/// value, `Err` a duplicate or invalid header — an ambiguity-smuggling
+/// vector every reader must refuse identically.
+pub fn strict_content_length(fields: &[(String, String)]) -> Result<Option<usize>, &'static str> {
+    let mut len = None;
+    for (k, v) in fields {
+        if k.eq_ignore_ascii_case("content-length") {
+            match (len, v.parse::<usize>()) {
+                (None, Ok(n)) => len = Some(n),
+                _ => return Err("duplicate or invalid content-length"),
+            }
+        }
+    }
+    Ok(len)
+}
+
 fn find_terminator(block: &[u8], from: usize) -> Option<usize> {
     if block.len() < 4 {
         return None;

@@ -453,42 +453,30 @@ impl Gate {
             Ok((h, r)) if !h.is_empty() => (h, r),
             _ => return,
         };
-        let text = String::from_utf8_lossy(&head).into_owned();
-        let mut lines = text.lines();
-        let request_line = lines.next().unwrap_or_default().to_owned();
+        let (request_line, fields) = creance_net::wire::parse_header_block(&head);
         let mut parts = request_line.split_whitespace();
         let method = parts.next().unwrap_or_default().to_owned();
         let path = parts.next().unwrap_or_default().to_owned();
-        let mut body_len = 0usize;
-        let mut seen_cl = false;
+        // FINDING-006: invalid or repeated Content-Length is an ambiguity
+        // smuggling vector — refuse it.
+        let body_len = match creance_net::wire::strict_content_length(&fields) {
+            Ok(Some(n)) => n,
+            Ok(None) => 0,
+            Err(_) => {
+                let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n");
+                return;
+            }
+        };
         let mut bearer = String::new();
         let mut host = String::new();
         let mut origin_present = false;
-        for line in lines {
-            if let Some((k, v)) = line.split_once(':') {
-                let (k, v) = (k.trim(), v.trim());
-                if k.eq_ignore_ascii_case("content-length") {
-                    // Invalid or repeated Content-Length is an ambiguity
-                    // smuggling vector — refuse it (FINDING-006).
-                    match (seen_cl, v.parse::<usize>()) {
-                        (false, Ok(n)) => {
-                            body_len = n;
-                            seen_cl = true;
-                        }
-                        _ => {
-                            let _ = stream.write_all(
-                                b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n",
-                            );
-                            return;
-                        }
-                    }
-                } else if k.eq_ignore_ascii_case("authorization") {
-                    bearer = v.strip_prefix("Bearer ").unwrap_or_default().to_owned();
-                } else if k.eq_ignore_ascii_case("host") {
-                    host = v.to_owned();
-                } else if k.eq_ignore_ascii_case("origin") {
-                    origin_present = true;
-                }
+        for (k, v) in &fields {
+            if k.eq_ignore_ascii_case("authorization") {
+                bearer = v.strip_prefix("Bearer ").unwrap_or_default().to_owned();
+            } else if k.eq_ignore_ascii_case("host") {
+                host = v.clone();
+            } else if k.eq_ignore_ascii_case("origin") {
+                origin_present = true;
             }
         }
         // Host must be the private name, Origin must be absent, and the

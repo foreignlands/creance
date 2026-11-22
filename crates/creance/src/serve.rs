@@ -61,32 +61,23 @@ fn handle(mut stream: std::net::TcpStream, port: u16, ctx: ServeCtx) {
         Ok((h, r)) if !h.is_empty() => (h, r),
         _ => return,
     };
-    let text = String::from_utf8_lossy(&head).into_owned();
-    let request_line = text.lines().next().unwrap_or_default().to_owned();
+    let (request_line, fields) = creance_net::wire::parse_header_block(&head);
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or_default().to_uppercase();
     let path = parts.next().unwrap_or_default().to_owned();
-    let mut body_len = 0usize;
-    let mut seen_cl = false;
+    // FINDING-006: invalid or repeated Content-Length is an ambiguity
+    // smuggling vector — reject it outright.
+    let body_len = match creance_net::wire::strict_content_length(&fields) {
+        Ok(Some(n)) => n,
+        Ok(None) => 0,
+        Err(_) => return reply(&mut stream, 400, "invalid content-length"),
+    };
     let mut origin = String::new();
-    for line in text.lines().skip(1) {
-        if let Some((k, v)) = line.split_once(':') {
-            let (k, v) = (k.trim(), v.trim());
-            if k.eq_ignore_ascii_case("content-length") {
-                // An invalid or repeated Content-Length is an ambiguity
-                // smuggling vector — reject it outright (FINDING-006).
-                match (seen_cl, v.parse::<usize>()) {
-                    (false, Ok(n)) => {
-                        body_len = n;
-                        seen_cl = true;
-                    }
-                    _ => return reply(&mut stream, 400, "invalid content-length"),
-                }
-            } else if k.eq_ignore_ascii_case("transfer-encoding") {
-                return reply(&mut stream, 400, "chunked bodies are not supported");
-            } else if k.eq_ignore_ascii_case("origin") && !v.is_empty() {
-                origin = v.to_owned();
-            }
+    for (k, v) in &fields {
+        if k.eq_ignore_ascii_case("transfer-encoding") {
+            return reply(&mut stream, 400, "chunked bodies are not supported");
+        } else if k.eq_ignore_ascii_case("origin") && !v.is_empty() {
+            origin = v.clone();
         }
     }
     if body_len > 1 << 20 {
