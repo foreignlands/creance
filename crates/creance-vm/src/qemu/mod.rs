@@ -307,7 +307,13 @@ pub fn up(profile: &str, instance: &str) -> i32 {
 /// it, or a failed gate would still arm the second line unverified.
 /// Returns true only when this call wrote it.
 pub fn mark_provisioned(profile: &str, instance: &str) -> bool {
-    let marker = paths::join(&instance_dir(profile, instance), "provisioned");
+    write_marker(&instance_dir(profile, instance))
+}
+
+/// Separated from instance_dir so the write semantics themselves are
+/// testable (F-087): absent → write + true; present → false.
+fn write_marker(dir: &str) -> bool {
+    let marker = paths::join(dir, "provisioned");
     if Path::new(&marker).is_file() {
         return false;
     }
@@ -531,5 +537,44 @@ mod tests {
             marker.ends_with("state/qemu/ws-0123abcd/instance.json"),
             "{marker}"
         );
+    }
+
+    #[test]
+    fn write_marker_writes_once_then_refuses() {
+        // F-087: absent → writes "ok\n" + true; present → false, file
+        // untouched.
+        let dir = std::env::temp_dir()
+            .join(format!("creance-mk-{}", crate::token()[..8].to_owned()))
+            .to_string_lossy()
+            .into_owned();
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(write_marker(&dir));
+        let marker = paths::join(&dir, "provisioned");
+        assert_eq!(std::fs::read(&marker).unwrap(), b"ok\n");
+        std::fs::write(&marker, b"keep\n").unwrap();
+        assert!(!write_marker(&dir));
+        assert_eq!(std::fs::read(&marker).unwrap(), b"keep\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn mark_provisioned_is_called_only_from_the_cli_crate() {
+        // F-087: the marker may only be written via the vm.rs dispatch
+        // the cli up-gate calls — no call site inside the qemu backend
+        // itself. The needle names a call shape (`&`-qualified args)
+        // so the `pub fn mark_provisioned(profile` definition does not
+        // match itself.
+        let needle = concat!("mark", "_provisioned(&");
+        for (name, src) in [
+            ("qemu/mod.rs", include_str!("mod.rs")),
+            ("qemu/runner.rs", include_str!("runner.rs")),
+            ("qemu/provision.rs", include_str!("provision.rs")),
+        ] {
+            assert_eq!(
+                src.matches(needle).count(),
+                0,
+                "{name} must not call mark_provisioned"
+            );
+        }
     }
 }

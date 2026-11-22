@@ -44,7 +44,7 @@ pub fn user_data(options: &SetupOptions, ssh_pubkey: &str) -> Result<String, Str
         // QEMU slirp: host alias .2, DNS/DHCP .3 — /32 only (F-073:
         // 10.0.2.0/24 is slirp's own, but any foreign range routes out
         // the host NIC).
-        &["10.0.2.2", "10.0.2.3"],
+        crate::vm::NAT_HOSTS_QEMU,
     );
     root.insert(
         "runcmd".into(),

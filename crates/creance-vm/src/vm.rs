@@ -322,6 +322,21 @@ pub fn stop_vm(profile: &str, instance: &str) -> i32 {
     }
 }
 
+/// The egress NAT peers each backend owns — the single source rendered
+/// into rules.v4 (guest_bootstrap nat_allows) AND into the up-gate
+/// probe's allowlist, so the two can never drift (F-086).
+pub const NAT_HOSTS_QEMU: &[&str] = &["10.0.2.2", "10.0.2.3"];
+pub const NAT_HOSTS_LIMA: &[&str] = &["192.168.5.2", "192.168.5.3"];
+
+/// This platform's sanctioned NAT /32 destinations.
+pub fn nat_allow_hosts() -> &'static [&'static str] {
+    if cfg!(target_os = "macos") {
+        NAT_HOSTS_LIMA
+    } else {
+        NAT_HOSTS_QEMU
+    }
+}
+
 /// Arms the post-provisioning second line of defense (QEMU slirp
 /// `restrict=on`) once the up-time egress guard has passed. The Lima
 /// backend has no restrict equivalent — a no-op there. Returns true

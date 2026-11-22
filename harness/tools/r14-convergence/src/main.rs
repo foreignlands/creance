@@ -61,7 +61,15 @@ fn die(section: &str, msg: String) -> ! {
 }
 
 fn main() {
-    let script = guest_script("/nonexistent-flag", "deadbeef", 17896, "devabc12345");
+    // F-089: the flag path must be WRITABLE — an unwritable path makes
+    // place_oracle_flag fail and renders the SKIP world, so the judge
+    // would inspect a script shape the real up-gate never sees.
+    let flag_path = std::env::temp_dir()
+        .join(format!("creance-r14-flag-{}", std::process::id()))
+        .to_string_lossy()
+        .into_owned();
+    let script = guest_script(&flag_path, "deadbeef", 17896, "devabc12345");
+    let _ = std::fs::remove_file(&flag_path);
     let expected = expected_ids(&script);
 
     // [A] 集合本身

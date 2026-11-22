@@ -56,7 +56,7 @@ pub fn generate_lima_yaml(options: &SetupOptions) -> Result<Vec<u8>, String> {
             &options.guest.username,
             // Lima usernet: gateway .2, internal DNS/DHCP .3 — /32 only
             // (F-073: a foreign backend's subnet is a live egress).
-            &["192.168.5.2", "192.168.5.3"],
+            crate::vm::NAT_HOSTS_LIMA,
         )),
     );
 

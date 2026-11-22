@@ -748,28 +748,34 @@ fn cmd_up() -> i32 {
         // fw-armed evidence is a root-owned stamp under /run (written
         // by the egress-lock unit from the LIVE ruleset), not an
         // iptables read the guest user cannot perform.
-        match creance_vm::vm::guest_script(&profile, &instance, escape::egress_probe_script()) {
-            Ok(out) => {
-                if let Err(reason) = escape::egress_verdict(&out) {
+        match creance_vm::vm::guest_script(
+            &profile,
+            &instance,
+            &escape::egress_probe_script(creance_vm::vm::nat_allow_hosts()),
+        ) {
+            Ok(out) => match escape::egress_verdict(&out) {
+                Err(reason) => {
                     let _ = creance_vm::vm::stop_vm(&profile, &instance);
                     return fail(format!(
                         "{reason}，VM 已停止；请 creance stop 后 creance setup 重建环境。探针原始输出：{out:?}"
                     ));
                 }
-            }
+                Ok(()) => {
+                    // F-081/F-087: the provisioned marker (slirp
+                    // restrict=on next boot) sits inside the Ok arm —
+                    // arming on ANY failure path would certify an
+                    // unverified guest.
+                    if creance_vm::vm::mark_provisioned(&profile, &instance) {
+                        println!(
+                            "供给完成——下次 creance stop && creance up 起 slirp restrict=on 第二道防线生效"
+                        );
+                    }
+                }
+            },
             Err(e) => {
                 let _ = creance_vm::vm::stop_vm(&profile, &instance);
                 return fail(format!("无法在 guest 内验证防火墙状态，VM 已停止：{e}"));
             }
-        }
-        // F-081: the provisioned marker (slirp restrict=on next boot)
-        // is written only after every gate above has passed — arming
-        // before the behavioral evidence lands would certify an
-        // unverified guest.
-        if creance_vm::vm::mark_provisioned(&profile, &instance) {
-            println!(
-                "供给完成——下次 creance stop && creance up 起 slirp restrict=on 第二道防线生效"
-            );
         }
         println!("Environment is up. The guest's only route out is the managed core (`creance escape-test` proves it).");
     }
@@ -795,20 +801,23 @@ fn cmd_shell(command: Vec<String>) -> i32 {
 mod up_gate_tests {
     #[test]
     fn provisioned_marker_only_after_verdict() {
-        // F-081/F-084: restrict=on must arm only after the behavioral
-        // gates pass — the marker write stays textually after the
-        // verdict call, never inside vm::up or ahead of a failure exit.
+        // F-081/F-087: the marker write is a single call site nested
+        // inside the verdict's Ok(()) arm — it cannot run on any
+        // failure path, and no second call may appear (in an Err arm,
+        // a probe branch, or back inside vm::up).
         let src = include_str!("main.rs");
+        let needle = concat!("creance_vm::vm::mark", "_provisioned(&profile, &instance)");
+        assert_eq!(
+            src.matches(needle).count(),
+            1,
+            "mark_provisioned 全文件唯一调用点"
+        );
         let verdict = src.find("escape::egress_verdict").expect("verdict call");
-        let mark = src
-            .find("creance_vm::vm::mark_provisioned")
-            .expect("marker write");
-        assert!(mark > verdict, "provisioned 标记必须写在守门判定之后");
+        let ok_arm = src[verdict..].find("Ok(())").expect("verdict Ok arm");
+        let mark = src.find(needle).expect("marker write");
         assert!(
-            !src.contains(
-                "vm::up(&profile, &instance);\n    let _ = creance_vm::vm::mark_provisioned"
-            ),
-            "标记不得移回 vm::up 调用紧邻处"
+            mark > verdict + ok_arm,
+            "provisioned 标记必须在守门 Ok 分支内"
         );
     }
 }

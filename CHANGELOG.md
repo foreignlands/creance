@@ -4,6 +4,36 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.6.15] — 2026-11-22
+
+### Fixed — night-22 (R23 audit round)
+
+- F-086 (S4): the fw-armed check is an allowlist, not a denylist — every
+  `-A OUTPUT` line in BOTH `/run/egress-armed` (live stamp) and
+  `/etc/iptables/rules.v4` (persisted source) must be `lo`, an
+  ESTABLISHED conntrack catch-all, or an ACCEPT to a sanctioned /32 NAT
+  host over udp/67 or icmp. A qualified ACCEPT (`-o e+`, `-p tcp`, a
+  comment match), a chain jump, or a rules.v4 drift now reads fw-down.
+  NAT hosts are single-sourced in `creance_vm::vm::nat_allow_hosts()`.
+  Documented residual: intra-boot drift of live netfilter state by a
+  privileged guest actor is unobservable unprivileged — and no
+  unprivileged path can modify it either.
+- F-087 (S5): the probe allowlist fragment runs under real `sh` in a
+  truth-table test (STAMP/RULES env overridable); the provisioned
+  marker call moved inside the verdict's Ok arm and is guarded as the
+  file's single call site; `write_marker` write-once semantics tested;
+  provision assertions hardened to exact lines (ExecStartPost, the
+  uncommented restart leg, the sha256 conditional, single nodejs.org
+  URL); a guard rejects `mark_provisioned` call sites inside
+  creance-vm.
+- F-088 (S5): CHANGELOG 0.6.10–0.6.14 rewritten against real tag
+  ranges — the misplaced idempotent-up, quality-batch, probe-semantics,
+  wire, and supply-chain items now sit in their own versions.
+- F-089 (S5): r14/r15 verdict tools render against a WRITABLE flag
+  path (an unwritable path had rendered the SKIP world — r15 panicked,
+  r14 judged a shape the real gate never runs); both re-verified RC=0
+  on the armed shape.
+
 ## [0.6.14] — 2026-11-22
 
 ### Fixed — night-22 (R22 audit round)
@@ -21,18 +51,19 @@ All notable changes to creance are documented here. The format follows
   parameter is gone); source-order guard pins the provisioned marker
   after the verdict; workbench TE and duplicate-CL get socket-level
   400 tests; provision/Lima pin assertions hardened.
-- F-085 (S5): CHANGELOG backfilled for 0.6.10–0.6.13.
+- F-085 (S5): CHANGELOG backfilled for 0.6.10–0.6.13 (this entry itself
+  landed after the tag, in 129782d).
 
 ## [0.6.13] — 2026-11-22
 
-### Fixed — night-21/22 (R21/R22 audit rounds)
+### Fixed — night-21 (R21 audit round)
 
-- F-078/F-084: `guest_script` places the fs-flag oracle itself — no
-  caller-supplied `oracle_ready` to wire wrong.
-- F-079: request-side strictness proven — `strict_content_length`
-  ambiguity matrix tests, gate duplicate Content-Length → 400 socket
-  test, workbench Transfer-Encoding → 400 socket test, node tarball
-  sha256 gate and Lima image digest pinned assertions.
+- F-078: `guest_script` places the fs-flag oracle itself — no
+  caller-supplied `oracle_ready` to wire wrong; wiring test pins it.
+- F-079: the v0.6.12 fix surfaces get behavior guards —
+  `strict_content_length` ambiguity matrix tests, gate duplicate
+  Content-Length → 400 socket test, node tarball sha256 gate and Lima
+  image digest pinned assertions.
 - F-080: Lima cloud image URL moved from the rolling `release/` dir to
   the immutable dated `release-20261017/` — the pinned digest can no
   longer be invalidated by an Ubuntu refresh (every setup would have
@@ -41,15 +72,6 @@ All notable changes to creance are documented here. The format follows
   (`fw-armed`) — slirp restrict=on can no longer mask a disarmed guest
   firewall; the `provisioned` marker is written only after every gate
   passes.
-- F-082/F-083: the fw-armed evidence is `/run/egress-armed` — a
-  root-owned stamp the egress-lock unit writes from the LIVE ruleset
-  via ExecStartPost (the apply leg now `systemctl restart`s the unit so
-  apply and stamp share one path). The unprivileged guest probe can
-  read it; `iptables -L` needed root and always printed fw-down, and a
-  bare `-A OUTPUT -j ACCEPT` no longer masquerades as armed.
-- F-084: `egress_probe_script`/`egress_verdict` factored into
-  creance::escape with per-branch tests; source-order guard pins the
-  provisioned-marker write after the verdict.
 
 ## [0.6.12] — 2026-11-22
 
@@ -61,6 +83,14 @@ All notable changes to creance are documented here. The format follows
   mount-before-bootstrap ordering; r14/r15 verdict tools repaired.
 - F-077: restrict=on declaration surfaces aligned; first-provision
   `up` prints the stop+up hint.
+- HTTP header parsing consolidated into `creance-net::wire`
+  (`parse_header_block` + `strict_content_length`); gate and workbench
+  share one parse and reject ambiguous Content-Length.
+- Supply chain: node v22.14.0 tarball sha256-pinned per arch (a
+  substituted tarball is refused, not unpacked; apt stays the
+  fallback); Lima cloudimg digest-pinned. The claude.ai install.sh
+  pipe-to-shell remains a documented residual — upstream ships no
+  versioned channel.
 
 ## [0.6.11] — 2026-11-22
 
@@ -77,11 +107,23 @@ All notable changes to creance are documented here. The format follows
 - slirp `restrict=on`: second line of defense — after provisioning the
   guest's raw-IP egress is cut at NAT level even if in-guest iptables
   is fully bypassed.
-- HTTP header parsing consolidated into `creance-net::wire`
-  (`parse_header_block` + `strict_content_length`); gate and workbench
-  reject ambiguous Content-Length.
-- Supply chain: node v22.14.0 tarball sha256-pinned per arch; Lima
-  cloudimg digest-pinned.
+- `creance up` is idempotent: an instance already running is reused
+  (instance-level flock); a second qemu can no longer clobber qemu.pid
+  and orphan the real VM. `DEFAULT_PORT` single-sourced.
+- Quality batch: `mihomo -t` and launchctl failures now propagate;
+  `sources.json` read errors fail closed instead of minting a fresh
+  auth; relay honors `CREANCE_CONFIG`; `proxy-import --url` feeds
+  refresh/interval; QMP reads time out (stop/delete can no longer
+  block forever on a hung qemu); gate and serve reject ambiguous or
+  duplicate Content-Length and Transfer-Encoding smuggling (400);
+  PROBE replies need an exact second token; HTTP status lines carry
+  reason phrases; gate lock poisoning recovered.
+- Probe verdict semantics: a finding emits ESCAPE, a missing tool
+  emits SKIP — never a silent PASS.
+- Platform shrink: dead code and non-target configuration removed;
+  targets are macOS (Apple Silicon) and Ubuntu 24.04 x86_64; the free
+  ssh port search no longer collides with its own probe.
+- pidfile writes are atomic (write-then-rename).
 
 ## [0.6.10] — 2026-11-22
 
@@ -95,9 +137,6 @@ All notable changes to creance are documented here. The format follows
   interrupted provision converges to "network up, locked" instead of
   a silently unarmed guest.
 - F-068/069/070: probe-oracle and declaration-surface corrections.
-- `creance up` is idempotent: an instance already running is reused
-  (instance-level flock); a second qemu can no longer clobber qemu.pid
-  and orphan the real VM.
 
 ## [0.6.9] — 2026-11-22
 

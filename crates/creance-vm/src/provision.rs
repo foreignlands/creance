@@ -320,24 +320,32 @@ mod tests {
 
     #[test]
     fn armed_stamp_is_root_written_from_live_rules() {
-        // F-082/F-083: the unprivileged up-gate reads /run/egress-armed;
-        // it must be produced by the unit (root) from the LIVE ruleset —
-        // not by any path the guest user controls.
+        // F-082/F-083/F-087: the unprivileged up-gate reads
+        // /run/egress-armed; it must be produced by the unit (root)
+        // from the LIVE ruleset — not by any path the guest user
+        // controls. Exact line: a `;`/`|` append on ExecStartPost
+        // (STAMPr) or a comment on the restart leg must fail these.
         let s = script();
         assert!(
-            s.contains("ExecStartPost=/bin/sh -c '/usr/sbin/iptables-save -t filter"),
+            s.contains("ExecStartPost=/bin/sh -c '/usr/sbin/iptables-save -t filter | /usr/bin/grep -E \"^:OUTPUT|^-A OUTPUT\" > /run/egress-armed'\n"),
             "{s}"
         );
-        assert!(s.contains("> /run/egress-armed"), "{s}");
-        // The stamp covers the OUTPUT policy line AND its rules, so a
-        // bare -A OUTPUT -j ACCEPT cannot masquerade as armed (F-083).
-        assert!(s.contains("^:OUTPUT|^-A OUTPUT"), "{s}");
-        // The apply leg goes through the unit — the stamp is written by
-        // the same code path that runs at every later boot.
-        assert!(s.contains("systemctl restart egress-lock.service"), "{s}");
-        // F-084: a bad node checksum must never be unpacked — the rm
-        // gate rides on the same line as the verify.
+        // The apply leg goes through the unit, uncommented — the stamp
+        // is written by the same code path that runs at every later boot.
+        assert!(
+            s.contains("\nsystemctl restart egress-lock.service\n"),
+            "{s}"
+        );
+        // F-084/F-087: a bad node checksum must never be unpacked —
+        // the conditional + rm gate, exactly one nodejs.org download.
+        assert!(s.contains("if [ -n \"$CREANCE_NODE_SHA256\" ]"), "{s}");
         assert!(s.contains("sha256sum -c - >> /var/log/creance-toolchain.log 2>&1 || rm -f /tmp/creance-node.tar.gz"), "{s}");
+        assert_eq!(
+            s.matches("nodejs.org/dist/v22.14.0/node-v22.14.0-linux")
+                .count(),
+            1,
+            "{s}"
+        );
     }
 
     #[test]

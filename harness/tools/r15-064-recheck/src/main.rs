@@ -60,7 +60,15 @@ fn die(section: &str, msg: String) -> ! {
 }
 
 fn main() {
-    let post = creance::escape::guest_script("/nonexistent-flag", "deadbeef", 17896, "devabc12345");
+    // F-089: the flag path must be WRITABLE — otherwise the render is
+    // the SKIP world and neither the pre nor the post shape matches
+    // what the real up-gate runs.
+    let flag_path = std::env::temp_dir()
+        .join(format!("creance-r15-flag-{}", std::process::id()))
+        .to_string_lossy()
+        .into_owned();
+    let post = creance::escape::guest_script(&flag_path, "deadbeef", 17896, "devabc12345");
+    let _ = std::fs::remove_file(&flag_path);
     let pre = revert_to_prefix(&post);
     let expected_pre = expected_ids(&pre);
 

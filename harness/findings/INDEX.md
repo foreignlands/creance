@@ -3,6 +3,10 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 086 | S4 | fw-armed 判据是黑名单+apply 时快照：限定 ACCEPT/跳链/rules.v4 漂移全判 armed | H1 / F-083 修复面 | 已修复（main-session，实机复验） |
+| 087 | S5 | v0.6.14 修复面 13 例变异全绿：probe 语义未执行、marker 守护只比首次出现、写盘/stamp 内容/restart 腿/校验门无行为守护 | H1 / F-076 同类 | 已修复（main-session，实机复验） |
+| 088 | S5 | CHANGELOG 0.6.10–0.6.14 与 tag 不对账：条目错位一个版本、两批 audit-batch 无条目、tag 内无自身条目 | 发版规程 | 已修复（main-session） |
+| 089 | S5 | r14/r15 裁判用不可写 flag 路径渲染 SKIP 世界：r15 panic RC=101、r14 绿但判错形态 | H1 / F-084 修复面 | 已修复（main-session，双裁判复跑 RC=0） |
 | 082 | S4 | fw-armed 探针无特权运行 iptables -L：PATH 无 /usr/sbin + Permission denied，v0.6.13 每次 up 恒失败停机、provisioned 永不写入 | H1 / F-081 修复面 | 已修复（main-session，实机复验） |
 | 083 | S4 | fw-armed 只看默认策略：DROP 策略 + 裸 -A OUTPUT -j ACCEPT 仍判 armed | H1 / F-081 修复面 | 已修复（main-session，实机复验） |
 | 084 | S5 | v0.6.13 修复面 10 例变异仍全绿：F-078 调用点、F-079 TE/node 校验/Lima digest 键、F-081 五例 | H1 / F-076 同类 | 已修复（main-session，实机复验） |
