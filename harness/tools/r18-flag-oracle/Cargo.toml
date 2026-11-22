@@ -1,0 +1,16 @@
+[package]
+name = "r18-flag-oracle"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# R18 (F-068): is the fs-flag-readable oracle alive in the default flow?
+# Real crates via RELATIVE path-dep (this checkout): real guest_script()
+# text + real environment_dir() derivation. The flag-path format! is the
+# one line mirrored from main.rs:360 (cmd_escape_test, bin crate).
+
+[dependencies]
+creance = { path = "../../../crates/creance" }
+creance-vm = { path = "../../../crates/creance-vm" }
+
+[workspace]
