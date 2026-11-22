@@ -4,6 +4,18 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.6.8] — 2026-11-22
+
+### Fixed — night-18 (R16 handoff)
+
+- F-066 (S5): the probe-id gate's parameterized-family allowlist was a
+  free pass — the enforced sock-$s socket-exposure probes are built at
+  runtime, invisible to the bidirectional diff, and R16 proved deleting
+  them left every automation layer green. The gate now requires the
+  family's emission site to be textually present in escape.rs (NC6
+  replay fails with a one-line pinpoint). QUICKSTART's category
+  enumeration gains the socket class.
+
 ## [0.6.7] — 2026-11-22
 
 ### Fixed — night-17 (R15 handoff)
