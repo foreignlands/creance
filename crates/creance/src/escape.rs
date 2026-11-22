@@ -354,12 +354,24 @@ fn fw_probe_fragment(nat_hosts: &[&str]) -> String {
         .map(|line| format!("-e '{line}'"))
         .collect::<Vec<_>>()
         .join(" ");
+    // F-092: rules.v4 is iptables-restore INPUT — its grammar is far
+    // wider than the `-A OUTPUT` spelling the stamp (iptables-save
+    // output) is normalized to. `-I`/`-R`/`--append`, leading blanks,
+    // a re-declared `:OUTPUT ACCEPT`, or a second `*filter` block all
+    // apply on the next boot but are invisible to a `^-A OUTPUT`
+    // line filter. So the persisted file is checked as a WHOLE: every
+    // non-blank line must literally be one canonical OUTPUT rule or
+    // one of the five structural lines, and each structural line may
+    // occur exactly once. The live stamp keeps the `-A OUTPUT`
+    // filter (save output is already normalized).
     format!(
         "STAMP=${{CREANCE_STAMP:-/run/egress-armed}}; WANT=${{CREANCE_RULES:-/etc/iptables/rules.v4}}\n\
          ok=0\n\
-         if [ -f \"$STAMP\" ] && [ -f \"$WANT\" ] && grep -q '^:OUTPUT DROP' \"$STAMP\" && grep -q '^:OUTPUT DROP' \"$WANT\"; then\n\
-           bad=$(cat \"$STAMP\" \"$WANT\" | grep -hE '^-A OUTPUT' | grep -vxF {grep_args})\n\
-           [ -z \"$bad\" ] && ok=1\n\
+         if [ -f \"$STAMP\" ] && [ -f \"$WANT\" ] && grep -q '^:OUTPUT DROP' \"$STAMP\"; then\n\
+           live=$(grep -hE '^-A OUTPUT' \"$STAMP\" | grep -vxF {grep_args})\n\
+           body=$(grep -v '^[[:space:]]*$' \"$WANT\" | grep -vxF {grep_args} -e '*filter' -e ':INPUT ACCEPT [0:0]' -e ':FORWARD ACCEPT [0:0]' -e ':OUTPUT DROP [0:0]' -e 'COMMIT')\n\
+           nfilter=$(grep -cxF '*filter' \"$WANT\"); ncommit=$(grep -cxF 'COMMIT' \"$WANT\"); nout=$(grep -c '^:OUTPUT ' \"$WANT\")\n\
+           if [ -z \"$live\" ] && [ -z \"$body\" ] && [ \"$nfilter\" = 1 ] && [ \"$ncommit\" = 1 ] && [ \"$nout\" = 1 ]; then ok=1; fi\n\
          fi\n\
          if [ \"$ok\" = 1 ]; then echo fw-armed; else echo fw-down; fi\n"
     )
@@ -1014,9 +1026,14 @@ mod tests {
         }
         assert!(p.contains("/run/egress-armed"), "{p}");
         assert!(p.contains("^:OUTPUT DROP"), "{p}");
-        // F-090: whole-line exact match (grep -vxF), never a substring
-        // pattern a `-m comment` or `!` negation could forge.
-        assert!(p.contains("grep -vxF"), "{p}");
+        // F-090/F-093: whole-line exact match (grep -vxF) on BOTH the
+        // live stamp and the rules.v4 body — dropping `-x` (substring
+        // mode) or a `-hE` line filter lets a canonical-substring line
+        // or a non-`-A` spelling through.
+        assert_eq!(p.matches("grep -vxF").count(), 2, "{p}");
+        assert!(p.contains("grep -v '^[[:space:]]*$'"), "{p}");
+        assert!(p.contains("grep -cxF '*filter'"), "{p}");
+        assert!(p.contains("grep -c '^:OUTPUT '"), "{p}");
         assert!(!p.contains("conntrack --ctstate .*"), "{p}");
         assert!(p.contains("/etc/iptables/rules.v4"), "{p}");
         assert!(p.contains("/dev/tcp/1.1.1.1/443"), "{p}");
@@ -1075,6 +1092,9 @@ mod tests {
             "-A OUTPUT -m conntrack --ctstate NEW -j ACCEPT",
             "-A OUTPUT -m conntrack --ctstate NEW,ESTABLISHED -j ACCEPT",
             "-A OUTPUT -m conntrack --ctstate ESTABLISHED -j LEAK",
+            // F-093/NC-NOX: a line CONTAINING a canonical line as a
+            // substring — only `-x` (whole-line) rejects it.
+            "-A OUTPUT -o lo -j ACCEPT -m comment --comment x",
             "-A OUTPUT -m comment --comment \"-d 10.0.2.2/32 -p icmp\" -j ACCEPT",
             "-A OUTPUT -m comment --comment \"conntrack --ctstate ESTABLISHED\" -j ACCEPT",
             "-A OUTPUT ! -d 10.0.2.2/32 -p udp -m udp ! --dport 67 -j ACCEPT",
@@ -1109,6 +1129,37 @@ mod tests {
             run(
                 stamp_good,
                 &want_good.replace(":OUTPUT DROP", ":OUTPUT ACCEPT")
+            ),
+            "fw-down"
+        );
+        // F-092: every spelling iptables-restore still applies but a
+        // `^-A OUTPUT` line filter skips — insert/replace/append,
+        // whitespace variants, comments (never written by the
+        // renderer), and structural re-declarations all read fw-down.
+        for hole in [
+            "-I OUTPUT -j ACCEPT",
+            "-I OUTPUT 1 -j ACCEPT",
+            "--append OUTPUT -j ACCEPT",
+            "-A  OUTPUT -j ACCEPT",
+            " -A OUTPUT -j ACCEPT",
+            "-A\tOUTPUT -j ACCEPT",
+            "-R OUTPUT 1 -j ACCEPT",
+            "# a comment line",
+            "*filter",
+            "COMMIT",
+            ":OUTPUT ACCEPT [0:0]",
+            ":OUTPUT DROP [0:0]",
+        ] {
+            assert_eq!(
+                run(stamp_good, &format!("{want_good}{hole}\n")),
+                "fw-down",
+                "{hole}"
+            );
+        }
+        assert_eq!(
+            run(
+                stamp_good,
+                &format!("{want_good}COMMIT\n*filter\n:OUTPUT ACCEPT [0:0]\n")
             ),
             "fw-down"
         );

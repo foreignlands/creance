@@ -801,25 +801,29 @@ fn cmd_shell(command: Vec<String>) -> i32 {
 mod up_gate_tests {
     #[test]
     fn provisioned_marker_only_after_verdict() {
-        // F-081/F-087/F-091: the marker write is a single call site —
-        // counted by the bare name so an `&*profile` alias or a second
-        // call still counts — nested inside the verdict's Ok(()) arm
-        // (between it and the outer Err(e) arm), so it cannot run on
-        // any failure path.
-        let src = include_str!("main.rs");
-        let needle = concat!("mark", "_provisioned(");
+        // F-081/F-087/F-091/F-093: the marker write is a single call
+        // site — counted by the BARE name so `use … as` renames and
+        // `(mark_provisioned)(…)` parens still count — and pinned
+        // INSIDE the Ok(()) arm's own body: between its `=>` and the
+        // next `=>` (the next match arm, whatever it is). Reordering
+        // the arms so Err(reason) sits between Ok(()) and Err(e)
+        // cannot smuggle the call into a failure arm.
+        // Count on the PRE-TEST region only — this test's own source
+        // names the symbol.
+        let src = &include_str!("main.rs")[..include_str!("main.rs").find("#[cfg(test)]").unwrap()];
         assert_eq!(
-            src.matches(needle).count(),
+            src.matches("mark_provisioned").count(),
             1,
-            "mark_provisioned は全ファイルで 1 箇所（別名・第二箇所は不可）"
+            "mark_provisioned は全ファイルで 1 箇所（別名 import・括弧呼び出しも不可）"
         );
         let verdict = src.find("escape::egress_verdict").expect("verdict call");
-        let ok_arm = verdict + src[verdict..].find("Ok(()) =>").expect("verdict Ok arm");
-        let err_arm = verdict + src[verdict..].find("Err(e) =>").expect("probe Err arm");
-        let mark = src.find(needle).expect("marker write");
+        let ok_body =
+            verdict + src[verdict..].find("Ok(()) =>").expect("verdict Ok arm") + "Ok(()) =>".len();
+        let next_arm = ok_body + src[ok_body..].find("=>").expect("arm after Ok");
+        let mark = src.find("mark_provisioned").expect("marker write");
         assert!(
-            ok_arm < mark && mark < err_arm,
-            "provisioned マーカーは verdict の Ok 分岐内（失敗経路では書かない）"
+            ok_body < mark && mark < next_arm,
+            "provisioned マーカーは verdict の Ok(()) 分岐の本体内のみ"
         );
     }
 }

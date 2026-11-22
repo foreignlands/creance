@@ -177,7 +177,7 @@ timeout "$TOOLCHAIN_BUDGET" sh -c '
 # this script on every start and cloud-init runs it once; restore is
 # idempotent either way. (`up` additionally verifies behaviorally; see
 # main.rs.) The unit is started rather than replaying the ruleset by
-# hand so the /run/egress-armed stamp (F-082) is written by the same
+# hand so the armed stamp (F-082) is written by the same
 # code path that will run at every later boot — one apply, one stamp.
 # `restart`, not `start`: a RemainAfterExit oneshot already active is a
 # no-op under start, but Lima replays this script and must re-apply
@@ -336,15 +336,30 @@ mod tests {
             s.contains("\nsystemctl restart egress-lock.service\n"),
             "{s}"
         );
-        // F-091: the ExecStartPost stamp write is the ONLY redirect into
-        // /run/egress-armed — a second, forged stamp write would mask
-        // the real one.
-        assert_eq!(s.matches("> /run/egress-armed").count(), 1, "{s}");
-        // ...and nothing after the apply leg touches netfilter at all —
-        // an `iptables -P OUTPUT ACCEPT` slipped in after restart must
-        // fail this.
-        let after_apply = &s[s.find("systemctl restart egress-lock.service").unwrap()..];
-        assert!(!after_apply.contains("iptables"), "{after_apply}");
+        // F-091/F-093: the ExecStartPost stamp write is the ONLY
+        // occurrence of the stamp path in the whole script — a second,
+        // forged write (`>`, `>>`, `>/run`, `| tee`, a smuggled line)
+        // adds an occurrence and fails this regardless of spelling.
+        assert_eq!(s.matches("/run/egress-armed").count(), 1, "{s}");
+        // ...and the tail after the apply leg is byte-exact — any
+        // injected netfilter touch (`iptables -P`, `nft flush`,
+        // another stamp write) changes the bytes and fails this.
+        let apply = s.find("systemctl restart egress-lock.service").unwrap();
+        let expected_tail = concat!(
+            "systemctl restart egress-lock.service\n",
+            "\n",
+            "# 020 PRIVILEGE RETIREMENT — cloud-init unconditionally grants the guest\n",
+            "# user sudo (NOPASSWD, or a random password parked in ~/password when\n",
+            "# passwordlessSudo is false). The enforcement plane is only as strong as\n",
+            "# the weakest privilege path, so the grant dies here: without it the\n",
+            "# firewall above cannot be lifted from inside the guest.\n",
+            "SUDOERS=/etc/sudoers.d/90-cloud-init-users\n",
+            "[ -f \"$SUDOERS\" ] && sed -i '\\#^dev0123abcd #d' \"$SUDOERS\" || true\n",
+            "passwd -l dev0123abcd 2>/dev/null || true\n",
+            "GUEST_HOME=$(getent passwd dev0123abcd | cut -d: -f6)\n",
+            "[ -n \"$GUEST_HOME\" ] && rm -f \"$GUEST_HOME/password\" || true\n",
+        );
+        assert_eq!(&s[apply..], expected_tail, "{s}");
         // F-084/F-087/F-091: a bad node checksum must never be unpacked —
         // the conditional's full line (a `&& false` append breaks it),
         // the rm gate, exactly one nodejs.org download.

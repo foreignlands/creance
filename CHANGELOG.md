@@ -4,6 +4,35 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.6.17] — 2026-11-22
+
+### Fixed — night-23 (R25 audit round)
+
+- F-092 (S4): the rules.v4 side of fw-armed is a WHOLE-FILE check now,
+  not a `^-A OUTPUT` line filter — iptables-restore accepts `-I`/`-R`/
+  `--append`, leading whitespace, a re-declared `:OUTPUT ACCEPT`, and a
+  second `*filter` block, none of which start with `-A OUTPUT`. Every
+  non-blank line must literally equal a canonical OUTPUT rule or one of
+  the five structural lines, each of which may occur exactly once
+  (`*filter`, `:INPUT`/`:FORWARD`/`:OUTPUT DROP [0:0]`, `COMMIT`). The
+  live stamp keeps the `-A OUTPUT` filter (iptables-save output is
+  already normalized).
+- F-093 (S5): the v0.6.16 guard hardening's 9 unguarded mutation
+  shapes closed — the marker guard counts the bare `mark_provisioned`
+  name in the pre-test region (a `use … as` rename or a parenthesized
+  call still counts) and pins the call strictly inside the Ok(()) arm's
+  own body, arm-order independent; the creance-vm guard counts
+  `write_marker(` too (a direct call skips the whole call-site guard)
+  and pins the vm.rs call inside the `pub fn mark_provisioned` body;
+  `write_marker` is exercised under a third dir outside the temp dir
+  (a path-prefix gate that declines to write now fails); the stamp
+  guard counts every `/run/egress-armed` occurrence in the script
+  (any spelling — `>`, `>>`, `>/run`, `| tee`); the post-apply tail is
+  asserted byte-exact instead of a `iptables` substring blacklist
+  (`nft flush` or any other injected line fails); the `-x` in
+  `grep -vxF` is itself counted and a canonical-substring line joins
+  the truth table.
+
 ## [0.6.16] — 2026-11-22
 
 ### Fixed — night-23 (R24 audit round)

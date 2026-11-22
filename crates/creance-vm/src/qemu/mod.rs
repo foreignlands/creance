@@ -541,14 +541,28 @@ mod tests {
 
     #[test]
     fn write_marker_writes_once_then_refuses() {
-        // F-087/F-091: absent → writes "ok\n" + true; present → false,
-        // file untouched. Two differently-named dirs so a dir-name gate
-        // (e.g. a "creance-mk-" prefix check) would be caught.
-        for name in ["creance-mk-", "plain-dir-"] {
-            let dir = std::env::temp_dir()
-                .join(format!("{name}{}", crate::token()[..8].to_owned()))
+        // F-087/F-091/F-093: absent → writes "ok\n" + true; present →
+        // false, file untouched. Three dir shapes — two names AND a
+        // dir outside the temp dir — so a dir-name gate or a
+        // temp-dir prefix gate that silently declines to write would
+        // be caught (the assert reads the file back, so a "true but
+        // unwritten" gate fails too).
+        let outside = std::env::current_dir()
+            .unwrap()
+            .join(format!("target-mk-{}", crate::token()[..8].to_owned()))
+            .to_string_lossy()
+            .into_owned();
+        for dir in [
+            std::env::temp_dir()
+                .join(format!("creance-mk-{}", crate::token()[..8].to_owned()))
                 .to_string_lossy()
-                .into_owned();
+                .into_owned(),
+            std::env::temp_dir()
+                .join(format!("plain-dir-{}", crate::token()[..8].to_owned()))
+                .to_string_lossy()
+                .into_owned(),
+            outside,
+        ] {
             std::fs::create_dir_all(&dir).unwrap();
             assert!(write_marker(&dir), "{dir}");
             let marker = paths::join(&dir, "provisioned");
@@ -562,23 +576,41 @@ mod tests {
 
     #[test]
     fn mark_provisioned_is_called_only_from_the_cli_crate() {
-        // F-087/F-091: the marker may only be written via the vm.rs
-        // dispatch the cli up-gate calls — `fn` definitions aside, the
-        // only call inside creance-vm is vm.rs's qemu dispatch. The
-        // needle is the bare name so any arg shape (aliases, no `&`)
-        // is counted.
-        let needle = concat!("mark", "_provisioned(");
-        for (name, src, expected) in [
-            ("qemu/mod.rs", include_str!("mod.rs"), 1usize), // definition only
-            ("qemu/runner.rs", include_str!("runner.rs"), 0),
-            ("qemu/provision.rs", include_str!("provision.rs"), 0),
-            ("vm.rs", include_str!("../vm.rs"), 2), // definition + qemu dispatch
+        // F-087/F-091/F-093: the marker may only be written via the
+        // vm.rs dispatch the cli up-gate calls. Counts are taken on the
+        // PRE-TEST region only (the test code itself names both
+        // symbols), the needle is the bare name so any arg shape or
+        // alias counts, and `write_marker(` is pinned too — a direct
+        // call would skip the whole call-site guard.
+        for (name, src, mark, write) in [
+            ("qemu/mod.rs", include_str!("mod.rs"), 1usize, 2usize),
+            ("qemu/runner.rs", include_str!("runner.rs"), 0, 0),
+            ("qemu/provision.rs", include_str!("provision.rs"), 0, 0),
+            ("vm.rs", include_str!("../vm.rs"), 2, 0),
         ] {
+            let prod = &src[..src.find("#[cfg(test)]").unwrap_or(src.len())];
             assert_eq!(
-                src.matches(needle).count(),
-                expected,
-                "{name} must not add mark_provisioned call sites"
+                prod.matches(concat!("mark", "_provisioned(")).count(),
+                mark,
+                "{name}: mark_provisioned( call-site count"
+            );
+            assert_eq!(
+                prod.matches("write_marker(").count(),
+                write,
+                "{name}: write_marker( call-site count"
             );
         }
+        // Position: vm.rs's call must be inside the dispatch fn body —
+        // between `pub fn mark_provisioned` and that function's closing
+        // brace at column 0.
+        let vm = include_str!("../vm.rs");
+        let prod = &vm[..vm.find("#[cfg(test)]").unwrap_or(vm.len())];
+        let def = prod.find("pub fn mark_provisioned").unwrap();
+        let body_end = def + prod[def..].find("\n}").unwrap();
+        let call = prod.rfind("mark_provisioned(").unwrap();
+        assert!(
+            def < call && call < body_end,
+            "vm.rs 的 dispatch 调用必须在 pub fn mark_provisioned 本体内"
+        );
     }
 }
