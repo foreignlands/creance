@@ -1,0 +1,1 @@
+RC=0 (sh scripts/ci.sh > ci.log 2>&1; RC=$?) @ a24b26b 2026-11-22T07:13:50Z

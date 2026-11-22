@@ -1,0 +1,6 @@
+guest 第一道防线（iptables 锁闭）未在武装状态——restrict=on 下的绿色直连判定不可信，按未验证拒绝交付，VM 已停止；请 creance stop 后 creance setup 重建环境。探针原始输出："tcp-blocked\nicmp-blocked\nfw-down\n"
+
+real	2m23.537s
+user	1m6.531s
+sys	0m11.276s
+up1 RC=1

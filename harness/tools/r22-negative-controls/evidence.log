@@ -1,0 +1,62 @@
+NC-R: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 60 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+    error: test failed, to rerun pass `-p creance-vm --lib`
+NC-R2: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 60 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+    error: test failed, to rerun pass `-p creance-vm --lib`
+NC-073q: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 60 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+    error: test failed, to rerun pass `-p creance-vm --lib`
+NC-073l: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 60 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+    error: test failed, to rerun pass `-p creance-vm --lib`
+NC-074: grep-c before=0 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 13 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+    error: test failed, to rerun pass `-p creance --lib`
+NC-074b: grep-c before=0 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 13 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+    error: test failed, to rerun pass `-p creance --lib`
+NC-074c: grep-c before=0 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 13 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+    error: test failed, to rerun pass `-p creance --lib`
+NC-RO: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 60 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+    error: test failed, to rerun pass `-p creance-vm --lib`
+NC-F: grep-c before=0 after=1 crates=creance test-RC=0 failed=0 compile-err=0
+NC-F2: grep-c before=0 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 13 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+    error: test failed, to rerun pass `-p creance --lib`
+NC-CLd: grep-c before=0 after=1 crates=creance-net creance-gate creance test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.21s
+    error: test failed, to rerun pass `-p creance-gate --lib`
+NC-CLx: grep-c before=0 after=1 crates=creance-net creance-gate creance test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.20s
+    error: test failed, to rerun pass `-p creance-gate --lib`
+NC-TE: grep-c before=0 after=1 crates=creance test-RC=0 failed=0 compile-err=0
+NC-NODE: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 60 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+    error: test failed, to rerun pass `-p creance-vm --lib`
+NC-NOCK: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-NOCK2: grep-c before=4 after=5 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-DIG: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 60 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+    error: test failed, to rerun pass `-p creance-vm --lib`
+NC-DIG2: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-URL: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 60 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+    error: test failed, to rerun pass `-p creance-vm --lib`
+NC-FW: grep-c before=0 after=1 crates=creance test-RC=0 failed=0 compile-err=0
+NC-FW2: grep-c before=1 after=0 crates=creance test-RC=0 failed=0 compile-err=0
+NC-MK: grep-c before=0 after=1 crates=creance test-RC=0 failed=0 compile-err=0
+NC-MK2: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-MP: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+crates/creance/src/escape.rs: OK
+crates/creance-vm/src/qemu/runner.rs: OK
+crates/creance/src/main.rs: OK
+crates/creance-vm/src/qemu/provision.rs: OK
+crates/creance-vm/src/lima.rs: OK
+crates/creance-vm/src/provision.rs: OK
+crates/creance-vm/src/qemu/mod.rs: OK
+crates/creance-net/src/wire.rs: OK
+crates/creance/src/serve.rs: OK
+NC done RC=0

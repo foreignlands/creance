@@ -1,0 +1,2 @@
+50e24e1fb79e89116e939d90aa7738f7af48c442fa1bc2510131e0b39c50348e *ubuntu-24.04-server-cloudimg-arm64.img
+50e24e1fb79e89116e939d90aa7738f7af48c442fa1bc2510131e0b39c50348e *ubuntu-24.04-server-cloudimg-arm64.img

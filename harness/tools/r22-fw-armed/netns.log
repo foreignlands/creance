@@ -1,0 +1,18 @@
+P1-product-shape (probe PATH=/usr/sbin:/usr/bin:/bin): fw-armed
+  loaded OUTPUT:
+    -P OUTPUT DROP
+    -A OUTPUT -o lo -j ACCEPT
+    -A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+P2-drop+accept-all (probe PATH=/usr/sbin:/usr/bin:/bin): fw-armed
+  loaded OUTPUT:
+    -P OUTPUT DROP
+    -A OUTPUT -j ACCEPT
+P3-accept-policy (probe PATH=/usr/sbin:/usr/bin:/bin): fw-down
+  loaded OUTPUT:
+    -P OUTPUT ACCEPT
+P4-product-shape (probe PATH=/usr/bin:/bin): fw-down
+  loaded OUTPUT:
+    -P OUTPUT DROP
+    -A OUTPUT -o lo -j ACCEPT
+    -A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+P5 unprivileged (uid 1000), full PATH: fw-down  stderr: iptables v1.8.7 (nf_tables): Could not fetch rule set generation id: Permission denied (you must be root)

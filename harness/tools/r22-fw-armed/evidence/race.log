@@ -1,0 +1,37 @@
+export DBUS_SESSION_BUS_ADDRESS='unix:path=/run/user/1000/bus'
+export HOME='/home/dev44febe1f'
+export LANG='en_US.UTF-8'
+export LOGNAME='dev44febe1f'
+export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin'
+export PWD='/home/dev44febe1f'
+export SHELL='/bin/bash'
+export SHLVL='1'
+export SSH_CLIENT='10.0.2.2 40768 22'
+export SSH_CONNECTION='10.0.2.2 40768 10.0.2.15 22'
+export USER='dev44febe1f'
+export XDG_RUNTIME_DIR='/run/user/1000'
+export XDG_SESSION_CLASS='user'
+export XDG_SESSION_ID='1'
+export XDG_SESSION_TYPE='tty'
+export _='/usr/bin/sh'
+id: uid=1000(dev44febe1f) gid=1000(dev44febe1f) groups=1000(dev44febe1f)
+command -v iptables (probe PATH=/usr/bin:/bin): /usr/sbin/iptables
+ls: cannot access '/usr/bin/iptables': No such file or directory
+lrwxrwxrwx 1 root root 22 Oct 17 12:57 /etc/alternatives/iptables -> /usr/sbin/iptables-nft
+lrwxrwxrwx 1 root root 26 Apr  8  2024 /usr/sbin/iptables -> /etc/alternatives/iptables
+--- probe line verbatim:
+fw-down
+--- same with /usr/sbin on PATH, stderr shown:
+iptables v1.8.10 (nf_tables): Could not fetch rule set generation id: Permission denied (you must be root)
+--- sudo -n:
+sudo: a password is required
+--- persisted rules.v4 head:
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT DROP [0:0]
+-A OUTPUT -o lo -j ACCEPT
+-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+--- egress-lock: active
+--- direct tcp 1.1.1.1:443:
+blocked

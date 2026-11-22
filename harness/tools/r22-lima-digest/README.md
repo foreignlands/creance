@@ -1,0 +1,1 @@
+r22-lima-digest — F-080 recheck: the pinned arm64 digest vs release-20261017/SHA256SUMS (dated, immutable) and release/SHA256SUMS (rolling). Reproduce: curl the two SHA256SUMS and grep cloudimg-arm64.img.
