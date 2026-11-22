@@ -1,0 +1,15 @@
+[package]
+name = "r24-fw-allowlist"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# R24: dumps the REAL v0.6.15 up-gate probe (escape::egress_probe_script
+# fed by creance_vm::vm::nat_allow_hosts / NAT_HOSTS_*), so netns.sh
+# replays the shipped allowlist fragment verbatim.
+
+[dependencies]
+creance = { path = "../../../crates/creance" }
+creance-vm = { path = "../../../crates/creance-vm" }
+
+[workspace]

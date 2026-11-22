@@ -1,0 +1,22 @@
+
+running 18 tests
+................. 17/18
+escape::tests::fw_probe_fragment_real_shell_truth_table --- FAILED
+
+failures:
+
+---- escape::tests::fw_probe_fragment_real_shell_truth_table stdout ----
+
+thread 'escape::tests::fw_probe_fragment_real_shell_truth_table' (34284) panicked at crates/creance/src/escape.rs:1022:9:
+assertion `left == right` failed
+  left: "fw-armed"
+ right: "fw-down"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    escape::tests::fw_probe_fragment_real_shell_truth_table
+
+test result: FAILED. 17 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p creance --lib`

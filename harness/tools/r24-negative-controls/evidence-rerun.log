@@ -1,0 +1,8 @@
+NC-PRB5b: grep-c before=0 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+NC-NOCK4b: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+crates/creance/src/escape.rs: OK
+crates/creance/src/main.rs: OK
+crates/creance-vm/src/provision.rs: OK
+crates/creance-vm/src/qemu/mod.rs: OK
+crates/creance-vm/src/vm.rs: OK
+crates/creance-vm/src/lima.rs: OK

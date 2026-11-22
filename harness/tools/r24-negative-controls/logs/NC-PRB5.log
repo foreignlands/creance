@@ -1,0 +1,12 @@
+error: invalid format string: expected `}`, found `g`
+   --> crates/creance/src/escape.rs:336:56
+    |
+336 | ...   if [ -f \"$STAMP\" ] && [ -f \"$WANT\" ] && { grep -q '^:OUTPUT DROP' \"$STAMP\" || true; } && grep -q '^:OUTPUT DROP' \"$WAN...
+    |                                                   - ^ expected `}` in format string
+    |                                                   |
+    |                                                   because of this opening brace
+    |
+    = note: if you intended to print `{`, you can escape it using `{{`
+
+error: could not compile `creance` (lib) due to 1 previous error
+error: could not compile `creance` (lib test) due to 1 previous error

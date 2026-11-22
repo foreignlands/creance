@@ -1,0 +1,23 @@
+tcp-blocked
+icmp-blocked
+fw-armed
+--- stamp:
+  :OUTPUT DROP [0:0]
+  -A OUTPUT -o lo -j ACCEPT
+  -A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+  -A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT
+  -A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT
+  -A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT
+  -A OUTPUT -d 10.0.2.3/32 -p udp -m udp --dport 67 -j ACCEPT
+  -A OUTPUT -d 10.0.2.3/32 -p icmp -j ACCEPT
+  -A OUTPUT -m comment --comment "-d 10.0.2.2/32 -p icmp" -j ACCEPT
+--- rules.v4 OUTPUT:
+  -A OUTPUT -o lo -j ACCEPT
+  -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  -A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT
+  -A OUTPUT -p udp --dport 67 -d 10.0.2.2/32 -j ACCEPT
+  -A OUTPUT -p icmp -d 10.0.2.2/32 -j ACCEPT
+  -A OUTPUT -p udp --dport 67 -d 10.0.2.3/32 -j ACCEPT
+  -A OUTPUT -p icmp -d 10.0.2.3/32 -j ACCEPT
+  -A OUTPUT -m comment --comment "-d 10.0.2.2/32 -p icmp" -j ACCEPT
+tcp-10.0.2.2:22=blocked

@@ -1,0 +1,33 @@
+error: unknown format trait `linux`
+   --> crates/creance-vm/src/provision.rs:152:105
+    |
+152 |   curl -fsSL -m 240 -o /tmp/creance-node.tar.gz "https://nodejs.org/dist/v22.14.0/node-v22.14.0-${ARCH:+linux}-$ARCH.tar.gz" 2>/dev...
+    |                                                                                                         ^^^^^
+    |
+    = note: the only appropriate formatting traits are:
+            - ``, which uses the `Display` trait
+            - `?`, which uses the `Debug` trait
+            - `e`, which uses the `LowerExp` trait
+            - `E`, which uses the `UpperExp` trait
+            - `o`, which uses the `Octal` trait
+            - `p`, which uses the `Pointer` trait
+            - `b`, which uses the `Binary` trait
+            - `x`, which uses the `LowerHex` trait
+            - `X`, which uses the `UpperHex` trait
+
+error[E0425]: cannot find value `ARCH` in this scope
+   --> crates/creance-vm/src/provision.rs:152:99
+    |
+152 |   curl -fsSL -m 240 -o /tmp/creance-node.tar.gz "https://nodejs.org/dist/v22.14.0/node-v22.14.0-${ARCH:+linux}-$ARCH.tar.gz" 2>/dev...
+    |                                                                                                   ^^^^ not found in this scope
+    |
+help: consider importing one of these constants
+    |
+ 11 + use crate::qemu::ARCH;
+    |
+ 11 + use std::env::consts::ARCH;
+    |
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `creance-vm` (lib) due to 2 previous errors
+error: could not compile `creance-vm` (lib test) due to 2 previous errors
