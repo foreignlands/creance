@@ -25,15 +25,22 @@ case "$(uname -m)" in
         ;;
 esac
 
+# Supported targets only: macOS Apple Silicon and Ubuntu x86_64.
+case "$os-$arch" in
+    darwin-arm64 | linux-amd64) ;;
+    *)
+        echo "unsupported platform: $os-$arch (creance targets macOS arm64 and Ubuntu x86_64)" >&2
+        exit 1
+        ;;
+esac
+
 # sha256 of the release .gz assets, recorded at pin time (full asset
 # names — case matches the whole string, a bare "darwin-arm64-…" would
 # never fire).
 checksum_for() {
     case "$1" in
-        mihomo-darwin-amd64-v1.19.34)  echo 089b033be801ff365b6558851115238b443b237433aa0841bc3fa41ad75a3927 ;;
         mihomo-darwin-arm64-v1.19.34)  echo 1a7a20eca63fbbaec90137717465bfde488d0db2a3a79b8fadebf9b2545b6e4c ;;
         mihomo-linux-amd64-v1.19.34)   echo 223fab877e5795ce780ba39902e5f0b1113c1256ae244a7160f1165e017e9ccc ;;
-        mihomo-linux-arm64-v1.19.34)   echo daaf78a6240a282cdfd75bcbf98fe321f6bd52765cc29e79f344191198f0b50f ;;
         *) return 1 ;;
     esac
 }

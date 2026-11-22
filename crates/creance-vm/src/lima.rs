@@ -17,13 +17,10 @@ pub fn generate_lima_yaml(options: &SetupOptions) -> Result<Vec<u8>, String> {
     if options.workspace.is_empty() || !crate::paths::is_abs(&options.workspace) {
         return Err("workspace must be an absolute host directory".to_owned());
     }
-    let arch = if cfg!(target_arch = "aarch64") {
-        "aarch64"
-    } else {
-        "amd64"
-    };
+    // The product targets Apple Silicon only — arm64 guests, always.
+    let arch = "aarch64";
     // Ubuntu's cloud image filenames use "arm64", not "aarch64".
-    let image_arch = if arch == "aarch64" { "arm64" } else { arch };
+    let image_arch = "arm64";
     let image = format!(
         "https://cloud-images.ubuntu.com/releases/{UBUNTU_RELEASE}/release/ubuntu-{UBUNTU_RELEASE}-server-cloudimg-{image_arch}.img"
     );
@@ -226,12 +223,8 @@ mod tests {
         assert_eq!(v["memory"], "8GiB");
         assert_eq!(v["disk"], "24GiB");
         let images = v["images"].as_sequence().unwrap();
-        // Ubuntu cloud images spell the arch "arm64"; the host decides which.
-        let image_arch = if cfg!(target_arch = "aarch64") {
-            "arm64"
-        } else {
-            "amd64"
-        };
+        // Ubuntu cloud images spell the arch "arm64"; guests are arm64-only.
+        let image_arch = "arm64";
         assert!(images[0]["location"]
             .as_str()
             .unwrap()

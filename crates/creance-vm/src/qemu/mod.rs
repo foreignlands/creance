@@ -18,12 +18,11 @@ use crate::pidfile;
 use crate::vm::{self, SetupOptions, SshTarget};
 use serde::{Deserialize, Serialize};
 
-/// The QEMU backend runs native-arch Linux guests only (KVM is a hard
-/// requirement; TCG's 8–12× slowdown is no sandbox an agent can work in).
+/// The QEMU backend runs x86_64 Linux guests on x86_64 hosts only (KVM is
+/// a hard requirement; TCG's 8–12× slowdown is no sandbox an agent can
+/// work in). The product targets Ubuntu 24.04 x86_64 on the Linux side.
 pub const ARCH: &str = if cfg!(target_arch = "x86_64") {
     "amd64"
-} else if cfg!(target_arch = "aarch64") {
-    "arm64"
 } else {
     "unsupported"
 };
@@ -97,7 +96,7 @@ pub fn setup_instance(
 ) -> Result<i32, String> {
     runner::require_tools()?;
     if ARCH == "unsupported" {
-        return Err("QEMU 后端当前仅支持 x86_64 与 aarch64 Linux 主机".to_owned());
+        return Err("QEMU 后端当前仅支持 x86_64 Linux 主机".to_owned());
     }
     // Validate the arguments BEFORE the ~600 MB image download: the 9p
     // share is handed to qemu by path (a missing dir makes the fsdev
@@ -177,7 +176,7 @@ fn instance_up_lock(dir: &str) -> Result<UpLock, String> {
 /// The flock makes the liveness check atomic with the spawn decision and
 /// serializes racing `up`s; a failure only stops the qemu THIS call booted.
 pub fn up(profile: &str, instance: &str) -> i32 {
-    let inst = match load_instance(profile, instance) {
+    let mut inst = match load_instance(profile, instance) {
         Ok(i) => i,
         Err(e) => {
             eprintln!("{e}");
@@ -195,6 +194,30 @@ pub fn up(profile: &str, instance: &str) -> i32 {
     };
     let we_started = !pidfile::alive(&pid_file);
     if we_started {
+        // The recorded ssh port was picked at setup; days later another
+        // process may hold it — probing the bind here is cheaper than a
+        // qemu that dies on the hostfwd and takes the pid file with it.
+        if std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, inst.ssh_local_port))
+            .is_err()
+        {
+            match runner::free_localhost_port() {
+                Ok(port) => {
+                    eprintln!("ssh 端口 {} 已被占用，改用 {port}", inst.ssh_local_port);
+                    inst.ssh_local_port = port;
+                    if let Ok(bytes) = serde_json::to_vec_pretty(&inst) {
+                        let _ =
+                            crate::write_private_atomic(&instance_file(profile, instance), &bytes);
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "ssh 端口 {} 已被占用且无法重新分配：{e}",
+                        inst.ssh_local_port
+                    );
+                    return 1;
+                }
+            }
+        }
         if let Err(e) = runner::start(&inst, &dir, &vm::state_dir(profile)) {
             eprintln!("{e}");
             return 1;

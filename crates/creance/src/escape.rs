@@ -354,9 +354,10 @@ if /usr/bin/env | /usr/bin/grep -v '^CREANCE_SESSION_TOKEN=' | /usr/bin/grep -qE
 else
   echo "PROBE env-hex-tokens PASS"
 fi
-# SSH: no agent socket, no host keys carried in.
+# SSH: no agent socket, no host keys carried in — a finding IS an escape
+# of the containment boundary, not an unmeasurable case.
 if [ -n "$SSH_AUTH_SOCK" ] || /usr/bin/ls ~/.ssh/id_* >/dev/null 2>&1; then
-  echo "PROBE ssh-material SKIP"
+  echo "PROBE ssh-material ESCAPE"
 else
   echo "PROBE ssh-material PASS"
 fi
@@ -370,20 +371,32 @@ echo "PROBE sock-abstract SKIP"
 # 0.3 ENFORCED NETWORK PROBES — the topology firewall must hold:
 # direct egress to external IPs is dropped, external DNS is dropped,
 # IPv6 is disabled. Escape = any of them succeeds.
-if curl -m 5 -s -o /dev/null https://1.1.1.1/ || curl -m 5 -s -o /dev/null http://93.184.216.34/; then
-  echo "PROBE net-direct-egress ESCAPE"
+if command -v curl >/dev/null 2>&1; then
+  if curl -m 5 -s -o /dev/null https://1.1.1.1/ || curl -m 5 -s -o /dev/null http://93.184.216.34/; then
+    echo "PROBE net-direct-egress ESCAPE"
+  else
+    echo "PROBE net-direct-egress PASS"
+  fi
 else
-  echo "PROBE net-direct-egress PASS"
+  echo "PROBE net-direct-egress SKIP"
 fi
-if timeout 4 getent hosts example.com >/dev/null 2>&1; then
-  echo "PROBE net-dns-external ESCAPE"
+if command -v getent >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
+  if timeout 4 getent hosts example.com >/dev/null 2>&1; then
+    echo "PROBE net-dns-external ESCAPE"
+  else
+    echo "PROBE net-dns-external PASS"
+  fi
 else
-  echo "PROBE net-dns-external PASS"
+  echo "PROBE net-dns-external SKIP"
 fi
-if ip -6 addr show scope global 2>/dev/null | grep -q inet6; then
-  echo "PROBE net-ipv6 ESCAPE"
+if command -v ip >/dev/null 2>&1; then
+  if ip -6 addr show scope global 2>/dev/null | grep -q inet6; then
+    echo "PROBE net-ipv6 ESCAPE"
+  else
+    echo "PROBE net-ipv6 PASS"
+  fi
 else
-  echo "PROBE net-ipv6 PASS"
+  echo "PROBE net-ipv6 SKIP"
 fi
 # F-060: ICMP used to be allowed to ANY destination — an echo channel the
 # TCP/DNS probes never watched. External echoes must die (only the NAT

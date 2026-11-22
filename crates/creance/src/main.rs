@@ -750,7 +750,7 @@ fn cmd_up() -> i32 {
         // interpreter shadowing — the README's honest-boundaries section
         // says so; the host-side gate evidence is the security control.)
         let probe = "export PATH=/usr/bin:/bin\n\
-                     /usr/bin/timeout 5 /bin/bash -c '</dev/tcp/1.1.1.1/443' 2>/dev/null && echo tcp-open || echo tcp-blocked\n\
+                     if /usr/bin/timeout 1 /bin/true; then /usr/bin/timeout 5 /bin/bash -c '</dev/tcp/1.1.1.1/443' 2>/dev/null && echo tcp-open || echo tcp-blocked; else echo tcp-unknown; fi\n\
                      if [ -x /usr/bin/ping ]; then /usr/bin/timeout 3 /usr/bin/ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo icmp-open || echo icmp-blocked; else echo icmp-unknown; fi\n";
         match creance_vm::vm::guest_script(&profile, &instance, probe) {
             Ok(out) => {

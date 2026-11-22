@@ -21,11 +21,7 @@ const POWERDOWN_BUDGET: Duration = Duration::from_secs(60);
 const TERM_BUDGET: Duration = Duration::from_secs(10);
 
 pub fn qemu_binary() -> &'static str {
-    if cfg!(target_arch = "x86_64") {
-        "qemu-system-x86_64"
-    } else {
-        "qemu-system-aarch64"
-    }
+    "qemu-system-x86_64"
 }
 
 /// The host tools the backend drives. Missing ones are setup-time fatals,
@@ -103,13 +99,9 @@ pub fn ensure_keypair(dir: &str) -> Result<String, String> {
 /// contract (exactly one hostfwd, one 9p share) lives here.
 pub fn build_args(inst: &Instance, dir: &str, state: &str) -> Result<Vec<String>, String> {
     if super::ARCH == "unsupported" {
-        return Err("QEMU 后端当前仅支持 x86_64 与 aarch64 Linux 主机".to_owned());
+        return Err("QEMU 后端当前仅支持 x86_64 Linux 主机".to_owned());
     }
-    let machine = if cfg!(target_arch = "x86_64") {
-        "q35,accel=kvm"
-    } else {
-        "virt,accel=kvm"
-    };
+    let machine = "q35,accel=kvm";
     let cpu = "host";
     let base = super::image::base_image_path(state, &inst.arch);
     let disk = super::image::overlay_path(dir);
@@ -121,7 +113,7 @@ pub fn build_args(inst: &Instance, dir: &str, state: &str) -> Result<Vec<String>
             return Err(format!("缺少实例文件 {required}；请重新 creance setup"));
         }
     }
-    let mut args: Vec<String> = vec![
+    let args: Vec<String> = vec![
         "-machine".into(),
         machine.into(),
         "-cpu".into(),
@@ -176,18 +168,6 @@ pub fn build_args(inst: &Instance, dir: &str, state: &str) -> Result<Vec<String>
         "-name".into(),
         format!("creance-{}", inst.name),
     ];
-    // aarch64 boots the same image through UEFI firmware; x86_64 uses the
-    // default SeaBIOS, which the Ubuntu cloud image's GPT layout supports.
-    if cfg!(target_arch = "aarch64") {
-        let fw = "/usr/share/qemu-efi-aarch64/QEMU_EFI.fd";
-        if !Path::new(fw).is_file() {
-            return Err(format!(
-                "缺少 aarch64 UEFI 固件（sudo apt install qemu-efi-aarch64 提供 {fw}）"
-            ));
-        }
-        args.push("-bios".into());
-        args.push(fw.into());
-    }
     Ok(args)
 }
 

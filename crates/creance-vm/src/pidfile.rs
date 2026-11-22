@@ -143,15 +143,32 @@ pub fn entry_alive(entry: &Entry) -> bool {
 /// proxy/ dir yet, and a missing directory must not read as daemon
 /// failure).
 pub fn write(path: &str, pid: i32) -> Result<(), String> {
-    if let Some(parent) = Path::new(path).parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
     let entry = Entry {
         pid,
         started: process_start_token(pid),
     };
-    std::fs::write(path, serde_json::to_vec(&entry).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())
+    // Atomic + private like every other record: temp (0600) + fsync +
+    // rename — a torn write must never read as a live pid entry. The
+    // parent dir is NOT forced private here: callers may pass a file
+    // directly under the temp dir.
+    let parent = Path::new(path)
+        .parent()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| ".".to_owned());
+    std::fs::create_dir_all(&parent).map_err(|e| e.to_string())?;
+    let (mut file, tmp) =
+        crate::private::create_private_temp(&parent, "pid").map_err(|e| e.to_string())?;
+    use std::io::Write;
+    let bytes = serde_json::to_vec(&entry).map_err(|e| e.to_string())?;
+    if let Err(e) = file.write_all(&bytes).and_then(|_| file.sync_all()) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
+    drop(file);
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })
 }
 
 /// Loads a pid file: a JSON entry, or the bare integer older builds wrote.

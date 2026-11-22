@@ -83,11 +83,12 @@ pub fn check_running(instances: &str, config: &Config) -> Result<(), String> {
     let own_start_empty = process_start_token(std::process::id() as i32).is_empty();
     let mut found = Vec::new();
     collect_records(Path::new(instances), &mut found);
+    let fingerprint = config.fingerprint();
     for record_path in found {
         let bytes = std::fs::read(&record_path).map_err(|e| e.to_string())?;
         let record: RunningProfile = serde_json::from_slice(&bytes)
             .map_err(|_| "invalid running cage profile record".to_owned())?;
-        if record_alive(&record, own_start_empty) && record.fingerprint != config.fingerprint() {
+        if record_alive(&record, own_start_empty) && record.fingerprint != fingerprint {
             return Err(
                 "cage configuration changed while a VM is running; run cage stop before restarting"
                     .to_owned(),
