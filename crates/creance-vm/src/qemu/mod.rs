@@ -552,6 +552,16 @@ mod tests {
             .join(format!("target-mk-{}", crate::token()[..8].to_owned()))
             .to_string_lossy()
             .into_owned();
+        // F-095/NC-MP4: a fourth dir shaped like the PRODUCT's own
+        // instance_dir (`…/state/qemu/<inst>`) — a path-prefix gate
+        // such as `dir.contains("/state/qemu/")` that declines to
+        // write is caught by the read-back assert.
+        let product_shaped = instance_dir(
+            &std::env::temp_dir()
+                .join(format!("creance-prof-{}", crate::token()[..8].to_owned()))
+                .to_string_lossy(),
+            "plain-inst",
+        );
         for dir in [
             std::env::temp_dir()
                 .join(format!("creance-mk-{}", crate::token()[..8].to_owned()))
@@ -562,6 +572,7 @@ mod tests {
                 .to_string_lossy()
                 .into_owned(),
             outside,
+            product_shaped,
         ] {
             std::fs::create_dir_all(&dir).unwrap();
             assert!(write_marker(&dir), "{dir}");
@@ -582,29 +593,35 @@ mod tests {
         // symbols), the needle is the bare name so any arg shape or
         // alias counts, and `write_marker(` is pinned too — a direct
         // call would skip the whole call-site guard.
+        // F-095: the needles are the BARE names — `(write_marker)(dir)`
+        // and `use … as` aliases carry no `write_marker(`/`mark_provisioned(`
+        // spelling but still add one bare-name occurrence. The pre-test
+        // region is cut at the LAST line-start `#[cfg(test)]` so an
+        // injected `// #[cfg(test)]` comment or an early test-attribute
+        // cannot truncate the scan before a smuggled call.
         for (name, src, mark, write) in [
             ("qemu/mod.rs", include_str!("mod.rs"), 1usize, 2usize),
             ("qemu/runner.rs", include_str!("runner.rs"), 0, 0),
             ("qemu/provision.rs", include_str!("provision.rs"), 0, 0),
             ("vm.rs", include_str!("../vm.rs"), 2, 0),
         ] {
-            let prod = &src[..src.find("#[cfg(test)]").unwrap_or(src.len())];
+            let prod = &src[..src.rfind("\n#[cfg(test)]").unwrap_or(src.len())];
             assert_eq!(
-                prod.matches(concat!("mark", "_provisioned(")).count(),
+                prod.matches(concat!("mark", "_provisioned")).count(),
                 mark,
-                "{name}: mark_provisioned( call-site count"
+                "{name}: mark_provisioned bare-name count"
             );
             assert_eq!(
-                prod.matches("write_marker(").count(),
+                prod.matches("write_marker").count(),
                 write,
-                "{name}: write_marker( call-site count"
+                "{name}: write_marker bare-name count"
             );
         }
         // Position: vm.rs's call must be inside the dispatch fn body —
         // between `pub fn mark_provisioned` and that function's closing
         // brace at column 0.
         let vm = include_str!("../vm.rs");
-        let prod = &vm[..vm.find("#[cfg(test)]").unwrap_or(vm.len())];
+        let prod = &vm[..vm.rfind("\n#[cfg(test)]").unwrap_or(vm.len())];
         let def = prod.find("pub fn mark_provisioned").unwrap();
         let body_end = def + prod[def..].find("\n}").unwrap();
         let call = prod.rfind("mark_provisioned(").unwrap();

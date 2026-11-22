@@ -4,6 +4,39 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.6.18] — 2026-11-22
+
+### Fixed — night-24 (R26 audit round)
+
+- F-094 (S4): the rules.v4 whole-file allowlist+counts check had two
+  remaining lanes — a NUL byte flips GNU grep into binary mode (every
+  line filter emits nothing, so an injected `-I OUTPUT -j ACCEPT`
+  still read fw-armed) and line counts cannot pin ORDER (`COMMIT`
+  early / `*filter` last / `:OUTPUT` after a rule all read armed while
+  iptables-restore rejects → next boot unarmed). The persisted file is
+  now compared BYTE-EXACT (`cmp -s`) against
+  `provision::rules_v4_text` — the new single renderer shared by the
+  bootstrap heredoc and the probe, so no second copy can drift. The
+  live stamp keeps the `-A OUTPUT` whole-line allowlist. Truth table
+  adds NUL + 3 reorder cases; verified on a live restrict=on guest.
+- F-095 (S5): the v0.6.17 guard hardening's 11 unguarded mutation
+  shapes closed — the marker guard now counts the bare
+  `mark_provisioned` name across the WHOLE cli crate (a relay through
+  another module counts) and each file is cut at the last line-start
+  `#[cfg(test)]` (an injected `// #[cfg(test)]` comment or early
+  test-attribute cannot truncate the scan); the verdict must be
+  consumed by a literal `match escape::egress_verdict(&out) {`
+  (`.or_else(|_| Ok(()))` neutralisation changes the bytes);
+  creance-vm counts switch to bare names too (use-as/renamed/
+  parenthesized `write_marker` and `mark_provisioned` all count);
+  `write_marker` is exercised under a product-shaped instance_dir
+  (`…/state/qemu/<inst>`) so a path-prefix gate that declines to
+  write fails; the script asserts exactly one `ExecStartPost=` and
+  exactly one `egress-armed` occurrence under ANY spelling
+  (`/run/./egress-armed`, double-slash paths); a bare
+  `-A OUTPUT -j ACCEPT` is asserted absent from the live-side
+  allowset.
+
 ## [0.6.17] — 2026-11-22
 
 ### Fixed — night-23 (R25 audit round)

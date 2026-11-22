@@ -354,24 +354,26 @@ fn fw_probe_fragment(nat_hosts: &[&str]) -> String {
         .map(|line| format!("-e '{line}'"))
         .collect::<Vec<_>>()
         .join(" ");
-    // F-092: rules.v4 is iptables-restore INPUT — its grammar is far
-    // wider than the `-A OUTPUT` spelling the stamp (iptables-save
-    // output) is normalized to. `-I`/`-R`/`--append`, leading blanks,
-    // a re-declared `:OUTPUT ACCEPT`, or a second `*filter` block all
-    // apply on the next boot but are invisible to a `^-A OUTPUT`
-    // line filter. So the persisted file is checked as a WHOLE: every
-    // non-blank line must literally be one canonical OUTPUT rule or
-    // one of the five structural lines, and each structural line may
-    // occur exactly once. The live stamp keeps the `-A OUTPUT`
-    // filter (save output is already normalized).
+    // F-094: the persisted rules.v4 is compared BYTE-EXACT against
+    // `provision::rules_v4_text` — the same renderer the bootstrap
+    // heredoc embeds. An allowset+counts check left two lanes open:
+    // a NUL byte flips GNU grep into binary mode (every line filter
+    // emits nothing → `-I OUTPUT -j ACCEPT` read as armed), and line
+    // counts cannot pin ORDER (`COMMIT` early / `*filter` last reads
+    // armed while iptables-restore rejects → next boot unarmed). cmp
+    // closes the whole encoding/order/spelling surface at once. The
+    // live stamp keeps the `-A OUTPUT` allowlist (save output is
+    // already normalized); the heredoc feeds cmp's expected side so
+    // rules.v4 itself never parses.
+    let expected = creance_vm::provision::rules_v4_text(nat_hosts);
     format!(
         "STAMP=${{CREANCE_STAMP:-/run/egress-armed}}; WANT=${{CREANCE_RULES:-/etc/iptables/rules.v4}}\n\
          ok=0\n\
          if [ -f \"$STAMP\" ] && [ -f \"$WANT\" ] && grep -q '^:OUTPUT DROP' \"$STAMP\"; then\n\
            live=$(grep -hE '^-A OUTPUT' \"$STAMP\" | grep -vxF {grep_args})\n\
-           body=$(grep -v '^[[:space:]]*$' \"$WANT\" | grep -vxF {grep_args} -e '*filter' -e ':INPUT ACCEPT [0:0]' -e ':FORWARD ACCEPT [0:0]' -e ':OUTPUT DROP [0:0]' -e 'COMMIT')\n\
-           nfilter=$(grep -cxF '*filter' \"$WANT\"); ncommit=$(grep -cxF 'COMMIT' \"$WANT\"); nout=$(grep -c '^:OUTPUT ' \"$WANT\")\n\
-           if [ -z \"$live\" ] && [ -z \"$body\" ] && [ \"$nfilter\" = 1 ] && [ \"$ncommit\" = 1 ] && [ \"$nout\" = 1 ]; then ok=1; fi\n\
+           if [ -z \"$live\" ] && cmp -s \"$WANT\" - <<'CREANCE_RULESET_EOF'\n\
+         {expected}CREANCE_RULESET_EOF\n\
+         then ok=1; fi\n\
          fi\n\
          if [ \"$ok\" = 1 ]; then echo fw-armed; else echo fw-down; fi\n"
     )
@@ -1026,14 +1028,15 @@ mod tests {
         }
         assert!(p.contains("/run/egress-armed"), "{p}");
         assert!(p.contains("^:OUTPUT DROP"), "{p}");
-        // F-090/F-093: whole-line exact match (grep -vxF) on BOTH the
-        // live stamp and the rules.v4 body — dropping `-x` (substring
-        // mode) or a `-hE` line filter lets a canonical-substring line
-        // or a non-`-A` spelling through.
-        assert_eq!(p.matches("grep -vxF").count(), 2, "{p}");
-        assert!(p.contains("grep -v '^[[:space:]]*$'"), "{p}");
-        assert!(p.contains("grep -cxF '*filter'"), "{p}");
-        assert!(p.contains("grep -c '^:OUTPUT '"), "{p}");
+        // F-090/F-093/F-094: whole-line exact match (grep -vxF) on the
+        // live stamp; the persisted rules.v4 is a BYTE-EXACT cmp
+        // against provision::rules_v4_text — no allowset/counts/
+        // encoding lane remains (NUL → cmp differs; reorder → differs).
+        assert_eq!(p.matches("grep -vxF").count(), 1, "{p}");
+        assert!(p.contains("cmp -s \"$WANT\" -"), "{p}");
+        // F-095/NC-SETMIX: a bare `-A OUTPUT -j ACCEPT` must never
+        // enter the live-side allowset.
+        assert!(!p.contains("-e '-A OUTPUT -j ACCEPT'"), "{p}");
         assert!(!p.contains("conntrack --ctstate .*"), "{p}");
         assert!(p.contains("/etc/iptables/rules.v4"), "{p}");
         assert!(p.contains("/dev/tcp/1.1.1.1/443"), "{p}");
@@ -1071,15 +1074,18 @@ mod tests {
             std::fs::write(&want, want_c).unwrap();
             run_fw_fragment(hosts, &stamp, &want)
         };
-        let want_good = "*filter\n:INPUT ACCEPT [0:0]\n:FORWARD ACCEPT [0:0]\n:OUTPUT DROP [0:0]\n-A OUTPUT -o lo -j ACCEPT\n-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n-A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT\n-A OUTPUT -p udp --dport 67 -d 10.0.2.2/32 -j ACCEPT\n-A OUTPUT -p icmp -d 10.0.2.2/32 -j ACCEPT\n-A OUTPUT -p udp --dport 67 -d 10.0.2.3/32 -j ACCEPT\n-A OUTPUT -p icmp -d 10.0.2.3/32 -j ACCEPT\nCOMMIT\n";
+        // F-094: the expected file is the renderer's own output — the
+        // probe byte-compares against it, so the fixture must be the
+        // same bytes (a hand-written copy would silently drift).
+        let want_good = creance_vm::provision::rules_v4_text(hosts);
         // The stamp lines the egress-lock unit actually writes
         // (iptables-save order: dst first, -m udp, /32 appended,
         // RELATED,ESTABLISHED).
         let stamp_good = "# Generated by egress-lock\n:OUTPUT DROP [0:0]\n-A OUTPUT -o lo -j ACCEPT\n-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT\n-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT\n-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT\n-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT\n-A OUTPUT -d 10.0.2.3/32 -p udp -m udp --dport 67 -j ACCEPT\n-A OUTPUT -d 10.0.2.3/32 -p icmp -j ACCEPT\n";
-        assert_eq!(run(stamp_good, want_good), "fw-armed");
+        assert_eq!(run(stamp_good, &want_good), "fw-armed");
         // Missing evidence.
         std::fs::remove_file(&stamp).unwrap();
-        assert_eq!(run("", want_good), "fw-down");
+        assert_eq!(run("", &want_good), "fw-down");
         // Bare blanket ACCEPT (F-083), qualified ACCEPTs (F-086), and
         // F-090's comment-forged tokens / negations / ranges / mixed
         // ctstate — every line not literally a canonical rule.
@@ -1104,14 +1110,14 @@ mod tests {
             "-A OUTPUT -p tcp -m comment --comment \"-d 10.0.2.3/32 -p icmp\" -j ACCEPT",
         ] {
             assert_eq!(
-                run(&format!("{stamp_good}{hole}\n"), want_good),
+                run(&format!("{stamp_good}{hole}\n"), &want_good),
                 "fw-down",
                 "{hole}"
             );
         }
         // OUTPUT policy not DROP in either file.
         assert_eq!(
-            run(&stamp_good.replace("DROP", "ACCEPT"), want_good),
+            run(&stamp_good.replace("DROP", "ACCEPT"), &want_good),
             "fw-down"
         );
         // rules.v4 carries the hole (post-provision file edit) — even
@@ -1163,6 +1169,47 @@ mod tests {
             ),
             "fw-down"
         );
+        // F-094: byte-exact also covers the lanes the allowset+counts
+        // check could not. Z01–Z03: a NUL byte flips GNU grep into
+        // binary mode — under the old check every line filter emitted
+        // nothing and an injected `-I OUTPUT -j ACCEPT` still read
+        // fw-armed; cmp just sees different bytes.
+        assert_eq!(
+            run(stamp_good, &format!("#\u{0}nul\n{want_good}")),
+            "fw-down"
+        );
+        assert_eq!(
+            run(
+                stamp_good,
+                &format!("{want_good}-I OUTPUT -j ACCEPT\u{0}\n")
+            ),
+            "fw-down"
+        );
+        // Trailing whitespace / extra newline: not the same bytes.
+        assert_eq!(run(stamp_good, &format!("{want_good}\n")), "fw-down");
+        // O01–O03: every line canonical, wrong ORDER — counts 1/1/1
+        // could not pin it; iptables-restore rejects or applies a
+        // different ruleset → next boot unarmed.
+        let order_cases: Vec<String> = {
+            let lines: Vec<&str> = want_good.lines().collect();
+            let mut early_commit = lines.clone();
+            let c = early_commit.pop().unwrap();
+            early_commit.insert(1, c); // COMMIT before the rules
+            let mut out_after_rule = lines.clone();
+            let decl = out_after_rule.remove(3); // :OUTPUT DROP
+            out_after_rule.insert(4, decl); // declared after a -A line
+            let mut filter_last = lines.clone();
+            let f = filter_last.remove(0);
+            filter_last.insert(filter_last.len() - 1, f); // *filter after rules
+            vec![
+                format!("{}\n", early_commit.join("\n")),
+                format!("{}\n", out_after_rule.join("\n")),
+                format!("{}\n", filter_last.join("\n")),
+            ]
+        };
+        for tampered in &order_cases {
+            assert_eq!(run(stamp_good, tampered), "fw-down", "{tampered}");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -801,20 +801,36 @@ fn cmd_shell(command: Vec<String>) -> i32 {
 mod up_gate_tests {
     #[test]
     fn provisioned_marker_only_after_verdict() {
-        // F-081/F-087/F-091/F-093: the marker write is a single call
-        // site — counted by the BARE name so `use … as` renames and
-        // `(mark_provisioned)(…)` parens still count — and pinned
-        // INSIDE the Ok(()) arm's own body: between its `=>` and the
-        // next `=>` (the next match arm, whatever it is). Reordering
-        // the arms so Err(reason) sits between Ok(()) and Err(e)
-        // cannot smuggle the call into a failure arm.
-        // Count on the PRE-TEST region only — this test's own source
-        // names the symbol.
-        let src = &include_str!("main.rs")[..include_str!("main.rs").find("#[cfg(test)]").unwrap()];
+        // F-081/F-087/F-091/F-093/F-095: the marker write is a single
+        // call site across the WHOLE crate — a relay through another
+        // module (NC-MKmod) counts too. The needle is the BARE name so
+        // `use … as` renames and `(mark_provisioned)(…)` parens still
+        // count, and each file is cut at its LAST line-start
+        // `#[cfg(test)]` so an injected `// #[cfg(test)]` comment or an
+        // early test-attribute cannot truncate the scan (NC-MKcfg).
+        let mut total = 0usize;
+        for entry in std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/src")).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            let prod = &text[..text.rfind("\n#[cfg(test)]").unwrap_or(text.len())];
+            total += prod.matches("mark_provisioned").count();
+        }
         assert_eq!(
-            src.matches("mark_provisioned").count(),
+            total, 1,
+            "mark_provisioned はクレート全体で 1 箇所（他モジュール中継・別名・括弧も不可）"
+        );
+        let src =
+            &include_str!("main.rs")[..include_str!("main.rs").rfind("\n#[cfg(test)]").unwrap()];
+        // F-095/NC-VERD: the verdict must be consumed by a bare match —
+        // `.or_else(|_| Ok(()))` or any wrapper that neutralises Err
+        // changes this literal and arms the marker on a failed verdict.
+        assert_eq!(
+            src.matches("match escape::egress_verdict(&out) {").count(),
             1,
-            "mark_provisioned は全ファイルで 1 箇所（別名 import・括弧呼び出しも不可）"
+            "egress_verdict の結果は素の match で消費される（Err 中和不可）"
         );
         let verdict = src.find("escape::egress_verdict").expect("verdict call");
         let ok_body =

@@ -5,6 +5,8 @@
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
 | 092 | S4 | rules.v4 半边只筛 `^-A OUTPUT` 行：`-I`/`--append`/`-R`/空白变体/`:OUTPUT ACCEPT` 重声明/第二 `*filter` 块被 restore 应用但探针不可见 | H1 / F-090 修复面 | 已修复（main-session，实机复验 up RC=0 + S01-S09 真值表全 fw-down） |
 | 093 | S5 | v0.6.16 守护加固 9 例变异全绿：use-as/括号调用/臂重排/vm.rs 位置/write_marker 直调/前缀 gate/stamp 拼写/nft | H1 / F-091 修复面 | 已修复（main-session，27 例 NC 复跑全红） |
+| 094 | S4 | rules.v4 整文件白名单对 NUL/顺序盲：grep 二进制模式放行 -I 注入；行数不钉顺序 → 下次启动失效 | H1 / F-092 修复面 | 已修复（main-session，改为 cmp 逐字节比对，实机复验） |
+| 095 | S5 | v0.6.17 守护加固 11 例变异全绿：跨文件/注释截断/or_else 中和/vm.rs 别名/括号直写/产品形 gate/双 ExecStartPost/路径另拼写/允许集混 ACCEPT | H1 / F-093 修复面 | 已修复（main-session，实机复验） |
 | 090 | S4 | fw-armed 白名单是逐行子串正则：注释伪造令牌/`NEW,ESTABLISHED`/`!` 取反/端口区间/tcp+注释全判 armed | H1 / F-086 修复面 | 已修复（main-session，实机复验：armed 实例 up RC=0 + 15 例伪造真值表） |
 | 091 | S5 | v0.6.15 修复面守护缺口：marker 守护漏别名/Err 臂/vm.rs，stamp 唯一写点/apply 后净面/NAT 表/探针参数面无钉 | H1 / F-087 同类 | 已修复（main-session，CI 全绿） |
 | 086 | S4 | fw-armed 判据是黑名单+apply 时快照：限定 ACCEPT/跳链/rules.v4 漂移全判 armed | H1 / F-083 修复面 | 已修复（main-session，实机复验） |

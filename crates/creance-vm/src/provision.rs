@@ -18,6 +18,28 @@ pub const UBUNTU_RELEASE: &str = "24.04";
 /// destinations the egress lockdown permits (DHCP/ICMP to the gateway).
 /// Each backend passes its own: allowing a foreign backend's subnet lets
 /// the VM NAT route it straight out the host NIC (F-073).
+/// The exact bytes written to `/etc/iptables/rules.v4` — the SINGLE
+/// source of truth for that file (F-094): the bootstrap heredoc embeds
+/// this text and the up-gate probe (`escape::egress_probe_script`)
+/// byte-compares the on-disk file against it, so no second renderer
+/// can drift and no `-I`/whitespace/NUL/reordered spelling can read as
+/// the canonical ruleset.
+pub fn rules_v4_text(nat_allows: &[&str]) -> String {
+    let mut out = String::from(
+        "*filter\n:INPUT ACCEPT [0:0]\n:FORWARD ACCEPT [0:0]\n:OUTPUT DROP [0:0]\n\
+         -A OUTPUT -o lo -j ACCEPT\n\
+         -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n\
+         -A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT\n",
+    );
+    for host in nat_allows {
+        out.push_str(&format!(
+            "-A OUTPUT -p udp --dport 67 -d {host}/32 -j ACCEPT\n-A OUTPUT -p icmp -d {host}/32 -j ACCEPT\n"
+        ));
+    }
+    out.push_str("COMMIT\n");
+    out
+}
+
 pub fn guest_bootstrap(
     locale: &str,
     timezone: &str,
@@ -27,12 +49,7 @@ pub fn guest_bootstrap(
     username: &str,
     nat_allows: &[&str],
 ) -> String {
-    let mut nat_rules = String::new();
-    for host in nat_allows {
-        nat_rules.push_str(&format!(
-            "-A OUTPUT -p udp --dport 67 -d {host}/32 -j ACCEPT\n-A OUTPUT -p icmp -d {host}/32 -j ACCEPT\n"
-        ));
-    }
+    let rules_v4 = rules_v4_text(nat_allows);
     format!(
         r#"#!/bin/sh
 set -e
@@ -73,14 +90,7 @@ mkdir -p /etc/iptables
 # range. This file is the single source of truth: the boot unit restores it verbatim and the
 # runtime apply below replays the same file (no second copy to drift).
 cat > /etc/iptables/rules.v4 <<'EGRESSRULES'
-*filter
-:INPUT ACCEPT [0:0]
-:FORWARD ACCEPT [0:0]
-:OUTPUT DROP [0:0]
--A OUTPUT -o lo -j ACCEPT
--A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
--A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT
-{nat_rules}COMMIT
+{rules_v4}EGRESSRULES
 EGRESSRULES
 # The boot replay: restore the ruleset before the network is up, so no
 # boot window exists with an open egress. Neutral name — the unit list
@@ -336,11 +346,19 @@ mod tests {
             s.contains("\nsystemctl restart egress-lock.service\n"),
             "{s}"
         );
-        // F-091/F-093: the ExecStartPost stamp write is the ONLY
+        // F-091/F-093/F-095: the ExecStartPost stamp write is the ONLY
         // occurrence of the stamp path in the whole script — a second,
         // forged write (`>`, `>>`, `>/run`, `| tee`, a smuggled line)
         // adds an occurrence and fails this regardless of spelling.
+        // `egress-armed` alone (no /run/ prefix) catches an alternate
+        // spelling of the SAME path (/run/./egress-armed, /run//…).
         assert_eq!(s.matches("/run/egress-armed").count(), 1, "{s}");
+        assert_eq!(s.matches("egress-armed").count(), 1, "{s}");
+        // F-095/NC-UNIT1+2: exactly one ExecStartPost — a second one
+        // (policy flip to ACCEPT, nft flush, a forged stamp write)
+        // would run after the real stamp write while the byte-exact
+        // tail assert (apply leg onward) cannot see it.
+        assert_eq!(s.matches("ExecStartPost=").count(), 1, "{s}");
         // ...and the tail after the apply leg is byte-exact — any
         // injected netfilter touch (`iptables -P`, `nft flush`,
         // another stamp write) changes the bytes and fails this.
