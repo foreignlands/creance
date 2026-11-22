@@ -367,7 +367,10 @@ fn cmd_escape_test() -> i32 {
         let script = escape::guest_script(
             &flag,
             &store.as_ref().map(|s| s.auth.clone()).unwrap_or_default(),
-            store.as_ref().map(|s| s.port).unwrap_or(17896),
+            store
+                .as_ref()
+                .map(|s| s.port)
+                .unwrap_or(creance_proxy::DEFAULT_PORT),
             &guest.map(|g| g.username).unwrap_or_default(),
         );
         match creance_vm::vm::guest_script(&profile, &instance, &script) {
@@ -582,7 +585,7 @@ fn cmd_proxy_refresh() -> i32 {
 fn proxy_store_port(profile: &str) -> u16 {
     creance_proxy::load(profile)
         .map(|s| s.port)
-        .unwrap_or(17896)
+        .unwrap_or(creance_proxy::DEFAULT_PORT)
 }
 
 fn cmd_setup(memory: u32, cpus: u32) -> i32 {
@@ -716,7 +719,7 @@ fn cmd_up() -> i32 {
         // fall back to the unconditional tunnel so the VM stays usable.
         let port = creance_proxy::load(&profile)
             .map(|s| s.port)
-            .unwrap_or(17896);
+            .unwrap_or(creance_proxy::DEFAULT_PORT);
         let instance_dir =
             creance_vm::paths::join(&creance_vm::vm::instances_root(&profile), &instance);
         if let Err(e) = gate::spawn_daemon(&profile, &instance, &path, &instance_dir, port) {

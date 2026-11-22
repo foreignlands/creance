@@ -106,6 +106,10 @@ fn users_uid() -> u32 {
     }
 }
 
+/// The managed core's loopback port when no store exists yet — the
+/// single spelling callers fall back to (main.rs, escape probes).
+pub const DEFAULT_PORT: u16 = 17896;
+
 /// Loads the store, yielding a fresh one when absent. A malformed store
 /// fails loudly: proxy credentials must never be silently reset.
 pub fn load(profile: &str) -> Result<Store, String> {
@@ -113,7 +117,7 @@ pub fn load(profile: &str) -> Result<Store, String> {
     let Ok(bytes) = std::fs::read(&path) else {
         return Ok(Store {
             version: 1,
-            port: 17896,
+            port: DEFAULT_PORT,
             auth: token(),
             sources: Vec::new(),
             ..Default::default()

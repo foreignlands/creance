@@ -136,7 +136,46 @@ pub fn setup_instance(
     Ok(0)
 }
 
-/// Boots the instance and waits until ssh answers.
+/// An exclusive flock serializing `up` per instance (see below).
+struct UpLock {
+    fd: std::os::unix::io::RawFd,
+}
+
+#[allow(unsafe_code)] // libc::flock/close on our own instance lock file
+impl Drop for UpLock {
+    fn drop(&mut self) {
+        unsafe {
+            libc::flock(self.fd, libc::LOCK_UN);
+            libc::close(self.fd);
+        }
+    }
+}
+
+#[allow(unsafe_code)] // libc::flock/close on our own instance lock file
+fn instance_up_lock(dir: &str) -> Result<UpLock, String> {
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(paths::join(dir, ".up.lock"))
+        .map_err(|e| format!("cannot open instance up-lock: {e}"))?;
+    let fd = std::os::unix::io::IntoRawFd::into_raw_fd(file);
+    unsafe {
+        if libc::flock(fd, libc::LOCK_EX) != 0 {
+            let err = std::io::Error::last_os_error();
+            libc::close(fd);
+            return Err(format!("cannot take instance up-lock: {err}"));
+        }
+    }
+    Ok(UpLock { fd })
+}
+
+/// Boots the instance and waits until ssh answers. Idempotent: an already
+/// running instance is waited on, never re-spawned — a second `up` used to
+/// spawn a second qemu, which died on the qcow2 lock, overwrote qemu.pid
+/// on its way out and left the real qemu an orphan no `stop` could find.
+/// The flock makes the liveness check atomic with the spawn decision and
+/// serializes racing `up`s; a failure only stops the qemu THIS call booted.
 pub fn up(profile: &str, instance: &str) -> i32 {
     let inst = match load_instance(profile, instance) {
         Ok(i) => i,
@@ -145,23 +184,32 @@ pub fn up(profile: &str, instance: &str) -> i32 {
             return 1;
         }
     };
-    if let Err(e) = runner::start(
-        &inst,
-        &instance_dir(profile, instance),
-        &vm::state_dir(profile),
-    ) {
-        eprintln!("{e}");
-        return 1;
-    }
-    let target = match ssh_target(profile, instance) {
-        Ok(t) => t,
+    let dir = instance_dir(profile, instance);
+    let pid_file = paths::join(&dir, "qemu.pid");
+    let _lock = match instance_up_lock(&dir) {
+        Ok(l) => l,
         Err(e) => {
             eprintln!("{e}");
             return 1;
         }
     };
-    let dir = instance_dir(profile, instance);
-    let pid_file = paths::join(&dir, "qemu.pid");
+    let we_started = !pidfile::alive(&pid_file);
+    if we_started {
+        if let Err(e) = runner::start(&inst, &dir, &vm::state_dir(profile)) {
+            eprintln!("{e}");
+            return 1;
+        }
+    }
+    let target = match ssh_target(profile, instance) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("{e}");
+            if we_started {
+                let _ = runner::stop(&dir);
+            }
+            return 1;
+        }
+    };
     // First boots download nothing (image is pre-seeded) but cloud-init
     // still takes minutes; later boots answer in seconds.
     match runner::wait_ssh(&target, &pid_file, std::time::Duration::from_secs(600)) {
@@ -170,7 +218,10 @@ pub fn up(profile: &str, instance: &str) -> i32 {
             eprintln!("{e}");
             // Never leave a half-booted qemu behind a failed up — the
             // next up would lose the hostfwd bind race to this corpse.
-            let _ = runner::stop(&dir);
+            // (Only ours: a VM someone else booted is theirs to keep.)
+            if we_started {
+                let _ = runner::stop(&dir);
+            }
             return 1;
         }
     }
@@ -190,7 +241,9 @@ pub fn up(profile: &str, instance: &str) -> i32 {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("{e}");
-            let _ = runner::stop(&dir);
+            if we_started {
+                let _ = runner::stop(&dir);
+            }
             1
         }
     }
