@@ -4,6 +4,21 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.6.7] — 2026-11-22
+
+### Fixed — night-17 (R15 handoff)
+
+- F-065 (S5): the ROADMAP probe inventory missed two live guest probe
+  ids — proxy-path (the enforced positive egress control) and
+  sock-abstract (the honest-SKIP known gap) — the third recurrence of
+  the hand-synced-declaration disease (058 → 063 → 065). The inventory
+  is now marker blocks of pure ids, guarded by
+  scripts/check-probe-inventory.sh wired into ci.sh: a bidirectional
+  diff between code emission sites and the declared inventory — a
+  missing id and a ghost id both fail CI with a one-line pinpoint
+  (proven by two negative controls). QUICKSTART's category enumeration
+  aligned.
+
 ## [0.6.6] — 2026-11-21
 
 ### Fixed — night-16 (R14 convergence round)
