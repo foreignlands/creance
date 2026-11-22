@@ -3,6 +3,7 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 065 | S5 | ROADMAP.md:38 探针清单缺两个真实 guest 探针 id：proxy-path（被强制的正向控制探针，QUICKSTART:85 明文承认其存在）已强制列表缺席、sock-abstract（诚实 SKIP 的未实现层）已强制与待做两节均零跟踪——host 侧 6 id 无漂移；R14 对 F-063 "逐一对上"的裁定只做了单向核对（清单→脚本），本条同时修正该验证记录。病根同 063（声明面靠人肉同步、063 建议的 grep 门禁未落地），同病第三次复发（058→063→065） | E5 邻接（探针清单声明面） | 待修复 |
 | 064 | S5 | F-062 缺行网漏掉 probe() 助手路由的 fs-flag-readable：提取器只枚举字面 `echo "PROBE <id>` 发射点并把 `$` 参数化发射连同该探针一起放弃（escape.rs:332 调用点的 id 本可静态枚举，main.rs:379-382 豁免注释"not statically knowable"名不符实）——该探针行可被单独致盲而 transport ESCAPE 不触发；其余 11 探针缺行网、子串碰撞矩阵、up 守门真值表经 r14-convergence 全实证 fail-closed | R14（F-062 修复面回归） | 已修复（night-16 主会话：escape.rs 删 probe() 助手改字面 if/else 发射，main.rs 豁免注释如实化；r14-convergence [A]/[E] 翻修复后断言全绿 + ci.sh RC=0（macOS），v0.6.6） |
 | 062 | S4 | guest_script 传输层 stdout 全权受 guest 控制（Ubuntu bash 非交互 source ~/.bashrc，实机实证）：PATH 影子/全盲 exec-redirect/整份 PROBE 伪造三形态——up 守门 `Ok(_)=>{}` 与 escape-test 缺行不计失败双消费点 fail-open，假绿（吞 tcp-open）与假红（echo tcp-open 杀健康 VM，实机验证）皆可；containment 内核侧未破，破坏的是守门/验收监控语义 | R13.5（F-059/F-011 修复面回归） | 已修复（night-15：守门改正向证据（tcp-blocked 必须在场，缺失=拒交+停机）；escape-test 探针行计数缺行=transport ESCAPE；探针脚本 PATH 硬重置+绝对路径；README 边界段如实降格"guest 探针=遥测，安全控制在宿主侧"。双向实机：致盲 .bashrc 下 up rc=1 拒交、escape 报 transport ESCAPE；健康路径零假报） |
 | 063 | S5 | ROADMAP.md:16 探针清单未随 E5 同步：仍列已删的 proxy-numeric-endpoint、缺新增的 net-icmp-external（E5 执行清单三处同步漏第三处）——与 F-058 同病（改名/删改后无 grep 门禁） | E5 执行面 | 已修复（night-15：随 ROADMAP v2 落地同步——探针清单去 proxy-numeric-endpoint、补 net-icmp-external） |
