@@ -15,6 +15,7 @@ cd "$(dirname "$0")/.."
 echo "== platform: $(uname -s)/$(uname -m) (cfg-gated code for other platforms is NOT compiled here) =="
 echo "== fmt =="; cargo fmt --check
 echo "== clippy =="; cargo clippy --locked --all-targets -- -D warnings
+echo "== probe inventory =="; sh scripts/check-probe-inventory.sh
 echo "== test =="; cargo test --locked
 echo "== release =="; cargo build --locked --release
 echo "OK"

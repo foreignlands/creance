@@ -33,10 +33,24 @@ creance 的定位：**通用的 AI agent 隔离容器**（功能对标 Claude Ca
 
 ## v1.0.0 — GA + 付费宣发投流，直面市场。
 
-## escape 探针清单（研究A产出，逐步翻绿）
+## escape 探针清单（研究A产出，逐步翻绿；id 与代码的双向差集由 scripts/check-probe-inventory.sh 门禁看守，任何一侧漂移 CI 即红。标记块内只放纯 id——注释写在块外，门禁解析器不认多字节）
 
-已强制（0.3–0.6.5）：config-valid / env-no-host-credentials / mounts-workspace-only / gate-record-private / credentials-are-session-only / fingerprint-consistent，以及 VM 内的 fs-flag-readable（旗标 oracle）/ guest-identity / guest-privilege / env-credentials / env-hex-tokens / ssh-material / sock-docker·lima-guestagent / net-direct-egress / net-dns-external / net-ipv6 / net-icmp-external（0.6.4 新增）。（原 proxy-numeric-endpoint 是永久绿的空探针，2026-11-21 E5 裁定删除。）
-待做：大陆出口命中拒（依赖出口证据链的 gate 联动）/ AAAA-本地名围栏 / 供应链探针（恶意 postinstall 外传被拦）/ 时区-出口一致性。
+宿主侧（已强制）：
+<!-- probe-inventory:host-enforced -->
+config-valid / env-no-host-credentials / mounts-workspace-only / gate-record-private / credentials-are-session-only / fingerprint-consistent
+<!-- /probe-inventory:host-enforced -->
+
+VM 内（已强制。sock-docker·lima-guestagent 是参数化 sock-$s 的三运行时家族名；fs-flag-readable 是旗标 oracle；net-icmp-external 0.6.4 新增；proxy-path 是出口正向控制——guest 输出任何含 " ESCAPE" 的行即 exit 1，PASS 需真实订阅节点）：
+<!-- probe-inventory:guest-enforced -->
+fs-flag-readable / guest-identity / guest-privilege / env-credentials / env-hex-tokens / ssh-material / sock-docker·lima-guestagent / net-direct-egress / net-dns-external / net-ipv6 / net-icmp-external / proxy-path
+<!-- /probe-inventory:guest-enforced -->
+
+VM 内（已知缺口，实现后转绿。sock-abstract 探针在场、如实 SKIP；其余为规划项：大陆出口命中拒依赖出口证据链的 gate 联动）：
+<!-- probe-inventory:guest-todo -->
+sock-abstract / 大陆出口命中拒 / AAAA-本地名围栏 / 供应链探针 / 时区-出口一致性
+<!-- /probe-inventory:guest-todo -->
+
+（原 proxy-numeric-endpoint 是永久绿的空探针，2026-11-21 E5 裁定删除——历史记录，不参与门禁。）
 红队方法论参考 sandbox_escape_bench 的「宿主旗标 + 场景 setup」结构。
 
 ## 架构参考（研究A结论，已采纳/计划）
