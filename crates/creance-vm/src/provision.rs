@@ -134,7 +134,18 @@ timeout "$TOOLCHAIN_BUDGET" sh -c '
   # with UNEXPECTED_EOF where curl sailed through).
   curl -fsSL -m 240 -o /tmp/creance-node.tar.gz https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-$ARCH.tar.gz >> /var/log/creance-toolchain.log 2>&1
   echo "node download rc=$?" >> /var/log/creance-toolchain.log
-  tar -xzf /tmp/creance-node.tar.gz -C /tmp >> /var/log/creance-toolchain.log 2>&1 \
+  # Supply chain: the pinned tarball must match the recorded sha256
+  # (nodejs.org/dist/v22.14.0/SHASUMS256.txt). A substituted tarball is
+  # refused, not unpacked — the apt fallback below stays the way out.
+  case "$ARCH" in
+    x64)   CREANCE_NODE_SHA256=9d942932535988091034dc94cc5f42b6dc8784d6366df3a36c4c9ccb3996f0c2 ;;
+    arm64) CREANCE_NODE_SHA256=8cf30ff7250f9463b53c18f89c6c606dfda70378215b2c905d0a9a8b08bd45e0 ;;
+    *)     CREANCE_NODE_SHA256= ;;
+  esac
+  if [ -n "$CREANCE_NODE_SHA256" ]; then
+    echo "$CREANCE_NODE_SHA256  /tmp/creance-node.tar.gz" | sha256sum -c - >> /var/log/creance-toolchain.log 2>&1 || rm -f /tmp/creance-node.tar.gz
+  fi
+  [ -f /tmp/creance-node.tar.gz ] && tar -xzf /tmp/creance-node.tar.gz -C /tmp >> /var/log/creance-toolchain.log 2>&1 \
     && mv /tmp/node-v22.14.0-linux-$ARCH/bin/node /usr/local/bin/node.new 2>> /var/log/creance-toolchain.log \
     && mv /usr/local/bin/node.new /usr/local/bin/node 2>> /var/log/creance-toolchain.log \
     || rm -f /usr/local/bin/node.new /tmp/creance-node.tar.gz

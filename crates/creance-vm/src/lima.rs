@@ -26,6 +26,14 @@ pub fn generate_lima_yaml(options: &SetupOptions) -> Result<Vec<u8>, String> {
     );
     let mut images = Mapping::new();
     images.insert("location".into(), Yaml::from(image));
+    // Supply chain: the image must match the recorded sha256 from
+    // cloud-images.ubuntu.com/releases/24.04/release/SHA256SUMS — Lima
+    // refuses a substituted download (parity with the QEMU backend,
+    // which verifies against SHA256SUMS itself).
+    images.insert(
+        "digest".into(),
+        Yaml::from("sha256:50e24e1fb79e89116e939d90aa7738f7af48c442fa1bc2510131e0b39c50348e"),
+    );
     images.insert("arch".into(), Yaml::from(arch));
 
     let mut mount = Mapping::new();
