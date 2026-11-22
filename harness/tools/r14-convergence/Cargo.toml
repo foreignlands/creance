@@ -11,7 +11,7 @@ publish = false
 # 不可导入，镜像逐字符拷贝自 6155c1f 的 main.rs（头部注明基线）。
 
 [dependencies]
-creance = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance" }
-creance-vm = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-vm" }
+creance = { path = "../../../crates/creance" }
+creance-vm = { path = "../../../crates/creance-vm" }
 
 [workspace]

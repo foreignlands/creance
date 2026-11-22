@@ -25,14 +25,14 @@ fn main() {
     std::fs::write(format!("{out_dir}/real-byte-exact.sh"), &script)
         .expect("write real-byte-exact.sh");
 
-    // 2) 可执行变体：仅把 /etc/… 绝对目标重写进 rootfs（macOS 宿主上 /etc
-    //    不可写，且 set -e 会在 cage-env.sh 重定向处极早中止）。五处重写，
+    // 2) 可执行变体：仅把 /etc/… 绝对目标重写进 rootfs（宿主 /etc
+    //    不可写，且裸跑会在第一个重定向处中止）。六类路径重写，
     //    工具链段（sh -c '…'）字节不动。
     let rootfs = format!("{out_dir}/rootfs");
     let exe = script
         .replace(
-            "/etc/profile.d/cage-env.sh",
-            &format!("{rootfs}/etc/profile.d/cage-env.sh"),
+            "/etc/profile.d/session-env.sh",
+            &format!("{rootfs}/etc/profile.d/session-env.sh"),
         )
         .replace(
             "/etc/sysctl.d/99-creance-noipv6.conf",
@@ -43,8 +43,8 @@ fn main() {
             &format!("{rootfs}/etc/iptables/rules.v4"),
         )
         .replace(
-            "/etc/iptables.up.rules",
-            &format!("{rootfs}/etc/iptables.up.rules"),
+            "/etc/systemd/system/egress-lock.service",
+            &format!("{rootfs}/etc/systemd/system/egress-lock.service"),
         )
         .replace(
             "/etc/sudoers.d/90-cloud-init-users",

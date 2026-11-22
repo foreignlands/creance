@@ -15,7 +15,7 @@ agent（ZCode 新会话 / 任何能跑 shell 的 agent CLI），工作目录指�
 | 路径 | 作用 |
 |---|---|
 | `OPERATOR-PROMPT.md` | 审查员提示词（角色、循环、压缩、记录协议） |
-| `attack-surfaces.md` | 攻击面地图：20 个测试方向 × 入口代码位置 |
+| `attack-surfaces.md` | 攻击面地图：45 个测试方向 × 入口代码位置 |
 | `findings/` | 发现记录（`NNN-slug.md`，索引在 `INDEX.md`） |
 | `tools/` | agent 被允许创建的测试工具/复现脚本（唯一可写代码区） |
 | `state/STATE.md` | 上下文压缩文件：跨会话续跑的单一事实源 |

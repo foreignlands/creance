@@ -4,7 +4,7 @@
 # burst -> sample invariants -> drain close. Anomalies -> /tmp/r4-c3-anomalies.log
 set -u
 PROFILE="$1"; ROUNDS="${2:-10}"
-CREANCE=/Users/shenyiyu/Documents/zcode/claude-cage-rs/target/release/creance
+CREANCE=${CREANCE_BIN:-$(cd "$(dirname "$0")/../../.." && pwd)/target/release/creance}
 LIMADIR="$PROFILE/state/lima"
 INST=$(ls "$LIMADIR" | grep -v '^_' | head -1)
 RECORD="$LIMADIR/$INST/cage-gate.json"

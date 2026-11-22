@@ -15,10 +15,10 @@ publish = false
 # ff286a6 引入）：外部 path-dep 的继承解析会撞上它并拼出 crates/crates/ 双倍路径，
 # 因此这里 path-dep 指向 /tmp 快照副本（副本内已删幽灵清单）。快照=当前 HEAD 源码，
 # 与仓库可能有漂移——仅用于行为观测，头部注明快照基线。
-creance = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance" }
-creance-gate = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-gate" }
-creance-proxy = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-proxy" }
-creance-vm = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-vm" }
+creance = { path = "../../../crates/creance" }
+creance-gate = { path = "../../../crates/creance-gate" }
+creance-proxy = { path = "../../../crates/creance-proxy" }
+creance-vm = { path = "../../../crates/creance-vm" }
 serde_json = "1"
 
 [workspace]

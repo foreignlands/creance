@@ -358,6 +358,10 @@ fn cmd_escape_test() -> i32 {
     let instance = instance();
     if std::path::Path::new(&creance_vm::vm::instance_marker(&profile, &instance)).exists() {
         let flag = format!("{}.escape-flag", creance_vm::vm::environment_dir(&profile));
+        // The flag is the oracle: it must exist on the host for the guest
+        // probe to have anything to look for. Without it fs-flag-readable
+        // was a vacuous PASS (F-068).
+        let flag_placed = std::fs::write(&flag, b"creance-escape-oracle\n").is_ok();
         let store = creance_proxy::load(&profile).ok();
         let guest = creance_vm::guestprofile::Profile::load_or_create(&profile).ok();
         let script = escape::guest_script(
@@ -412,6 +416,13 @@ fn cmd_escape_test() -> i32 {
                 }
             }
             Err(e) => eprintln!("cannot run in-guest probes: {e}"),
+        }
+        if flag_placed {
+            let _ = std::fs::remove_file(&flag);
+        } else {
+            // No oracle, no verdict: the fs probe answered against a
+            // missing flag, which is not evidence of containment.
+            println!("PROBE fs-flag-readable SKIP — oracle flag 未能落盘");
         }
     }
     code

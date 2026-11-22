@@ -3,7 +3,10 @@
 //! Lima delivers it through its `provision:` array; the QEMU backend packs
 //! the same text into the cloud-init seed's `runcmd`. One script, one
 //! contract: fingerprint supply first, best-effort toolchain second, and
-//! the containment lockdown LAST — the section that must never be skipped.
+//! the containment lockdown's runtime apply LAST — the section that must
+//! never be skipped — while its persistence artifacts (rules file,
+//! sysctl drop-in, boot unit) land before the toolchain leg so an
+//! interrupted provision still converges to a contained guest next boot.
 
 /// The Ubuntu LTS release every fresh environment installs.
 pub const UBUNTU_RELEASE: &str = "24.04";
@@ -37,6 +40,62 @@ SESSENV
 export DEBIAN_FRONTEND=noninteractive
 locale-gen {locale} >/dev/null 2>&1 || true
 update-locale LANG={locale} >/dev/null 2>&1 || true
+# 0.3a LOCKDOWN PERSISTENCE — the durable layer lands BEFORE the
+# network-dependent toolchain leg. iptables state lives in kernel RAM
+# (F-059), and a script killed mid-provision leaves nothing behind to
+# replay: runcmd is per-instance on cloud-init, so an interrupted first
+# boot used to mean the lockdown section below never ran AND never
+# re-ran — the guest stayed wide open behind a "done" status while
+# every later `up` refused it. With the ruleset, the no-IPv6 drop-in and
+# the boot-replay unit already on disk+enabled at this point, any later
+# boot restores DROP before the network is up: an interrupted provision
+# degrades to a contained guest, never an open one. The RUNTIME
+# application still comes last, after the toolchain leg — provisioning
+# needs the open NAT (F-054 bounds that window).
+sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null
+printf 'net.ipv6.conf.all.disable_ipv6=1\n' > /etc/sysctl.d/99-creance-noipv6.conf
+mkdir -p /etc/iptables
+# F-060: the DHCP and ICMP allowances exist for the virtual NAT gateway
+# (lease renewal, path-MTU signals). Scoped to the NAT subnets — slirp's
+# 10.0.2.0/24, Lima usernet's 192.168.5.0/24, plus DHCP broadcast — so
+# neither can carry traffic to a real destination. This file is the single
+# source of truth: the boot unit restores it verbatim and the runtime
+# apply below replays the same file (no second copy to drift).
+cat > /etc/iptables/rules.v4 <<'EGRESSRULES'
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT DROP [0:0]
+-A OUTPUT -o lo -j ACCEPT
+-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A OUTPUT -p udp --dport 67 -d 10.0.2.0/24 -j ACCEPT
+-A OUTPUT -p udp --dport 67 -d 192.168.5.0/24 -j ACCEPT
+-A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT
+-A OUTPUT -p icmp -d 10.0.2.0/24 -j ACCEPT
+-A OUTPUT -p icmp -d 192.168.5.0/24 -j ACCEPT
+COMMIT
+EGRESSRULES
+# The boot replay: restore the ruleset before the network is up, so no
+# boot window exists with an open egress. Neutral name — the unit list
+# is guest-visible.
+cat > /etc/systemd/system/egress-lock.service <<'LOCKUNIT'
+[Unit]
+Description=Network egress policy
+DefaultDependencies=no
+After=systemd-modules-load.service
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/iptables-restore /etc/iptables/rules.v4
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+LOCKUNIT
+systemctl daemon-reload
+systemctl enable egress-lock.service >/dev/null
 # Toolchain installs are best-effort (F-031) AND time-bounded (F-054):
 # `|| true` guards against failure, but a network BLACKHOLE neither
 # fails nor succeeds — the provisioner's own timeout then killed the
@@ -87,59 +146,16 @@ timeout "$TOOLCHAIN_BUDGET" sh -c '
   echo "toolchain end node=$(/usr/local/bin/node -v 2>/dev/null || command -v node || echo missing) claude=$(command -v claude || echo missing)" >> /var/log/creance-toolchain.log
 ' || true
 
-# 0.3 TOPOLOGY LOCKDOWN — the guest's only wire out is the ssh -R tunnel to
-# the host-side core on this machine's own loopback (managed from the host
-# after boot). Everything else, including DNS and IPv6, is dropped.
-#
-# F-059: iptables state lives in kernel RAM. A reboot (host stop->up is the
-# daily cycle) used to hand back a wide-open guest behind a green exit:
-# runcmd is per-instance on cloud-init and nothing replayed the rules. Two
-# durable layers now hold the line — the rules file, and a boot-time unit
-# that restores it before the network comes up — making the lockdown an
-# instance property instead of a first-boot event. (`up` additionally
-# verifies behaviorally; see main.rs.)
-#
-# F-060: the DHCP and ICMP allowances exist for the virtual NAT gateway
-# (lease renewal, path-MTU signals). Scoped to the NAT subnets — slirp's
-# 10.0.2.0/24, Lima usernet's 192.168.5.0/24, plus DHCP broadcast — so
-# neither can carry traffic to a real destination. Subnet-scoped rather
-# than a guessed gateway IP.
-sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null
-printf 'net.ipv6.conf.all.disable_ipv6=1\n' > /etc/sysctl.d/99-creance-noipv6.conf
-# Idempotent add: Lima replays boot scripts on every start; -C||-A keeps
-# the replay from stacking duplicate rules.
-addrule() {{ iptables -C OUTPUT "$@" 2>/dev/null || iptables -A OUTPUT "$@"; }}
-addrule -o lo -j ACCEPT
-addrule -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-addrule -p udp --dport 67 -d 10.0.2.0/24 -j ACCEPT
-addrule -p udp --dport 67 -d 192.168.5.0/24 -j ACCEPT
-addrule -p udp --dport 67 -d 255.255.255.255 -j ACCEPT
-addrule -p icmp -d 10.0.2.0/24 -j ACCEPT
-addrule -p icmp -d 192.168.5.0/24 -j ACCEPT
-iptables -P OUTPUT DROP
-mkdir -p /etc/iptables
-iptables-save > /etc/iptables/rules.v4
-# The boot replay: restore the saved set before the network is up, so no
-# boot window exists with an open egress. Neutral name — the unit list is
-# guest-visible.
-cat > /etc/systemd/system/egress-lock.service <<'LOCKUNIT'
-[Unit]
-Description=Network egress policy
-DefaultDependencies=no
-After=systemd-modules-load.service
-Before=network-pre.target
-Wants=network-pre.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/sbin/iptables-restore /etc/iptables/rules.v4
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-LOCKUNIT
-systemctl daemon-reload
-systemctl enable egress-lock.service >/dev/null
+# 0.3b TOPOLOGY LOCKDOWN — runtime apply, LAST and unskippable: the
+# guest's only wire out is the ssh -R tunnel to the host-side core on
+# this machine's own loopback (managed from the host after boot).
+# Everything else, including DNS and IPv6, is dropped. The ruleset comes
+# from the file written above — the same bytes the boot unit replays —
+# so the applied set and the persisted set cannot drift. Lima replays
+# this script on every start and cloud-init runs it once; restore is
+# idempotent either way. (`up` additionally verifies behaviorally; see
+# main.rs.)
+/usr/sbin/iptables-restore < /etc/iptables/rules.v4
 
 # 020 PRIVILEGE RETIREMENT — cloud-init unconditionally grants the guest
 # user sudo (NOPASSWD, or a random password parked in ~/password when
@@ -198,11 +214,23 @@ mod tests {
         }
         assert!(s.contains("-p icmp -d 10.0.2.0/24 -j ACCEPT"));
         assert!(s.contains("-p udp --dport 67 -d 192.168.5.0/24 -j ACCEPT"));
-        // Replayed adds are idempotent — Lima re-runs boot scripts every
-        // start; duplicate stacking would be cosmetic rot at best.
+        // The persisted ruleset is the single source of truth: the same
+        // file the boot unit restores is what the runtime apply replays —
+        // no iptables-save capture (Lima's guestagent NAT used to leak
+        // LIMADNS into rules.v4 that way), no second copy to drift.
         assert!(
-            s.contains("iptables -C OUTPUT"),
-            "rule adds check-before-append"
+            s.contains("cat > /etc/iptables/rules.v4"),
+            "the ruleset is persisted to disk before the toolchain leg"
+        );
+        assert!(
+            s.contains("iptables-restore < /etc/iptables/rules.v4"),
+            "the runtime apply replays the persisted file verbatim"
+        );
+        // Restore replaces the whole table — idempotent under Lima's
+        // every-boot replay and cloud-init's once-run alike.
+        assert!(
+            !s.contains("iptables-save"),
+            "no capture-based persistence (LIMADNS contamination)"
         );
     }
 
@@ -210,13 +238,29 @@ mod tests {
     fn lockdown_leg_is_last_and_unskippable() {
         let s = script();
         let toolchain = s.find("TOOLCHAIN_BUDGET").expect("toolchain leg");
-        let lockdown = s.find("iptables -P OUTPUT DROP").expect("lockdown leg");
+        let lockdown = s
+            .find("iptables-restore < /etc/iptables/rules.v4")
+            .expect("runtime lockdown apply");
         assert!(
             toolchain < lockdown,
             "the contract section must come after the tolerant toolchain leg"
         );
+        // The persistence artifacts land BEFORE the toolchain leg — an
+        // interrupted provision still converges to a contained guest.
+        let persist = s.find("/etc/iptables/rules.v4").expect("rules file");
+        assert!(
+            persist < toolchain,
+            "rules.v4 must be written before the network-dependent leg"
+        );
+        let enable = s
+            .find("systemctl enable egress-lock.service")
+            .expect("unit enable");
+        assert!(
+            enable < toolchain,
+            "the boot-replay unit must be enabled before the toolchain leg"
+        );
         // No `|| true` on the policy flip itself — it must land or fail loud.
-        let flip = s.find("iptables -P OUTPUT DROP").unwrap();
+        let flip = s.find("iptables-restore < /etc/iptables/rules.v4").unwrap();
         let rest = &s[flip..];
         let line_end = rest.find('\n').unwrap();
         assert!(!rest[..line_end].contains("|| true"));

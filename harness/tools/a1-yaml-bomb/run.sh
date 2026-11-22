@@ -5,8 +5,10 @@
 # payload 放 mktemp 临时目录，跑完即删。
 set -u
 cd "$(dirname "$0")"
-ROOT=/Users/shenyiyu/Documents/zcode/claude-cage-rs
-export RUSTUP_HOME=$ROOT/.toolchain/rustup CARGO_HOME=$ROOT/.toolchain/cargo PATH=$ROOT/.toolchain/cargo/bin:$PATH
+ROOT=${CREANCE_REPO:-$(cd ../../.. && pwd)}
+if [ -d "$ROOT/.toolchain/cargo/bin" ]; then
+  export RUSTUP_HOME=$ROOT/.toolchain/rustup CARGO_HOME=$ROOT/.toolchain/cargo PATH=$ROOT/.toolchain/cargo/bin:$PATH
+fi
 cargo build --release --quiet 2>&1 | head -3
 BIN=target/release/a1-yaml-bomb
 

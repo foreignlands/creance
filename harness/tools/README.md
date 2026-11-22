@@ -6,10 +6,9 @@ cargo 小工程。**都是历史工件**：它们冻结在各自轮次的目标�
 
 维护裁定（AUDIT-2026-11-21 待审 #10–#12，2026-11-21 拍板）：
 
-- **个人路径依赖（#10，缓修）**：部分工具的 `Cargo.toml` 以绝对
-  路径依赖原作者机器上的 crate（`/Users/shenyiyu/...`）。在别的
-  checkout 上编不了属于已知状态；需要复跑某探针时，把 path 指向
-  本 checkout 的 `crates/` 即可。
+- **个人路径依赖（#10，已修 2026-11-22）**：所有工具的 `Cargo.toml`
+  已改为相对路径（`../../../crates/…`），shell 驱动里的绝对路径已
+  参数化为 `CREANCE_REPO`/`CREANCE_BIN`（默认按脚本位置推导）。
 - **平台限定（#11）**：`r11-regression`、`r9-regression`、
   `r8-regression`、`r7-sync-matrix`、`r5-race-probe` 调
   `vm::lima_home`（v0.6 起 macOS-only）——Linux 上编不过，属预期。

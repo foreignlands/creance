@@ -14,7 +14,7 @@ publish = false
 #   <out-dir>/segment-real.txt     工具链段（timeout … ' || true'），供与 r11 探针对 diff
 
 [dependencies]
-creance-vm = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-vm" }
+creance-vm = { path = "../../../crates/creance-vm" }
 serde_yaml = "0.9"
 
 [workspace]

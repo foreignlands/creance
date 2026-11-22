@@ -19,10 +19,10 @@ publish = false
 #      自述足以通过对账；负对照：mode=direct 自述被拒（修复对已记录攻击有效）。
 
 [dependencies]
-creance = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance" }
-creance-gate = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-gate" }
-creance-proxy = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-proxy" }
-creance-vm = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance-vm" }
+creance = { path = "../../../crates/creance" }
+creance-gate = { path = "../../../crates/creance-gate" }
+creance-proxy = { path = "../../../crates/creance-proxy" }
+creance-vm = { path = "../../../crates/creance-vm" }
 serde_json = "1"
 
 [workspace]

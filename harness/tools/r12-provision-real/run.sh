@@ -3,30 +3,34 @@
 # 判据：
 #   P1 real-exec.sh   → URL 架构段非空（linux-arm64/linux-x64）→ F-055 修复面成立
 #   P2 oldbug-exec.sh → URL 架构段为空 → 负控（探针具鉴别力）
-#   P3a real-exec 与 byte-exact 差异仅 /etc 路径重写（4 行 = 8 diff 行；
-#       rules.v4 与 up.rules 共享一行）
+#   P3a real-exec 与 byte-exact 差异仅 /etc 路径重写（6 行 = 12 diff 行；
+#       rules.v4 出现两次：persist + runtime restore）
 #   P3b 工具链段与 r11 探针 heredoc 等价（允许差异：lima.rs 原文含
 #       F-034 两行注释，r11 复刻不含——语义中性）
 set -u
-REPO=/Users/shenyiyu/Documents/zcode/claude-cage-rs
-HERE=$REPO/harness/tools/r12-provision-real
-export RUSTUP_HOME=$REPO/.toolchain/rustup CARGO_HOME=$REPO/.toolchain/cargo
-PATH=$REPO/.toolchain/cargo/bin:$PATH
-export PATH
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+REPO=${CREANCE_REPO:-$(CDPATH= cd -- "$HERE/../../.." && pwd)}
+# Repo-local toolchain wins when present (macOS dev layout); otherwise the
+# ambient cargo/rustup on PATH is used (Linux CI boxes).
+if [ -d "$REPO/.toolchain/cargo/bin" ]; then
+  export RUSTUP_HOME=$REPO/.toolchain/rustup CARGO_HOME=$REPO/.toolchain/cargo
+  PATH=$REPO/.toolchain/cargo/bin:$PATH
+  export PATH
+fi
 
 STAGE=$(mktemp -d /tmp/r12-f055-real.XXXXXX)
 trap 'rm -rf "$STAGE"' EXIT
 cargo run --release --quiet --manifest-path "$HERE/Cargo.toml" -- "$STAGE" > /dev/null || exit 2
 
 # rootfs 目录树（/etc 重写落点）
-for d in etc/profile.d etc/sysctl.d etc/iptables etc/sudoers.d; do
+for d in etc/profile.d etc/sysctl.d etc/iptables etc/sudoers.d etc/systemd/system; do
   mkdir -p "$STAGE/rootfs/$d"
 done
 
 # stub 集：脚本里所有外部命令；sh → dash（Ubuntu /bin/sh 语义）
 FB=$STAGE/fakebin
 mkdir -p "$FB"
-for t in hostnamectl locale-gen update-locale apt-get timeout curl mv chmod bash sysctl iptables iptables-save passwd getent; do
+for t in hostnamectl locale-gen update-locale apt-get timeout curl mv chmod bash sysctl iptables iptables-restore systemctl passwd getent; do
   printf '#!/bin/sh\nexit 0\n' > "$FB/$t"
 done
 cat > "$FB/curl" <<'EOF'
@@ -90,8 +94,8 @@ esac
 echo "=== P3a: byte-exact vs exec diff"
 diff "$STAGE/real-byte-exact.sh" "$STAGE/real-exec.sh" > "$STAGE/exe.diff" || true
 DIFFC=$(grep -c '^[<>]' "$STAGE/exe.diff")
-echo "diff lines: $DIFFC (expect 8: /etc rewrites touch 4 lines, rules.v4+up.rules share one)"
-[ "$DIFFC" -eq 8 ] || { echo "P3a FAIL"; RC=1; }
+echo "diff lines: $DIFFC (expect 12: /etc rewrites touch 6 lines, rules.v4 appears twice)"
+[ "$DIFFC" -eq 12 ] || { echo "P3a FAIL"; RC=1; }
 echo "--- diff record:"
 cat "$STAGE/exe.diff"
 

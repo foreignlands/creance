@@ -108,7 +108,7 @@ mod tests {
         assert!(ud.contains("lock_passwd: true"));
         assert!(ud.contains("- ssh-ed25519 AAAA test"));
         // The shared bootstrap rides in runcmd, lockdown included.
-        assert!(ud.contains("iptables -P OUTPUT DROP"));
+        assert!(ud.contains("iptables-restore < /etc/iptables/rules.v4"));
         assert!(ud.contains("CREANCE_SESSION_TOKEN="));
         // 9p mount leg present, tagged, fstab-persisted.
         assert!(ud.contains("mount -t 9p"));
@@ -133,7 +133,7 @@ mod tests {
         assert_eq!(runcmd.len(), 2);
         let first = runcmd[0][2].as_str().unwrap();
         let second = runcmd[1][2].as_str().unwrap();
-        assert!(first.contains("iptables -P OUTPUT DROP"));
+        assert!(first.contains("iptables-restore < /etc/iptables/rules.v4"));
         assert!(second.contains("mount -t 9p"));
         assert!(!second.contains("iptables"));
     }

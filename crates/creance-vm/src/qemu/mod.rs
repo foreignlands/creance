@@ -165,14 +165,85 @@ pub fn up(profile: &str, instance: &str) -> i32 {
     // First boots download nothing (image is pre-seeded) but cloud-init
     // still takes minutes; later boots answer in seconds.
     match runner::wait_ssh(&target, &pid_file, std::time::Duration::from_secs(600)) {
-        Ok(()) => 0,
+        Ok(()) => {}
         Err(e) => {
             eprintln!("{e}");
             // Never leave a half-booted qemu behind a failed up — the
             // next up would lose the hostfwd bind race to this corpse.
             let _ = runner::stop(&dir);
+            return 1;
+        }
+    }
+    // sshd answers long before first-boot provisioning lands: the runcmd
+    // leg (bounded toolchain download, then the egress lockdown) can take
+    // minutes while the guest's egress is still open. Lima's `start`
+    // waits for cloud-init before returning; parity demands the QEMU
+    // backend do the same — otherwise the caller's egress probe fires
+    // inside the provisioning window and kills a healthy first boot.
+    // The behavioral egress check afterwards still judges the outcome.
+    match wait_cloud_init(
+        profile,
+        instance,
+        &pid_file,
+        std::time::Duration::from_secs(600),
+    ) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("{e}");
+            let _ = runner::stop(&dir);
             1
         }
+    }
+}
+
+/// Polls `cloud-init status` in the guest until it reports a terminal
+/// state. Terminal does NOT mean healthy — the caller's egress probe
+/// remains the authority; this only keeps that probe out of the
+/// provisioning window.
+///
+/// Terminal = `done`/`degraded` (success or partial failure — the probe
+/// judges the outcome) and `error`/`disabled` (provision failed — the
+/// probe still judges, but we stop waiting). Everything else keeps
+/// polling: sshd answers while cloud-init is still early, when the
+/// status file does not exist yet and the command exits non-zero —
+/// reading that as "no cloud-init" once let the egress probe fire one
+/// second into modules-final and brick a healthy first boot.
+fn wait_cloud_init(
+    profile: &str,
+    instance: &str,
+    pid_file: &str,
+    budget: std::time::Duration,
+) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + budget;
+    loop {
+        if !pidfile::alive(pid_file) {
+            return Err(
+                "qemu 进程已退出（hostfwd 端口被占用或启动即败）；请查看实例目录 serial.log"
+                    .to_owned(),
+            );
+        }
+        if let Ok(out) = vm::guest_script(
+            profile,
+            instance,
+            "cloud-init status 2>/dev/null || echo 'status: pending'",
+        ) {
+            if out.contains("status: error") || out.contains("status: disabled") {
+                return Err(format!(
+                    "cloud-init 供给失败（{}）；请查看实例目录 serial.log",
+                    out.lines().next().unwrap_or("status: error").trim()
+                ));
+            }
+            if out.contains("status: done") || out.contains("status: degraded") {
+                return Ok(());
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(
+                "cloud-init 未在预算内完成供给（首次启动需下载工具链）；请查看实例目录 serial.log"
+                    .to_owned(),
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_secs(5));
     }
 }
 

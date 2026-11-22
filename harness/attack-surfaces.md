@@ -75,9 +75,7 @@
 | G3 | gate*.go vs gate.rs 状态迁移与租期 | 已穷尽：Grant 五重判定（Checking/epoch/CheckID/时间戳/Authorizes 签名）vs Rust 单查 authorizes → F-008；lease 90s 值一致；fault 条件一致；RunID 绑定 night-08 已落 ✓；**Configuration 绑定+Renew 重授权+24h 硬顶+预铸下界仍缺 → R7 设计审查文档 harness/go-authz-alignment.md（对齐面待重排 0.7/0.8，0.6 被 Linux 移植占用）** |
 | G4 | store.go vs store.rs Route/Import 语义 | 已覆盖：route() 的 chain/环/缺失判定一致（C2 矩阵 15 变体全对）；Import 的 refresh 保留语义有 repo 测试；**R7 select 语义对照：Go applyProxy 每次 select/restart/route 同步 closeProxyGate（proxy.go:334），Rust select_and_apply 不触碰 gate → FINDING-043 S5**（night-09 两入口已同步撤 gate）。**R8 收尾抽查 → FINDING-047 S5**：close 失败分支 Go 事务性（中止+defer 回滚）vs Rust 先落地后 `let _` 吞错（窗口 ≤90s lease 有界+再 open 被 selection 对账拒）；Go validateProxyCore 在 select 前拒坏节点、Rust 延迟到 proxy-start（fail-closed UX 漂移，不立案）；route/链式切换无 Rust 缺口（workbench 无独立 route 动作，select 覆盖）；Go store.go 其余（Import 校验/unsafeOption/Runtime 生成）逐行结论与 G2/F3 一致 |
 
-## H. Linux QEMU 后端（v0.6.0 新面，全部未覆盖——下轮夜间审计的主攻区）
-
-> R18 注：本标题"全部未覆盖"已陈旧——H1-H7 自 R13 起逐条覆盖（见各行状态列）；记 F-070，措辞清理留下一轮。
+## H. Linux QEMU 后端（v0.6.0 新面——R13 静态已全覆盖，实机回填项见各条目"待 Linux 实机"标记）
 
 条目按"guest 视角可达性"排序：guest 真正够得着的面优先于同 uid 自伤面。
 
@@ -90,8 +88,6 @@
 | H5 | /proc starttime 令牌：stat_starttime 按"最后一个右括号"切分（comm 含括号/空格有测试）；hidepid 下 token="" 时 pidfile 守卫退化语义（空 token 恒过还是恒拒？）；PID 复用窗口在 Linux 侧的实际宽度 | creance-vm/src/pidfile.rs `process_start_token`(linux) | 已覆盖（R13 静态）：空 token 记录走 legacy pid-only 语义（注释明示），读失败对自家进程不 fail——方向为保守；升级杀路径要求 `!entry.started.is_empty() && token==started` → hidepid 下拒绝 SIGKILL=恒拒（fail-closed ✓）；PID 复用被 token 封死——已排除 |
 | H6 | 进程内核心监督（Linux 侧 service.rs）：relay 分离进程组+env_clear 后靠 pidfile（记的是 relay 的 pid）+控制 socket 活性双判；孤儿收割 `reap_orphan_cores` 的签名匹配（`<dir>/mihomo -d <dir>`）与 ppid==1 判定的误杀/漏杀面（2026-11-21 新代码，理应被审） | creance-proxy/src/service.rs `launch_supervised`/`stop_local`/`reap_orphan_cores` | 已覆盖（R13 实机+静态）：签名 ERE → **F-056 S4**（四场景实锤：漏杀/跨目录误杀/regcomp 静默吞）；ppid==1 → **F-057 S4**（systemd subreaper 恒假，Linux 主战场失效）；裸 pid 无 token TOCTOU 记档（F-056 未验证想法节）；launch_supervised/stop_local 的 token 纪律本体 ✓ |
 | H7 | 镜像供给链：ensure_base_image 从 cloud-images.ubuntu.com 拉 img+SHA256SUMS 校验——SUMS 文件本身的来源信任（同 HTTPS 通道）、部分下载残尸的原子性、release_dir 拼写的路径注入 | qemu/image.rs `ensure_base_image`/`parse_sum`/`fetch` | 已覆盖（R13 静态）：**F-061 S4**（SUMS 同通道取回、.gpg 不拉不验、"signed-by-construction" 注释名不符实；对照 fetch-proxy-core 仓库自录哈希=更强信任根）；残尸原子性 ✓（.part 中转+失败即删+两段 rename）；parse_sum 单字段行整体拒绝=fail-closed ✓；缓存镜像永不复验=自伤面记档 |
-
-> 状态由审查员更新（本文件是 harness 中唯一允许审查员写的非 findings 文件）。
 
 > 状态由审查员更新（本文件是 harness 中唯一允许审查员写的非 findings 文件）。
 

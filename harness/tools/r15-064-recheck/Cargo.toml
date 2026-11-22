@@ -13,6 +13,6 @@ publish = false
 # （与 r14-convergence 同一镜像，头部注明基线以延续 F-033 教训的边界）。
 
 [dependencies]
-creance = { path = "/Users/shenyiyu/Documents/zcode/claude-cage-rs/crates/creance" }
+creance = { path = "../../../crates/creance" }
 
 [workspace]

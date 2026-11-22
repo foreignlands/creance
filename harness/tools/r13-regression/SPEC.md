@@ -1,4 +1,4 @@
-# r13-regression — R13 产出：Ubuntu 侧实机探针规格（全部待 Linux 实机）
+# r13-regression — R13 产出：Ubuntu 侧实机探针规格（U1-U5 已实机回填 2026-11-22，结果见各条"实测"）
 
 本文件只写规格，不写实现（本机 macOS 编不了 Linux-gated 代码）。每条探针给
 出：前置、精确命令、期望、实际判定、对应 finding。判绿纪律：`cmd > log 2>&1; RC=$?`
@@ -35,6 +35,14 @@ creance shell bash -c 'grep -c iptables /var/log/cloud-init-output.log'
 netfilter-persistent 包安装 + `netfilter-persistent reload`；或 cloud-init
 `bootcmd`（每 boot 重放）写规则；或 up() 对存量实例做 OUTPUT 策略验证。
 
+**实测（2026-11-22 Linux，v0.6.10 修复后）**：已验证修复生效——
+`SIGKILL qemu`（模拟崩溃）→ `creance up` → "Environment is up"（F-059
+行为探针绿）。落地形态与建议的选项不同但更轻：`egress-lock.service`
+（Before=network-pre.target）+ 静态 `/etc/iptables/rules.v4` 单源，无需
+netfilter-persistent 包（guest 内实测 NO-RESTORE-PKG）。顺带产出
+F-071/F-072 两个 S2（up 只等 sshd 探针在供给窗口内开火；被打断的
+runcmd 永不重跑），均随本批修复。
+
 ## U2 — F-060：后 lockdown 出网通道（ICMP 载荷 / UDP dport 67）
 
 **假设**：lockdown 四条 ALLOW 里 `-p icmp` 与 `-p udp --dport 67` 均无
@@ -55,6 +63,11 @@ creance shell bash -c 'echo marker-u2b | nc -u -w 2 93.184.216.34 67 > /tmp/u2b.
 **判定**：任一通道出站可见 → F-060 成立。修复方向：`-p udp --dport 67` 加
 `-d 10.0.2.2/32`（或 255.255.255.255）；icmp 限 `-d 10.0.2.2/32 --icmp-type echo`
 或直接删（若供给期 DHCP 用不到 guest 侧 ping）。
+
+**实测（2026-11-22 Linux，v0.6.10 修复后）**：外部 ICMP `ping -w2 8.8.8.8`
+→ 100% loss；外部 UDP/67 `cat > /dev/udp/93.184.216.34/67` → EPERM（OUTPUT
+拦截）；同网段 DHCP 目的大地（10.0.2.2 ping）可达。ALLOW 已按目的限定到
+slirp/usernet 子网 + DHCP 广播——修复生效。
 
 ## U3 — F-057 验证：orphan core 在 systemd user session 下 ppid≠1
 
@@ -79,6 +92,13 @@ creance proxy-stop && ps -o pid,ppid -p <mihomo pid>   # 期望（洞成立）�
 修复方向：ppid 判定改为「parent 非 relay 且非本 creance 进程树」或比对
 `/proc/<pid>/stat` 的 ppid∈{1, systemd-user-pid}，或以控制 socket 活性为收割判据。
 
+**实测（2026-11-22 Linux，systemd 249 非 logind 工具会话）**：
+F-057 失败形态在本机**未复现**——本机测试会话非 logind user session
+子树（`systemd-run --user --scope` 下孤儿仍落 init），孤儿恒得
+PPID=1 → 收割网工作正常（与 finding 自身"形态摆动"未验证想法一致）。
+F-056 ERE 配套实机全绿：r13-orphan-probe 四场景（plain/`a+b`/`aab`/
+`paren(1`）自收割不误杀；r14-convergence/ere-matrix 14 元字符 4/4 批 PASS。
+
 ## U4 — GNU gunzip 尾部垃圾退出码（fetch-proxy-core override 路径，Linux 分支）
 
 ```bash
@@ -88,6 +108,9 @@ gunzip -c d.gz > o 2>e; RC=$?
 # 若 RC=0（旧 GNU 行为）→ override 路径带垃圾包仍可 mv 成功——影响仅 override（无哈希）路径，钉版路径哈希盖全文件不受影响
 ```
 
+**实测（2026-11-22，gzip 1.10）**：RC=2 + "decompression OK, trailing
+garbage ignored" → fail-closed 方向符合预期。
+
 ## U5 — 供给期窗口宽度量化（H1 分析配套，非独立 finding）
 
 ```bash
@@ -96,6 +119,11 @@ creance shell bash -c 'stat -c %Y /etc/iptables/rules.v4'     # lockdown 落地�
 # 对照：cloud-init 各阶段时间戳（/var/log/cloud-init-output.log 的 toolchain start/end）
 # 期望：窗口 ≈ toolchain 预算上限（300s）+ apt 实际耗时；期间 guest 可直达 10.0.2.2（宿主回环）与外网
 # 窗口内攻击面备忘：root 未退役 + NAT 全开 —— 敌意网络 MITM 可在窗口内植根（F-054 契约段只防"跳过"，不防"窗口内被攻破"）
+
+**实测（2026-11-22 Linux 首启）**：boot→modules-final done = 56.57s；
+rules.v4 持久层落于 ~15s，runtime restore 于 ~56s → 本次窗口 ≈41s
+（nodejs.org 直连可达时）；上界=TOOLCHAIN_BUDGET 300s。窗口语义同
+F-054：供给期开放是有界且记录的。
 ```
 
 ## 交叉引用

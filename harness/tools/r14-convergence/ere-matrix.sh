@@ -7,8 +7,8 @@
 # 平台边界：macOS/BSD regex；Linux glibc 的 `\]` 等转义接受度留 Ubuntu 回填。
 set -u
 ROOT=/tmp/r14-ere-matrix
-BIN=/Users/shenyiyu/Documents/zcode/claude-cage-rs/target/release/creance
 HERE="$(cd "$(dirname "$0")" && pwd)"
+BIN=${CREANCE_BIN:-$(cd "$HERE/../../.." && pwd)/target/release/creance}
 FAKE="$HERE/fakecore.c"
 
 setup_batch() { # $@ = 批内目录 tag
@@ -19,6 +19,8 @@ setup_batch() { # $@ = 批内目录 tag
     d="$ROOT/prof-$dn/proxy"
     mkdir -p "$d" || { echo "MKDIR_FAIL $dn"; exit 1; }
     cp "$ROOT/mihomo-bin" "$d/mihomo"
+    printf '{\n  "proxy_url": "socks5://127.0.0.1:17896",\n  "dns_url": "https://1.1.1.1/dns-query",\n  "timezone": "Etc/UTC",\n  "locale": "en_US.UTF-8",\n  "browser_language": "en-US"\n}\n' \
+      > "$ROOT/prof-$dn/config.json"
   done
 }
 

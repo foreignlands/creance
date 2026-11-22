@@ -7,7 +7,7 @@
 set -u
 ROOT=/tmp/r13-ere
 HERE="$(cd "$(dirname "$0")" && pwd)"
-BIN=/Users/shenyiyu/Documents/zcode/claude-cage-rs/target/release/creance
+BIN=${CREANCE_BIN:-$(cd "$HERE/../../.." && pwd)/target/release/creance}
 FAKE="$HERE/fakecore.c"
 
 setup() { # $1=场景名 $2=目录名

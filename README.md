@@ -62,7 +62,7 @@ existing `~/.claude-cage` profiles keep working).
 ## Night-audit harness
 
 [`harness/`](harness/README.md) — 把一个 LLM（GLM 5.3 Flash）变成整夜
-运转的对抗性审查员：循环协议、上下文压缩协议、findings 记录、20 项
+运转的对抗性审查员：循环协议、上下文压缩协议、findings 记录、45 项
 攻击面地图，以及把模型关进 VM 让它全力逃逸的红队任务书。
 
 ## Escape-test: the acceptance harness
