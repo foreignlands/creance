@@ -1,0 +1,30 @@
+guest: grep (GNU grep) 3.11; LANG=en_US.UTF-8 LC_ALL=unset; ssh-forwarded-locale: LANG=en_US.UTF-8
+P01 LANG=(env)    -> fw-armed
+P01 LANG=C.UTF-8  -> fw-armed
+grep: /tmp/tmp.73PMGY89kG/Z01: binary file matches
+Z01 LANG=(env)    -> fw-armed
+grep: /tmp/tmp.73PMGY89kG/Z01: binary file matches
+Z01 LANG=C.UTF-8  -> fw-armed
+grep: /tmp/tmp.73PMGY89kG/Z03: binary file matches
+Z03 LANG=(env)    -> fw-down
+grep: /tmp/tmp.73PMGY89kG/Z03: binary file matches
+Z03 LANG=C.UTF-8  -> fw-down
+O01 LANG=(env)    -> fw-armed
+O01 LANG=C.UTF-8  -> fw-armed
+O03 LANG=(env)    -> fw-armed
+O03 LANG=C.UTF-8  -> fw-armed
+grep: /tmp/tmp.73PMGY89kG/Z01: binary file matches
+--- Z01 grep view: lines-out=0 stderr=[]
+--- O01 file:
+    *filter
+    :INPUT ACCEPT [0:0]
+    :FORWARD ACCEPT [0:0]
+    COMMIT
+    :OUTPUT DROP [0:0]
+    -A OUTPUT -o lo -j ACCEPT
+    -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    -A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT
+    -A OUTPUT -p udp --dport 67 -d 10.0.2.2/32 -j ACCEPT
+    -A OUTPUT -p icmp -d 10.0.2.2/32 -j ACCEPT
+    -A OUTPUT -p udp --dport 67 -d 10.0.2.3/32 -j ACCEPT
+    -A OUTPUT -p icmp -d 10.0.2.3/32 -j ACCEPT

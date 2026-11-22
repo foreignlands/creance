@@ -1,0 +1,19 @@
+NC-MKuse: grep-c before=0 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+NC-SETMIX: grep-c before=0 after=1 crates=creance test-RC=0 failed=0 compile-err=0
+NC-MKmod: grep-c before=0 after=1 crates=creance test-RC=0 failed=0 compile-err=0
+NC-MKcfg: grep-c before=0 after=1 crates=creance test-RC=0 failed=0 compile-err=0
+NC-VERD: grep-c before=0 after=1 crates=creance test-RC=0 failed=0 compile-err=0
+NC-VMuse: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-WMparen: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-WMuse: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-MP4: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-UNIT1: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-UNIT2: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-STAMPdot: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+crates/creance/src/escape.rs: OK
+crates/creance/src/main.rs: OK
+crates/creance-vm/src/provision.rs: OK
+crates/creance-vm/src/qemu/mod.rs: OK
+crates/creance-vm/src/vm.rs: OK
+crates/creance-vm/src/lima.rs: OK
+done

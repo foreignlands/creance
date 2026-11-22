@@ -1,0 +1,9 @@
+binary: creance 0.6.17 md5=8811ad60
+init RC=0 (0s)
+setup RC=0 (28s)
+up1 RC=0 (79s)
+stop1 RC=0 (3s)
+up2 RC=0 (18s)
+escape2 RC=1 (0s)
+marker: ok
+-netdev user,id=net0,restrict=on,hostfwd=tcp:127.0.0.1:41523-:22

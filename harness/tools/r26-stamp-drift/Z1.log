@@ -1,0 +1,11 @@
+new md5=1be757fb orig md5=e13fe10a nul-bytes=1
+== Z1 offline edit rc=0 rule: -I OUTPUT -j ACCEPT
+== Z1 up (marker present) RC=1 netdev: 
+    guest 第一道防线（iptables 锁闭）未在武装状态——restrict=on 下的绿色直连判定不可信，按未验证拒绝交付，VM 已停止；请 creance stop 后 creance setup 重建环境。探针原始输出："tcp-blocked\nicmp-blocked\nfw-down\n"
+== Z1 in-guest (restrict=on), shipped probe + facts:
+    instance prof-downloads-634d999c is not running
+== escape-test RC=0 net/fw verdicts:
+== Z1 CONTROL up (marker absent) RC=1 netdev: 
+    guest 防火墙未生效（直连可达），VM 已停止；请 creance stop 后 creance setup 重建环境。探针原始输出："tcp-open\nicmp-open\nfw-down\n"
+== Z1 restored rc=0
+== marker restored: present
