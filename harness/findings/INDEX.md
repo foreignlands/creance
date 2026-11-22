@@ -3,6 +3,9 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 075 | S4 | F-072 中断收敛只收敛防火墙：QEMU 首启 runcmd 被打断后第二条 runcmd（9p 挂载+fstab）永不执行，cloud-init done/errors=[]，up 无 guest 挂载校验→全绿但 workspace 不共享（lab 实测：杀于 runcmd[0]，二启 runcmd 零执行、fstab 无 9p 行） | H1 / F-072 修复面 | 待修复 |
+| 074 | S5 | F-068 修复残留：旗标不可落盘时 guest 的空真 PASS 行照常回显再追加 SKIP（双判词，与 a601c6a "SKIP instead of vacuous PASS" 不符）；放置代码换成 true 后 cargo test RC=0（无行为守卫）；传输挂起被杀遗留 oracle（r19-flag-skip A/B/C） | E2 / F-068 修复面 | 待修复 |
+| 073 | S2 | rules.v4 单源化含两后端网段：QEMU/slirp 上 192.168.5.0/24（Lima usernet 网段）是可路由目的——非特权 guest 的 UDP/67 与带载荷 ICMP 实测从宿主 ens5 离开（10.0.2.77 对照零包、1.1.1.1 对照被拦）；Lima 上 10.0.2.0/24 对称推论；net-icmp-external 只测 1.1.1.1 失明 | H1 / F-060+F-072 修复面 | 待修复 |
 | 072 | S2 | 首启 runcmd 被打断 → status: done 永久撒谎 + guest 永久裸奔且每次 up 必拒；修复=持久层（rules.v4/noipv6/egress-lock.service enable）前置到工具链之前 + rules.v4 单源（iptables-save/LIMADNS 捕获路径一并移除） | H1 | 已修复（main-session，实机复验） |
 | 071 | S2 | QEMU 后端 up 只等 sshd 不等 cloud-init：F-059 探针在供给窗口内开火、健康首启必杀；wait_cloud_init 首版又把 status.json 未建立的非零退出误读为"无 cloud-init" 早放（serial.log 实证 modules-final 启动 1s 内被杀） | H1+H2 | 已修复（main-session，实机复验） |
 | 070 | S5 | harness 声明面计数/状态陈旧：README:65 与 harness/README:18 称攻击面地图"20 项/20 个测试方向"（实 45 条 A-H），attack-surfaces:78 H 节标题仍写"全部未覆盖"（H1-H7 全已覆盖），文件尾状态注记重复 | harness 文档 | 已修复（main-session） |

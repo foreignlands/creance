@@ -1,0 +1,10 @@
+[package]
+name = "r19-flag-skip"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+creance-vm = { path = "../../../crates/creance-vm" }
+
+[workspace]
