@@ -241,6 +241,12 @@ mod tests {
                 "foreign/subnet allow leaked: {foreign}"
             );
         }
+        // F-079: the pinned node toolchain is verified — the recorded
+        // sha256s and the `sha256sum -c` gate must stay in the script.
+        let s2 = script();
+        assert!(s2.contains("sha256sum -c -"), "{s2}");
+        assert!(s2.contains("9d942932535988091034dc94cc5f42b6dc8784d6366df3a36c4c9ccb3996f0c2"));
+        assert!(s2.contains("8cf30ff7250f9463b53c18f89c6c606dfda70378215b2c905d0a9a8b08bd45e0"));
         // The persisted ruleset is the single source of truth: the same
         // file the boot unit restores is what the runtime apply replays —
         // no iptables-save capture (Lima's guestagent NAT used to leak

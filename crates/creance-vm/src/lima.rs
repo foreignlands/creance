@@ -21,13 +21,16 @@ pub fn generate_lima_yaml(options: &SetupOptions) -> Result<Vec<u8>, String> {
     let arch = "aarch64";
     // Ubuntu's cloud image filenames use "arm64", not "aarch64".
     let image_arch = "arm64";
+    // F-080: a dated release dir is immutable — the rolling `release/`
+    // URL would invalidate the pinned digest on every Ubuntu refresh
+    // and fail every setup closed.
     let image = format!(
-        "https://cloud-images.ubuntu.com/releases/{UBUNTU_RELEASE}/release/ubuntu-{UBUNTU_RELEASE}-server-cloudimg-{image_arch}.img"
+        "https://cloud-images.ubuntu.com/releases/{UBUNTU_RELEASE}/release-20261017/ubuntu-{UBUNTU_RELEASE}-server-cloudimg-{image_arch}.img"
     );
     let mut images = Mapping::new();
     images.insert("location".into(), Yaml::from(image));
     // Supply chain: the image must match the recorded sha256 from
-    // cloud-images.ubuntu.com/releases/24.04/release/SHA256SUMS — Lima
+    // cloud-images.ubuntu.com/releases/24.04/release-20261017/SHA256SUMS — Lima
     // refuses a substituted download (parity with the QEMU backend,
     // which verifies against SHA256SUMS itself).
     images.insert(
@@ -270,6 +273,21 @@ mod tests {
         for foreign in ["192.168.5.0/24", "10.0.2."] {
             assert!(!yaml.contains(foreign), "leaked: {foreign}");
         }
+    }
+
+    #[test]
+    fn image_is_digest_pinned_to_a_dated_release() {
+        // F-079/F-080: the Lima image must stay pinned — dated dir +
+        // sha256 — or a rolling URL silently re-fetches whatever the
+        // mirror serves next.
+        let yaml = String::from_utf8(generate_lima_yaml(&options()).unwrap()).unwrap();
+        assert!(yaml.contains("release-20261017/"), "{yaml}");
+        assert!(
+            yaml.contains(
+                "sha256:50e24e1fb79e89116e939d90aa7738f7af48c442fa1bc2510131e0b39c50348e"
+            ),
+            "{yaml}"
+        );
     }
 
     #[test]

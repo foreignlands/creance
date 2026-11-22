@@ -3,6 +3,10 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 078 | S5 | F-076 修复残留：flag_placed 仍内联于 cmd_up 且其与 oracle_ready 的接线零守护 | H1 / F-074+076 修复面 | 已修复（main-session，实机复验） |
+| 079 | S5 | v0.6.12 新面零行为守护：strict_content_length 拒绝矩阵、gate 重复 CL→400、node sha256 钉值、Lima digest 钉值均无测试 | H1 / F-076 同类 | 已修复（main-session，实机复验） |
+| 080 | S4 | Lima digest 钉在滚动 release/ URL：下次 Ubuntu 刷新 digest 必失配，全部 setup 失败关闭 | H1 / a7ac0e3 修复面 | 已修复（main-session，实机复验） |
+| 081 | S4 | restrict=on 遮蔽第一道防线：guest iptables 失效时 up 守门与 escape 探针全绿；且 provisioned 标记在校验前写入 | H1 / 1ca32c8+F-077 修复面 | 已修复（main-session，实机复验） |
 | 077 | S5 | restrict=on 声明面漂移：qemu/mod.rs 称无条件生效、ROADMAP 列待办、runner 注释过时；供给会话无第二道防线且零提示 | H1 / 1ca32c8 | 已修复（main-session，实机复验） |
 | 076 | S5 | v0.6.11 修复面零行为守护：五例注入（删 restrict、/32 表互换、双判词回退等）cargo test 全绿 | H1 / F-073+F-074 修复面 | 已修复（main-session，实机复验） |
 | 075 | S4 | F-072 中断收敛只收敛防火墙：QEMU 首启 runcmd 被打断后 9p 挂载腿永不执行，up 全绿但 workspace 不共享 | H1 / F-072 修复面 | 已修复（main-session，实机复验） |

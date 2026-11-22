@@ -54,8 +54,10 @@ pub fn read_header_block<R: Read>(
 
 /// Splits a header block into the request/status line and the header
 /// fields as (name, value) pairs — names verbatim, values trimmed.
-/// Shared by the gate, the workbench, and tunnel readers so the
-/// per-field iteration lives in exactly one place.
+/// Shared by the gate and the workbench so the per-field iteration
+/// lives in exactly one place. (The egress tunnel keeps its own
+/// response-side parser — upstream servers get RFC-lenient treatment
+/// that request-facing readers must not extend.)
 pub fn parse_header_block(block: &[u8]) -> (String, Vec<(String, String)>) {
     let text = String::from_utf8_lossy(block);
     let mut lines = text.lines();
@@ -180,5 +182,41 @@ mod tests {
         // must error instead of passing as a 200 with an empty body.
         let wire = b"HTTP/1.1 200 OK\r\nX".as_slice();
         assert!(read_header_block(wire, 16 << 10).is_err());
+    }
+
+    #[test]
+    fn parse_splits_line_and_fields() {
+        let (first, fields) = parse_header_block(
+            b"POST /x HTTP/1.1\r\nHost: gate\r\nContent-Length: 2 \r\n\r\n{}".as_slice(),
+        );
+        assert_eq!(first, "POST /x HTTP/1.1");
+        assert_eq!(
+            fields,
+            vec![
+                ("Host".to_owned(), "gate".to_owned()),
+                ("Content-Length".to_owned(), "2".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn strict_content_length_refuses_ambiguity() {
+        // F-079/FINDING-006: absent and single-valid are fine; duplicated
+        // (even identical) and unparseable values are smuggling vectors.
+        let f = |v: &[(&str, &str)]| {
+            let fields: Vec<(String, String)> = v
+                .iter()
+                .map(|(k, val)| (k.to_string(), val.to_string()))
+                .collect();
+            strict_content_length(&fields)
+        };
+        assert_eq!(f(&[]), Ok(None));
+        assert_eq!(f(&[("Content-Length", "2")]), Ok(Some(2)));
+        // Field values arrive already trimmed by parse_header_block.
+        assert_eq!(f(&[("content-length", "7")]), Ok(Some(7)));
+        assert!(f(&[("Content-Length", "2"), ("Content-Length", "2")]).is_err());
+        assert!(f(&[("Content-Length", "2"), ("Content-Length", "3")]).is_err());
+        assert!(f(&[("Content-Length", "abc")]).is_err());
+        assert!(f(&[("Content-Length", "-1")]).is_err());
     }
 }

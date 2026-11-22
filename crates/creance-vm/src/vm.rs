@@ -322,6 +322,22 @@ pub fn stop_vm(profile: &str, instance: &str) -> i32 {
     }
 }
 
+/// Arms the post-provisioning second line of defense (QEMU slirp
+/// `restrict=on`) once the up-time egress guard has passed. The Lima
+/// backend has no restrict equivalent — a no-op there. Returns true
+/// only when this call armed it.
+pub fn mark_provisioned(profile: &str, instance: &str) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = (profile, instance);
+        false
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        crate::qemu::mark_provisioned(profile, instance)
+    }
+}
+
 /// Opens a shell (or runs a command) inside the environment VM.
 pub fn shell(profile: &str, instance: &str, command: &[&str]) -> i32 {
     #[cfg(target_os = "macos")]

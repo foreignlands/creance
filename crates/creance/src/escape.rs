@@ -299,6 +299,14 @@ fn scan_unknown_tokens(profile: &str) -> Result<Vec<(String, String)>, String> {
     Ok(unknown)
 }
 
+/// Places the fs-flag oracle on the host. Returns whether the flag
+/// actually landed — the caller feeds that into [`guest_script`] as
+/// `oracle_ready`, so a flag that never existed can never produce a
+/// vacuous PASS (F-078).
+pub fn place_oracle_flag(path: &str) -> bool {
+    std::fs::write(path, b"creance-escape-oracle\n").is_ok()
+}
+
 /// The in-guest probe script: run inside the VM, prints one `PROBE id
 /// RESULT` line per check (RESULT in PASS/ESCAPE/SKIP). Kept POSIX-sh so it
 /// runs on any guest. `expected_user` is the generated guest identity the
@@ -779,6 +787,14 @@ mod tests {
         assert!(
             no_oracle.contains("PROBE fs-flag-readable SKIP"),
             "{no_oracle}"
+        );
+        // F-078: the host-side wiring — a flag that cannot be placed
+        // must produce the SKIP script, not the real probe.
+        let unwritable = "/nonexistent-dir-nope/flag";
+        assert!(!place_oracle_flag(unwritable));
+        assert!(
+            guest_script(unwritable, place_oracle_flag(unwritable), "a", 1, "u")
+                .contains("PROBE fs-flag-readable SKIP")
         );
         for required in [
             "PROBE fs-flag-readable ESCAPE",

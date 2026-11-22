@@ -1627,6 +1627,11 @@ mod tests {
                 .starts_with("403")
         );
         assert!(raw_no_auth(&format!("POST /control HTTP/1.1\r\nHost: evil\r\nAuthorization: Bearer {}\r\nContent-Length: 2\r\n\r\n{{}}", record.token)).starts_with("403"));
+        // F-079/FINDING-006: a duplicated Content-Length — even two
+        // identical values — is an ambiguity smuggling vector (400,
+        // before any auth check).
+        assert!(raw_no_auth("POST /control HTTP/1.1\r\nHost: gate\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\n{}")
+            .starts_with("400"));
         // Valid command with the right token goes through.
         let body = r#"{"action":"check"}"#;
         let got = raw_no_auth(&format!(

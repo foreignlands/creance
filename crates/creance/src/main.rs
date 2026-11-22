@@ -357,7 +357,7 @@ fn cmd_escape_test() -> i32 {
         // The flag is the oracle: it must exist on the host for the guest
         // probe to have anything to look for. Without it fs-flag-readable
         // was a vacuous PASS (F-068).
-        let flag_placed = std::fs::write(&flag, b"creance-escape-oracle\n").is_ok();
+        let flag_placed = escape::place_oracle_flag(&flag);
         let store = creance_proxy::load(&profile).ok();
         let guest = creance_vm::guestprofile::Profile::load_or_create(&profile).ok();
         let script = escape::guest_script(
@@ -750,16 +750,25 @@ fn cmd_up() -> i32 {
         // says so; the host-side gate evidence is the security control.)
         let probe = "export PATH=/usr/bin:/bin\n\
                      if /usr/bin/timeout 1 /bin/true; then /usr/bin/timeout 5 /bin/bash -c '</dev/tcp/1.1.1.1/443' 2>/dev/null && echo tcp-open || echo tcp-blocked; else echo tcp-unknown; fi\n\
-                     if [ -x /usr/bin/ping ]; then /usr/bin/timeout 3 /usr/bin/ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo icmp-open || echo icmp-blocked; else echo icmp-unknown; fi\n";
+                     if [ -x /usr/bin/ping ]; then /usr/bin/timeout 3 /usr/bin/ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo icmp-open || echo icmp-blocked; else echo icmp-unknown; fi\n\
+                     if iptables -L OUTPUT -n 2>/dev/null | head -1 | grep -q 'policy DROP'; then echo fw-armed; else echo fw-down; fi\n";
         match creance_vm::vm::guest_script(&profile, &instance, probe) {
             Ok(out) => {
                 let tcp_ok = out.contains("tcp-blocked") && !out.contains("tcp-open");
                 let icmp_ok = out.contains("icmp-blocked")
                     || (out.contains("icmp-unknown") && !out.contains("icmp-open"));
-                if !tcp_ok || !icmp_ok {
+                // F-081: once slirp restrict=on arms, tcp/icmp stay
+                // "blocked" even with the in-guest firewall flushed —
+                // the second line masks a dead first line. Require the
+                // OUTPUT policy itself to still be DROP, or a disarmed
+                // guest would go green indefinitely.
+                let fw_ok = out.contains("fw-armed");
+                if !tcp_ok || !icmp_ok || !fw_ok {
                     let _ = creance_vm::vm::stop_vm(&profile, &instance);
                     let reason = if out.contains("tcp-open") || out.contains("icmp-open") {
                         "guest 防火墙未生效（直连可达）"
+                    } else if !fw_ok {
+                        "guest 第一道防线（iptables 锁闭）未在武装状态——restrict=on 下的绿色直连判定不可信，按未验证拒绝交付"
                     } else {
                         "无法取得防火墙正向证据（探针输出缺失或被干扰，按未验证拒绝交付）"
                     };
@@ -772,6 +781,15 @@ fn cmd_up() -> i32 {
                 let _ = creance_vm::vm::stop_vm(&profile, &instance);
                 return fail(format!("无法在 guest 内验证防火墙状态，VM 已停止：{e}"));
             }
+        }
+        // F-081: the provisioned marker (slirp restrict=on next boot)
+        // is written only after every gate above has passed — arming
+        // before the behavioral evidence lands would certify an
+        // unverified guest.
+        if creance_vm::vm::mark_provisioned(&profile, &instance) {
+            println!(
+                "供给完成——下次 creance stop && creance up 起 slirp restrict=on 第二道防线生效"
+            );
         }
         println!("Environment is up. The guest's only route out is the managed core (`creance escape-test` proves it).");
     }

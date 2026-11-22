@@ -283,19 +283,7 @@ pub fn up(profile: &str, instance: &str) -> i32 {
          if mountpoint -q '{ws}' 2>/dev/null || (mount -a 2>/dev/null && mountpoint -q '{ws}'); then echo mount-ok; else echo mount-missing; fi\n"
     );
     match vm::guest_script(profile, instance, &check) {
-        Ok(out) if out.contains("mount-ok") => {
-            // Provisioning verified end to end: next boot slirp gets
-            // restrict=on (runner::build_args), so raw guest egress is
-            // dead at the NAT even if the in-guest firewall fails.
-            let marker = paths::join(&dir, "provisioned");
-            if !Path::new(&marker).is_file() {
-                let _ = std::fs::write(&marker, b"ok\n");
-                println!(
-                    "供给完成——下次 creance stop && creance up 起 slirp restrict=on 第二道防线生效"
-                );
-            }
-            0
-        }
+        Ok(out) if out.contains("mount-ok") => 0,
         Ok(out) => {
             eprintln!("guest 工作区未挂载（{out:?}）——请 creance stop 后 creance setup 重建环境");
             if we_started {
@@ -311,6 +299,19 @@ pub fn up(profile: &str, instance: &str) -> i32 {
             1
         }
     }
+}
+
+/// Writes the `provisioned` marker AFTER the caller's behavioral egress
+/// guard has passed — `runner::build_args` arms slirp `restrict=on` from
+/// the next boot. F-081: the marker must follow the gate, never precede
+/// it, or a failed gate would still arm the second line unverified.
+/// Returns true only when this call wrote it.
+pub fn mark_provisioned(profile: &str, instance: &str) -> bool {
+    let marker = paths::join(&instance_dir(profile, instance), "provisioned");
+    if Path::new(&marker).is_file() {
+        return false;
+    }
+    std::fs::write(&marker, b"ok\n").is_ok()
 }
 
 /// Polls `cloud-init status` in the guest until it reports a terminal
