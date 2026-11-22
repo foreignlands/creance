@@ -29,11 +29,11 @@ guest_code=$(grep -o 'echo "PROBE [a-z0-9-]*' crates/creance/src/escape.rs \
 host_code=$(grep -o 'id: "[a-z0-9-]*"' crates/creance/src/escape.rs \
   | sed 's/^id: "//; s/"$//' | sort -u | tr '\n' ' ' || true)
 
-block() { # block <name> -> ids, split on '/' (blocks hold pure ids; any
-          # annotation lives in the prose around the block, never inside —
-          # BSD sed is byte-wise on multibyte chars, so stripping （）here
-          # corrupts tokens)
-  sed -n "/<!-- probe-inventory:$1 -->/,/<!-- \/probe-inventory:$1 -->/p" ROADMAP.md \
+block() { # block <file> <name> -> ids, split on '/' (blocks hold pure ids;
+          # any annotation lives in the prose around the block, never
+          # inside — BSD sed is byte-wise on multibyte chars, so stripping
+          # （）here corrupts tokens)
+  sed -n "/<!-- probe-inventory:$2 -->/,/<!-- \/probe-inventory:$2 -->/p" "$1" \
     | grep -v '<!--' \
     | tr '/' '\n' \
     | sed 's/^ *//; s/ *$//' \
@@ -41,9 +41,9 @@ block() { # block <name> -> ids, split on '/' (blocks hold pure ids; any
     | sort -u | tr '\n' ' ' || true
 }
 
-guest_enforced=$(block guest-enforced)
-guest_todo=$(block guest-todo)
-host_enforced=$(block host-enforced)
+guest_enforced=$(block ROADMAP.md guest-enforced)
+guest_todo=$(block ROADMAP.md guest-todo)
+host_enforced=$(block ROADMAP.md host-enforced)
 
 # 1) every code-emitted guest id is tracked somewhere (enforced or todo)
 tracked="$guest_enforced $guest_todo"
@@ -86,6 +86,34 @@ if ! grep -q 'echo "PROBE sock-\$s ESCAPE"' crates/creance/src/escape.rs; then
   echo "FAIL: sock-\$s family emission site missing from escape.rs (enforced socket probe silently removed?)"
   fail=1
 fi
+
+# 5) README surface (F-067): the third declaration surface, guarded the
+#    same way — its enforced block must equal the code's enforced id set
+#    (ids emitted by the code but tracked as honest-SKIP gaps, e.g.
+#    sock-abstract, are excluded: present ≠ enforced). A ghost claim
+#    (the deleted numeric endpoint survived four rounds here) and a
+#    silently-missing probe both fail.
+readme_enforced=$(block README.md readme-enforced)
+enforced_guest=""
+for id in $guest_code; do
+  case " $guest_todo " in
+    *" $id "*) ;; # tracked gap: probe present but honest-SKIP
+    *) enforced_guest="$enforced_guest $id" ;;
+  esac
+done
+expected_readme="$enforced_guest $host_code $guest_families"
+for id in $readme_enforced; do
+  case " $expected_readme " in
+    *" $id "*) ;;
+    *) echo "FAIL: README enforces probe '$id' but the code never emits it"; fail=1 ;;
+  esac
+done
+for id in $expected_readme; do
+  case " $readme_enforced " in
+    *" $id "*) ;;
+    *) echo "FAIL: README enforcement block is missing '$id' (code emits it)"; fail=1 ;;
+  esac
+done
 
 if [ "$fail" = 0 ]; then
   echo "probe inventory: bidirectional diff empty (guest $(echo "$guest_code" | wc -w | tr -d ' ') code ids, host $(echo "$host_code" | wc -w | tr -d ' '))"

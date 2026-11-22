@@ -68,12 +68,19 @@ existing `~/.claude-cage` profiles keep working).
 ## Escape-test: the acceptance harness
 
 `creance escape-test` reports per-probe: ✅ contained · ❌ escaped (exit 1) ·
-⏭️ not-enforced. Enforced since 0.3/0.4/0.5: profile validity, no host
-credentials in child env, numeric proxy endpoint, workspace-only mounts,
-private live-served gate record, session-only credentials, fingerprint
-consistency — and, with a VM, the guest probes: filesystem flag oracle,
-guest identity/privilege/env, socket exposure, and the network probes
-(direct egress, external DNS, IPv6 — all enforced live).
+⏭️ not-enforced. Enforced live: the six host probes, and with a VM the
+guest probes — filesystem flag oracle, identity/privilege, credentials
+(env/hex tokens/ssh material), socket exposure (the sock-* family), the
+network probes (direct egress, external DNS, IPv6, external ICMP) and
+the positive egress control (proxy-path; PASS needs a real subscription
+node). (The old "numeric proxy endpoint" probe was permanently green —
+an empty probe, deleted 2026-11-21.) The exact id inventory below is
+gate-checked against the code by scripts/check-probe-inventory.sh on
+every CI run; ROADMAP.md tracks the honest-SKIP known gap (sock-abstract).
+
+<!-- probe-inventory:readme-enforced -->
+config-valid / env-no-host-credentials / mounts-workspace-only / gate-record-private / credentials-are-session-only / fingerprint-consistent / fs-flag-readable / guest-identity / guest-privilege / env-credentials / env-hex-tokens / ssh-material / sock-docker·lima-guestagent / net-direct-egress / net-dns-external / net-ipv6 / net-icmp-external / proxy-path
+<!-- /probe-inventory:readme-enforced -->
 
 ## Status
 
