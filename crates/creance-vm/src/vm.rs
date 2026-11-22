@@ -676,6 +676,22 @@ mod tests {
     }
 
     #[test]
+    fn nat_allow_hosts_are_pinned_to_the_backend_tables() {
+        // F-091: the exact sanctioned hosts — adding an entry would
+        // silently widen BOTH rules.v4 and the up-gate allowlist.
+        assert_eq!(NAT_HOSTS_QEMU, ["10.0.2.2", "10.0.2.3"]);
+        assert_eq!(NAT_HOSTS_LIMA, ["192.168.5.2", "192.168.5.3"]);
+        assert_eq!(
+            nat_allow_hosts(),
+            if cfg!(target_os = "macos") {
+                NAT_HOSTS_LIMA
+            } else {
+                NAT_HOSTS_QEMU
+            }
+        );
+    }
+
+    #[test]
     fn environment_dir_falls_back_to_downloads() {
         let dir = std::env::temp_dir().join(format!("cage-vm-{}", std::process::id()));
         let profile = dir.to_string_lossy().into_owned();

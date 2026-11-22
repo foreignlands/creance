@@ -4,6 +4,34 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.6.16] — 2026-11-22
+
+### Fixed — night-23 (R24 audit round)
+
+- F-090 (S4): the fw-armed allowlist is whole-line exact matching
+  (`grep -vxF` against the canonical rule lines this product itself
+  writes, in both written and iptables-save form) — never a substring
+  pattern again. A `-m comment`-forged token, a `!` negation, a port
+  range (`--dport 67:65535`), a mixed `NEW,ESTABLISHED` ctstate, or a
+  `-p tcp` rule whose comment carries `-p icmp` all read fw-down now;
+  each of them had read fw-armed while actually allowing traffic.
+  `fw_probe_fragment` takes `nat_hosts: &[&str]` and emits both line
+  forms per host, so the canonical set is rendered by the product's own
+  NAT-table expansion.
+- F-091 (S5): v0.6.15's own guard gaps closed — the marker call-site
+  guard counts the bare name (aliases/Err-arms/second sites fail) and
+  pins the call between the verdict's `Ok(())` and the probe `Err(e)`
+  arms; the creance-vm guard scans `vm.rs` with per-file expected
+  counts (mod.rs def-only, runner/provision zero, vm.rs def+dispatch);
+  `write_marker` runs under two different dir names so a path-prefix
+  gate would be caught; provision asserts the ExecStartPost stamp is
+  the only redirect into `/run/egress-armed` and that nothing after the
+  apply leg touches netfilter at all; the node-sha `if` is asserted as
+  a full line; NAT host tables are pinned to their exact values;
+  the executed fw truth table is sliced from the real
+  `egress_probe_script` output (the shipped script, not a
+  hand-written copy) and covers the F-090 forgery shapes.
+
 ## [0.6.15] — 2026-11-22
 
 ### Fixed — night-22 (R23 audit round)

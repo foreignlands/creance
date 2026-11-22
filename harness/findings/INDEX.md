@@ -3,6 +3,8 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 090 | S4 | fw-armed 白名单是逐行子串正则：注释伪造令牌/`NEW,ESTABLISHED`/`!` 取反/端口区间/tcp+注释全判 armed | H1 / F-086 修复面 | 已修复（main-session，实机复验：armed 实例 up RC=0 + 15 例伪造真值表） |
+| 091 | S5 | v0.6.15 修复面守护缺口：marker 守护漏别名/Err 臂/vm.rs，stamp 唯一写点/apply 后净面/NAT 表/探针参数面无钉 | H1 / F-087 同类 | 已修复（main-session，CI 全绿） |
 | 086 | S4 | fw-armed 判据是黑名单+apply 时快照：限定 ACCEPT/跳链/rules.v4 漂移全判 armed | H1 / F-083 修复面 | 已修复（main-session，实机复验） |
 | 087 | S5 | v0.6.14 修复面 13 例变异全绿：probe 语义未执行、marker 守护只比首次出现、写盘/stamp 内容/restart 腿/校验门无行为守护 | H1 / F-076 同类 | 已修复（main-session，实机复验） |
 | 088 | S5 | CHANGELOG 0.6.10–0.6.14 与 tag 不对账：条目错位一个版本、两批 audit-batch 无条目、tag 内无自身条目 | 发版规程 | 已修复（main-session） |

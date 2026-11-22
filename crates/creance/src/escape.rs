@@ -306,38 +306,59 @@ fn scan_unknown_tokens(profile: &str) -> Result<Vec<(String, String)>, String> {
 /// (unprivileged users cannot create files in /run, so the stamp
 /// cannot be forged from the guest account).
 pub fn egress_probe_script(nat_hosts: &[&str]) -> String {
-    let hosts = nat_hosts
-        .iter()
-        .map(|h| h.replace('.', "\\."))
-        .collect::<Vec<_>>()
-        .join("|");
     format!(
         "export PATH=/usr/bin:/bin\n\
          if /usr/bin/timeout 1 /bin/true; then /usr/bin/timeout 5 /bin/bash -c '</dev/tcp/1.1.1.1/443' 2>/dev/null && echo tcp-open || echo tcp-blocked; else echo tcp-unknown; fi\n\
          if [ -x /usr/bin/ping ]; then /usr/bin/timeout 3 /usr/bin/ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo icmp-open || echo icmp-blocked; else echo icmp-unknown; fi\n\
          {fw}",
-        fw = fw_probe_fragment(&hosts)
+        fw = fw_probe_fragment(nat_hosts)
     )
 }
 
-/// The fw-armed fragment — allowlist, not denylist (F-086): every
-/// `-A OUTPUT` line in BOTH the live stamp and the persisted rules.v4
-/// must be `lo`, the conntrack catch-all, or an ACCEPT to a sanctioned
-/// /32 host over udp/67 or icmp. Anything else — a qualified ACCEPT,
-/// a chain jump, a rules.v4 edit — reads fw-down. The env overrides
-/// exist for the executed truth-table test (F-087); defaults are the
-/// real paths. Residual: intra-boot drift of live netfilter state by a
-/// privileged actor cannot be observed unprivileged — by design no
-/// unprivileged path can modify it either.
-fn fw_probe_fragment(hosts_re: &str) -> String {
+/// The fw-armed fragment — every `-A OUTPUT` line in BOTH the live
+/// stamp and the persisted rules.v4 must EXACTLY equal one of the
+/// canonical sanctioned lines (F-086/F-090). Whole-line `grep -vxF`
+/// comparison, not substring patterns: a `-m comment` quoting a
+/// sanctioned token, a `!` negation, a port range, an extra ctstate,
+/// or a chain jump all fail to equal a canonical line and read
+/// fw-down. Both spellings are allowed because iptables-save renders
+/// the same rules differently from the rules.v4 we write (dst first,
+/// `-m udp`, `/32`, RELATED,ESTABLISHED). The env overrides exist for
+/// the executed truth-table test (F-087); defaults are the real paths.
+/// Residual: intra-boot drift of live netfilter state by a privileged
+/// actor cannot be observed unprivileged — by design no unprivileged
+/// path can modify it either.
+fn fw_probe_fragment(nat_hosts: &[&str]) -> String {
+    // Canonical OUTPUT lines — the union of the rules.v4 written form
+    // and the iptables-save rendering of the same rules. Single-quoted
+    // for `grep -e`; the lines contain no `'`.
+    let mut allowed: Vec<String> = vec![
+        "-A OUTPUT -o lo -j ACCEPT".to_owned(),
+        "-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT".to_owned(),
+        "-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT".to_owned(),
+        "-A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT".to_owned(),
+        "-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT".to_owned(),
+    ];
+    for host in nat_hosts {
+        allowed.push(format!(
+            "-A OUTPUT -p udp --dport 67 -d {host}/32 -j ACCEPT"
+        ));
+        allowed.push(format!(
+            "-A OUTPUT -d {host}/32 -p udp -m udp --dport 67 -j ACCEPT"
+        ));
+        allowed.push(format!("-A OUTPUT -p icmp -d {host}/32 -j ACCEPT"));
+        allowed.push(format!("-A OUTPUT -d {host}/32 -p icmp -j ACCEPT"));
+    }
+    let grep_args = allowed
+        .iter()
+        .map(|line| format!("-e '{line}'"))
+        .collect::<Vec<_>>()
+        .join(" ");
     format!(
         "STAMP=${{CREANCE_STAMP:-/run/egress-armed}}; WANT=${{CREANCE_RULES:-/etc/iptables/rules.v4}}\n\
          ok=0\n\
          if [ -f \"$STAMP\" ] && [ -f \"$WANT\" ] && grep -q '^:OUTPUT DROP' \"$STAMP\" && grep -q '^:OUTPUT DROP' \"$WANT\"; then\n\
-           rem=$(cat \"$STAMP\" \"$WANT\" | grep -E '^-A OUTPUT' | grep -Ev -- '^-A OUTPUT -o lo -j ACCEPT$|^-A OUTPUT .*conntrack --ctstate .*ESTABLISHED.*-j ACCEPT$')\n\
-           bad=$(printf '%s\\n' \"$rem\" | grep -v '^$' | grep -Ev -- '-j ACCEPT$')\n\
-           [ -n \"$bad\" ] || bad=$(printf '%s\\n' \"$rem\" | grep -v '^$' | grep -Ev -- '-d (({hosts_re})/32|255\\.255\\.255\\.255(/32)?) ')\n\
-           [ -n \"$bad\" ] || bad=$(printf '%s\\n' \"$rem\" | grep -v '^$' | grep -Ev -- '-p udp.*--dport 67|--dport 67.*-p udp|-p icmp')\n\
+           bad=$(cat \"$STAMP\" \"$WANT\" | grep -hE '^-A OUTPUT' | grep -vxF {grep_args})\n\
            [ -z \"$bad\" ] && ok=1\n\
          fi\n\
          if [ \"$ok\" = 1 ]; then echo fw-armed; else echo fw-down; fi\n"
@@ -954,6 +975,27 @@ mod tests {
         assert!(egress_verdict("tcp-blocked\nicmp-unknown\nfw-armed\n").is_ok());
     }
 
+    /// Run the shipped fw fragment — sliced out of the real
+    /// `egress_probe_script` output, so the executed test covers the
+    /// product's own NAT-host expansion, not a hand-written pattern
+    /// (F-091).
+    fn run_fw_fragment(
+        nat_hosts: &[&str],
+        stamp: &std::path::Path,
+        want: &std::path::Path,
+    ) -> String {
+        let script = egress_probe_script(nat_hosts);
+        let frag = &script[script.find("STAMP=").expect("fw fragment")..];
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(frag)
+            .env("CREANCE_STAMP", stamp)
+            .env("CREANCE_RULES", want)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    }
+
     #[test]
     fn egress_probe_reads_only_unprivileged_evidence() {
         // F-082: no netfilter read (needs root), no PATH outside
@@ -972,10 +1014,10 @@ mod tests {
         }
         assert!(p.contains("/run/egress-armed"), "{p}");
         assert!(p.contains("^:OUTPUT DROP"), "{p}");
-        // F-083/F-086: every OUTPUT rule must be allowlist-shaped —
-        // a qualified ACCEPT or chain jump must not read as armed.
-        assert!(p.contains("-j ACCEPT$"), "{p}");
-        assert!(p.contains("conntrack"), "{p}");
+        // F-090: whole-line exact match (grep -vxF), never a substring
+        // pattern a `-m comment` or `!` negation could forge.
+        assert!(p.contains("grep -vxF"), "{p}");
+        assert!(!p.contains("conntrack --ctstate .*"), "{p}");
         assert!(p.contains("/etc/iptables/rules.v4"), "{p}");
         assert!(p.contains("/dev/tcp/1.1.1.1/443"), "{p}");
         // F-062: PATH reset survives.
@@ -986,49 +1028,60 @@ mod tests {
             p.contains("${CREANCE_RULES:-/etc/iptables/rules.v4}"),
             "{p}"
         );
-        // The probe embeds this backend's NAT hosts.
-        assert!(p.contains("10\\.0\\.2\\.2"), "{p}");
-        assert!(p.contains("10\\.0\\.2\\.3"), "{p}");
+        // The probe embeds this backend's NAT hosts as literal lines.
+        assert!(
+            p.contains("-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT"),
+            "{p}"
+        );
+        assert!(
+            p.contains("-A OUTPUT -d 10.0.2.3/32 -p icmp -j ACCEPT"),
+            "{p}"
+        );
     }
 
     #[test]
     fn fw_probe_fragment_real_shell_truth_table() {
-        // F-087: actually run the fragment under sh against fixtures —
-        // the grep allowlist is too subtle to trust unread.
+        // F-087/F-090: actually run the fragment under sh against
+        // fixtures — the allowlist is too subtle to trust unread.
         let dir = std::env::temp_dir().join(format!("creance-fw-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let stamp = dir.join("stamp");
         let want = dir.join("want");
-        let frag = fw_probe_fragment("10\\.0\\.2\\.2|10\\.0\\.2\\.3");
+        let hosts = &["10.0.2.2", "10.0.2.3"];
         let run = |stamp_c: &str, want_c: &str| -> String {
             std::fs::write(&stamp, stamp_c).unwrap();
             std::fs::write(&want, want_c).unwrap();
-            let out = std::process::Command::new("sh")
-                .arg("-c")
-                .arg(&frag)
-                .env("CREANCE_STAMP", &stamp)
-                .env("CREANCE_RULES", &want)
-                .output()
-                .unwrap();
-            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+            run_fw_fragment(hosts, &stamp, &want)
         };
-        let want_good = "*filter\n:INPUT ACCEPT [0:0]\n:FORWARD ACCEPT [0:0]\n:OUTPUT DROP [0:0]\n-A OUTPUT -o lo -j ACCEPT\n-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n-A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT\n-A OUTPUT -p udp --dport 67 -d 10.0.2.2/32 -j ACCEPT\n-A OUTPUT -p udp --dport 67 -d 10.0.2.3/32 -j ACCEPT\n-A OUTPUT -p icmp -d 10.0.2.2/32 -j ACCEPT\n-A OUTPUT -p icmp -d 10.0.2.3/32 -j ACCEPT\nCOMMIT\n";
-        // iptables-save order: dst before -p, -m udp added, /32 appended.
-        let stamp_good = "# Generated by egress-lock\n*filter\n:OUTPUT DROP [0:0]\n-A OUTPUT -o lo -j ACCEPT\n-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT\n-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT\n-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT\n-A OUTPUT -d 10.0.2.3/32 -p udp -m udp --dport 67 -j ACCEPT\n-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT\n-A OUTPUT -d 10.0.2.3/32 -p icmp -j ACCEPT\n";
+        let want_good = "*filter\n:INPUT ACCEPT [0:0]\n:FORWARD ACCEPT [0:0]\n:OUTPUT DROP [0:0]\n-A OUTPUT -o lo -j ACCEPT\n-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n-A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT\n-A OUTPUT -p udp --dport 67 -d 10.0.2.2/32 -j ACCEPT\n-A OUTPUT -p icmp -d 10.0.2.2/32 -j ACCEPT\n-A OUTPUT -p udp --dport 67 -d 10.0.2.3/32 -j ACCEPT\n-A OUTPUT -p icmp -d 10.0.2.3/32 -j ACCEPT\nCOMMIT\n";
+        // The stamp lines the egress-lock unit actually writes
+        // (iptables-save order: dst first, -m udp, /32 appended,
+        // RELATED,ESTABLISHED).
+        let stamp_good = "# Generated by egress-lock\n:OUTPUT DROP [0:0]\n-A OUTPUT -o lo -j ACCEPT\n-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT\n-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT\n-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT\n-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT\n-A OUTPUT -d 10.0.2.3/32 -p udp -m udp --dport 67 -j ACCEPT\n-A OUTPUT -d 10.0.2.3/32 -p icmp -j ACCEPT\n";
         assert_eq!(run(stamp_good, want_good), "fw-armed");
         // Missing evidence.
         std::fs::remove_file(&stamp).unwrap();
         assert_eq!(run("", want_good), "fw-down");
-        // Bare blanket ACCEPT (F-083) and qualified ACCEPTs (F-086).
+        // Bare blanket ACCEPT (F-083), qualified ACCEPTs (F-086), and
+        // F-090's comment-forged tokens / negations / ranges / mixed
+        // ctstate — every line not literally a canonical rule.
         for hole in [
             "-A OUTPUT -j ACCEPT",
             "-A OUTPUT -o e+ -j ACCEPT",
             "-A OUTPUT -p tcp -d 10.0.2.2/32 -j ACCEPT",
             "-A OUTPUT -p udp --dport 67 -d 8.8.8.8/32 -j ACCEPT",
-            "-A OUTPUT -m comment --comment x -j ACCEPT",
             "-A OUTPUT -j LEAK",
             "-A OUTPUT -m conntrack --ctstate NEW -j ACCEPT",
+            "-A OUTPUT -m conntrack --ctstate NEW,ESTABLISHED -j ACCEPT",
+            "-A OUTPUT -m conntrack --ctstate ESTABLISHED -j LEAK",
+            "-A OUTPUT -m comment --comment \"-d 10.0.2.2/32 -p icmp\" -j ACCEPT",
+            "-A OUTPUT -m comment --comment \"conntrack --ctstate ESTABLISHED\" -j ACCEPT",
+            "-A OUTPUT ! -d 10.0.2.2/32 -p udp -m udp ! --dport 67 -j ACCEPT",
+            "-A OUTPUT ! -d 10.0.2.2/32 -p icmp -j ACCEPT",
+            "-A OUTPUT ! -d 10.0.2.3/32 -p udp -m udp --dport 67:65535 -j ACCEPT",
+            "-A OUTPUT -d 10.0.2.2/32 -p tcp -m comment --comment \"-p icmp\" -j ACCEPT",
+            "-A OUTPUT -p tcp -m comment --comment \"-d 10.0.2.3/32 -p icmp\" -j ACCEPT",
         ] {
             assert_eq!(
                 run(&format!("{stamp_good}{hole}\n"), want_good),
@@ -1041,11 +1094,14 @@ mod tests {
             run(&stamp_good.replace("DROP", "ACCEPT"), want_good),
             "fw-down"
         );
-        // rules.v4 carries the hole (post-provision file edit).
+        // rules.v4 carries the hole (post-provision file edit) — even
+        // when the live stamp alone is clean.
         assert_eq!(
             run(
                 stamp_good,
-                &format!("{want_good}-A OUTPUT -o e+ -j ACCEPT\n")
+                &format!(
+                    "{want_good}-A OUTPUT -m comment --comment \"-d 10.0.2.2/32 -p icmp\" -j ACCEPT\n"
+                )
             ),
             "fw-down"
         );

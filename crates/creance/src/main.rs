@@ -801,23 +801,25 @@ fn cmd_shell(command: Vec<String>) -> i32 {
 mod up_gate_tests {
     #[test]
     fn provisioned_marker_only_after_verdict() {
-        // F-081/F-087: the marker write is a single call site nested
-        // inside the verdict's Ok(()) arm — it cannot run on any
-        // failure path, and no second call may appear (in an Err arm,
-        // a probe branch, or back inside vm::up).
+        // F-081/F-087/F-091: the marker write is a single call site —
+        // counted by the bare name so an `&*profile` alias or a second
+        // call still counts — nested inside the verdict's Ok(()) arm
+        // (between it and the outer Err(e) arm), so it cannot run on
+        // any failure path.
         let src = include_str!("main.rs");
-        let needle = concat!("creance_vm::vm::mark", "_provisioned(&profile, &instance)");
+        let needle = concat!("mark", "_provisioned(");
         assert_eq!(
             src.matches(needle).count(),
             1,
-            "mark_provisioned 全文件唯一调用点"
+            "mark_provisioned は全ファイルで 1 箇所（別名・第二箇所は不可）"
         );
         let verdict = src.find("escape::egress_verdict").expect("verdict call");
-        let ok_arm = src[verdict..].find("Ok(())").expect("verdict Ok arm");
+        let ok_arm = verdict + src[verdict..].find("Ok(()) =>").expect("verdict Ok arm");
+        let err_arm = verdict + src[verdict..].find("Err(e) =>").expect("probe Err arm");
         let mark = src.find(needle).expect("marker write");
         assert!(
-            mark > verdict + ok_arm,
-            "provisioned 标记必须在守门 Ok 分支内"
+            ok_arm < mark && mark < err_arm,
+            "provisioned マーカーは verdict の Ok 分岐内（失敗経路では書かない）"
         );
     }
 }

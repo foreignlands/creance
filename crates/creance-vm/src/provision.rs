@@ -336,9 +336,22 @@ mod tests {
             s.contains("\nsystemctl restart egress-lock.service\n"),
             "{s}"
         );
-        // F-084/F-087: a bad node checksum must never be unpacked —
-        // the conditional + rm gate, exactly one nodejs.org download.
-        assert!(s.contains("if [ -n \"$CREANCE_NODE_SHA256\" ]"), "{s}");
+        // F-091: the ExecStartPost stamp write is the ONLY redirect into
+        // /run/egress-armed — a second, forged stamp write would mask
+        // the real one.
+        assert_eq!(s.matches("> /run/egress-armed").count(), 1, "{s}");
+        // ...and nothing after the apply leg touches netfilter at all —
+        // an `iptables -P OUTPUT ACCEPT` slipped in after restart must
+        // fail this.
+        let after_apply = &s[s.find("systemctl restart egress-lock.service").unwrap()..];
+        assert!(!after_apply.contains("iptables"), "{after_apply}");
+        // F-084/F-087/F-091: a bad node checksum must never be unpacked —
+        // the conditional's full line (a `&& false` append breaks it),
+        // the rm gate, exactly one nodejs.org download.
+        assert!(
+            s.contains("if [ -n \"$CREANCE_NODE_SHA256\" ]; then\n"),
+            "{s}"
+        );
         assert!(s.contains("sha256sum -c - >> /var/log/creance-toolchain.log 2>&1 || rm -f /tmp/creance-node.tar.gz"), "{s}");
         assert_eq!(
             s.matches("nodejs.org/dist/v22.14.0/node-v22.14.0-linux")
