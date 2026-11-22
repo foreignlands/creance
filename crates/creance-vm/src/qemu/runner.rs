@@ -311,6 +311,14 @@ fn wait_until(mut cond: impl FnMut() -> bool, budget: Duration, step: Duration) 
 fn qmp_powerdown(sock: &str) -> Result<(), String> {
     let mut stream = std::os::unix::net::UnixStream::connect(sock)
         .map_err(|e| format!("qmp unreachable: {e}"))?;
+    // A hung qemu must not wedge stop()/delete() here: the socket stays on
+    // a short I/O deadline regardless of the outer powerdown budget.
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .map_err(|e| e.to_string())?;
+    stream
+        .set_write_timeout(Some(std::time::Duration::from_secs(10)))
+        .map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
     let mut line = String::new();
     reader

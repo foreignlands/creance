@@ -57,13 +57,7 @@ fn record_alive(record: &RunningProfile, own_start_empty: bool) -> bool {
 
 /// Records this process as the network owner in `instance_dir`.
 pub fn record_running(instance_dir: &str, config: &Config) -> Result<(), String> {
-    if Path::new(instance_dir)
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .as_deref()
-        != Some(instance_dir.rsplit('/').next().unwrap_or(""))
-        && Path::new(instance_dir).file_name().is_none()
-    {
+    if Path::new(instance_dir).file_name().is_none() {
         return Err("invalid cage instance directory".to_owned());
     }
     let pid = std::process::id() as i32;

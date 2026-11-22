@@ -121,16 +121,6 @@ impl Profile {
     }
 }
 
-/// The credential handoff the guest receives: exactly one cage-issued
-/// session token, delivered through the tunnel at provision time. The
-/// host's own credentials (API keys, OAuth tokens) never enter the VM.
-pub fn credential_env(guest: &Profile) -> Vec<(String, String)> {
-    vec![(
-        "CREANCE_SESSION_TOKEN".to_owned(),
-        guest.session_token.clone(),
-    )]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

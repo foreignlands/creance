@@ -410,10 +410,10 @@ pub fn start(profile: &str, store: &Store) -> Result<(), String> {
     let core = core_path()?;
     let core_copy = Path::new(&dir(profile)).join("mihomo");
     copy_executable_if_changed(&core, core_copy.to_string_lossy().as_ref())?;
-    let config_path = match std::env::var(creance_vm::config::CONFIG_ENV) {
-        Ok(p) if !p.is_empty() => p,
-        _ => format!("{profile}/config.json"),
-    };
+    // The relay must read the same configuration this process resolved —
+    // CONFIG_ENV alone misses CREANCE_CONFIG (precedence lives in
+    // config::config_path).
+    let config_path = creance_vm::config::config_path();
     launch_supervised(profile, &relay_bin.to_string_lossy(), &config_path)?;
     let deadline = Instant::now() + START_BUDGET;
     while Instant::now() < deadline {
@@ -634,11 +634,20 @@ extern "C" fn forward_signal(sig: libc::c_int) {
 }
 
 fn run_command(program: &str, args: &[&str]) -> Result<(), String> {
-    std::process::Command::new(program)
+    let out = std::process::Command::new(program)
         .args(args)
         .output()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "{program} {} failed ({}): {}",
+            args.join(" "),
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        ))
+    }
 }
 
 #[cfg(target_os = "macos")]

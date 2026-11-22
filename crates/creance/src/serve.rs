@@ -40,7 +40,6 @@ pub fn serve(profile: &str, config_path: &str, port: u16) -> Result<(), String> 
         let ctx = ServeCtx {
             profile: profile.to_owned(),
             config_path: config_path.to_owned(),
-            live: live.clone(),
         };
         std::thread::spawn(move || {
             handle(stream, port, ctx);
@@ -53,9 +52,6 @@ pub fn serve(profile: &str, config_path: &str, port: u16) -> Result<(), String> 
 struct ServeCtx {
     profile: String,
     config_path: String,
-    /// Keeps the connection slot owned by this handler's spawn scope alive.
-    #[allow(dead_code)]
-    live: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
 fn handle(mut stream: std::net::TcpStream, port: u16, ctx: ServeCtx) {
@@ -71,12 +67,23 @@ fn handle(mut stream: std::net::TcpStream, port: u16, ctx: ServeCtx) {
     let method = parts.next().unwrap_or_default().to_uppercase();
     let path = parts.next().unwrap_or_default().to_owned();
     let mut body_len = 0usize;
+    let mut seen_cl = false;
     let mut origin = String::new();
     for line in text.lines().skip(1) {
         if let Some((k, v)) = line.split_once(':') {
             let (k, v) = (k.trim(), v.trim());
             if k.eq_ignore_ascii_case("content-length") {
-                body_len = v.parse().unwrap_or(0);
+                // An invalid or repeated Content-Length is an ambiguity
+                // smuggling vector — reject it outright (FINDING-006).
+                match (seen_cl, v.parse::<usize>()) {
+                    (false, Ok(n)) => {
+                        body_len = n;
+                        seen_cl = true;
+                    }
+                    _ => return reply(&mut stream, 400, "invalid content-length"),
+                }
+            } else if k.eq_ignore_ascii_case("transfer-encoding") {
+                return reply(&mut stream, 400, "chunked bodies are not supported");
             } else if k.eq_ignore_ascii_case("origin") && !v.is_empty() {
                 origin = v.to_owned();
             }
@@ -84,12 +91,6 @@ fn handle(mut stream: std::net::TcpStream, port: u16, ctx: ServeCtx) {
     }
     if body_len > 1 << 20 {
         return reply(&mut stream, 400, "body too large");
-    }
-    if text
-        .lines()
-        .any(|l| l.eq_ignore_ascii_case("transfer-encoding: chunked"))
-    {
-        return reply(&mut stream, 400, "chunked bodies are not supported");
     }
     let mut body = vec![0u8; body_len];
     if body_len > 0 && stream.read_exact(&mut body).is_err() {
@@ -106,8 +107,9 @@ fn handle(mut stream: std::net::TcpStream, port: u16, ctx: ServeCtx) {
     let (status, content_type, payload) = route(&ctx, &method, &path, &body);
     let _ = stream.write_all(
         format!(
-            "HTTP/1.1 {}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 {} {}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             status,
+            reason(status),
             payload.len()
         )
         .as_bytes(),
@@ -295,11 +297,26 @@ fn nodes_json(ctx: &ServeCtx) -> serde_json::Value {
         .collect::<Vec<_>>())
 }
 
+fn reason(status: u16) -> &'static str {
+    match status {
+        200 => "OK",
+        400 => "Bad Request",
+        403 => "Forbidden",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        409 => "Conflict",
+        500 => "Internal Server Error",
+        503 => "Busy",
+        _ => "Status",
+    }
+}
+
 fn reply<W: std::io::Write>(stream: &mut W, status: u16, message: &str) {
     let payload = json!({"error": message}).to_string();
     let _ = stream.write_all(
         format!(
-            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+            "HTTP/1.1 {status} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+            reason(status),
             payload.len()
         )
         .as_bytes(),

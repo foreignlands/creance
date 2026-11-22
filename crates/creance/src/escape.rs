@@ -7,10 +7,9 @@
 //!   private, fingerprint consistency. These are hard assertions.
 //! - **In-guest probes**: a generated script the CLI runs inside the VM via
 //!   the backend shell (limactl on macOS, ssh on Linux); each probe
-//!   reports PASS (contained) or ESCAPE. Network
-//!   probes are marked `pending-enforcement` until the VM network plane
-//!   routes through the gate (ROADMAP), so the suite reports them as
-//!   "not enforced" rather than lying about containment.
+//!   reports PASS (contained), SKIP (cannot measure) or ESCAPE. Since the
+//!   0.3 wire enforcement, network probes are hard assertions: an ESCAPE
+//!   fails the suite.
 
 use creance_vm::{config, paths, vm};
 use std::path::Path;

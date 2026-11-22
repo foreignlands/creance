@@ -235,6 +235,20 @@ impl Drop for GateHandle {
     }
 }
 
+/// RFC 9112 status lines carry a reason phrase; strict parsers reject a
+/// bare code.
+fn reason(status: u16) -> &'static str {
+    match status {
+        200 => "OK",
+        400 => "Bad Request",
+        403 => "Forbidden",
+        404 => "Not Found",
+        409 => "Conflict",
+        500 => "Internal Server Error",
+        _ => "Status",
+    }
+}
+
 /// Locks a gate mutex, recovering from a poisoned lock (a panicked handler
 /// must not cascade into every later call).
 fn lock_or_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -446,6 +460,7 @@ impl Gate {
         let method = parts.next().unwrap_or_default().to_owned();
         let path = parts.next().unwrap_or_default().to_owned();
         let mut body_len = 0usize;
+        let mut seen_cl = false;
         let mut bearer = String::new();
         let mut host = String::new();
         let mut origin_present = false;
@@ -453,7 +468,20 @@ impl Gate {
             if let Some((k, v)) = line.split_once(':') {
                 let (k, v) = (k.trim(), v.trim());
                 if k.eq_ignore_ascii_case("content-length") {
-                    body_len = v.parse().unwrap_or(0);
+                    // Invalid or repeated Content-Length is an ambiguity
+                    // smuggling vector — refuse it (FINDING-006).
+                    match (seen_cl, v.parse::<usize>()) {
+                        (false, Ok(n)) => {
+                            body_len = n;
+                            seen_cl = true;
+                        }
+                        _ => {
+                            let _ = stream.write_all(
+                                b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n",
+                            );
+                            return;
+                        }
+                    }
                 } else if k.eq_ignore_ascii_case("authorization") {
                     bearer = v.strip_prefix("Bearer ").unwrap_or_default().to_owned();
                 } else if k.eq_ignore_ascii_case("host") {
@@ -490,8 +518,9 @@ impl Gate {
         };
         let _ = stream.write_all(
             format!(
-                "HTTP/1.1 {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 response.0,
+                reason(response.0),
                 response.1.len()
             )
             .as_bytes(),
@@ -508,10 +537,7 @@ impl Gate {
         let config = match config::load(&self.config_path) {
             Ok(c) => c,
             Err(_) => {
-                self.inner
-                    .lock()
-                    .expect("gate lock")
-                    .close("配置读取失败，外网保持关闭");
+                lock_or_recover(&self.inner).close("配置读取失败，外网保持关闭");
                 return (409, error_json("配置读取失败，外网保持关闭"));
             }
         };
@@ -524,10 +550,7 @@ impl Gate {
             &config.proxy_url,
             &config.proxy_revision,
         ) {
-            self.inner
-                .lock()
-                .expect("gate lock")
-                .close(&format!("代理节点未应用：{e}"));
+            lock_or_recover(&self.inner).close(&format!("代理节点未应用：{e}"));
             return (409, error_json(&format!("代理节点未应用：{e}")));
         }
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());

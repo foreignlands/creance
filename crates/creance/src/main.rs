@@ -130,9 +130,7 @@ enum Commands {
     /// Re-fetch every source that carries a URL.
     ProxyRefresh,
     /// Apply a node as the exit and record it in config.json.
-    ProxySelect {
-        node: String,
-    },
+    ProxySelect { node: String },
     /// Create the environment VM (Lima) for this profile.
     Setup {
         #[arg(long, default_value_t = 8)]
@@ -156,13 +154,13 @@ enum Commands {
     },
     /// Run Claude Code in the environment VM.
     Claude,
-    /// Diagnose the environment VM.
     /// Run the containment probe suite (host checks + in-guest probes).
     EscapeTest,
     /// Open the environment gate (check window + grant). The wire follows.
     GateOpen,
     /// Close the environment gate: the guest loses its only route out.
     GateClose,
+    /// Diagnose the environment VM.
     Doctor,
     /// Serve the lean workbench (loopback HTTP + single-page UI).
     Serve {
@@ -173,9 +171,7 @@ enum Commands {
     Version,
     /// Internal: own the proxy core's output as the supervised daemon. Not for direct use.
     #[command(hide = true)]
-    LogRelay {
-        kind: String,
-    },
+    LogRelay { kind: String },
     /// Internal: hold the environment gate until its record is removed.
     #[command(hide = true)]
     GateDaemon {
@@ -400,7 +396,9 @@ fn cmd_escape_test() -> i32 {
                 for id in &expected {
                     let answered = stdout
                         .lines()
-                        .any(|l| l.starts_with("PROBE ") && l.contains(id));
+                        // The answer is the second whitespace token — a
+                        // substring match would let `PROBE x` spoof `PROBE xy`.
+                        .any(|l| l.split_whitespace().nth(1) == Some(*id));
                     if !answered {
                         missing.push(*id);
                     }
@@ -518,7 +516,14 @@ fn cmd_proxy_import(
     let profile = profile();
     let imported = creance_proxy::with_store_lock(&profile, || {
         let mut store = creance_proxy::load(&profile)?;
-        store.import(&name, "", &data, "", interval, "cli")?;
+        store.import(
+            &name,
+            url.as_deref().unwrap_or(""),
+            &data,
+            "",
+            interval,
+            "cli",
+        )?;
         let count = store.count();
         creance_proxy::save(&profile, &store)?;
         Ok(count)

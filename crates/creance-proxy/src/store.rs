@@ -114,14 +114,20 @@ pub const DEFAULT_PORT: u16 = 17896;
 /// fails loudly: proxy credentials must never be silently reset.
 pub fn load(profile: &str) -> Result<Store, String> {
     let path = Path::new(&dir(profile)).join("sources.json");
-    let Ok(bytes) = std::fs::read(&path) else {
-        return Ok(Store {
-            version: 1,
-            port: DEFAULT_PORT,
-            auth: token(),
-            sources: Vec::new(),
-            ..Default::default()
-        });
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Store {
+                version: 1,
+                port: DEFAULT_PORT,
+                auth: token(),
+                sources: Vec::new(),
+                ..Default::default()
+            });
+        }
+        // Fail closed on permission/IO errors: a fresh store would mint a
+        // new random auth and the next save would overwrite the real file.
+        Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
     };
     if bytes.len() > MAX_STORE_SIZE {
         return Err("Cage 代理配置无效，请恢复私有配置备份".to_owned());
