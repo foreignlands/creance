@@ -1,0 +1,18 @@
+[package]
+name = "r15-064-recheck-r23"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# R15 收敛判词轮：064 修复（d220e1b）增量复核的**鉴别力负控 + 12 id 独立
+# 覆盖核对 + 行为等价**。r14-convergence 的裁判断言已翻转成修复后形态，
+# 但一个恒 PASS 的裁判没有证明力——本探针把脚本回植成修复前形态
+# （probe() 助手 + 参数化发射，文本逐字取自 d220e1b 的 diff `-` 行），
+# 用同一提取器镜像跑一遍，证明修复前形态会被裁判判死。
+# 逻辑镜像基线：d220e1b 的 crates/creance/src/main.rs cmd_escape_test
+# （与 r14-convergence 同一镜像，头部注明基线以延续 F-033 教训的边界）。
+
+[dependencies]
+creance = { path = "../../../../crates/creance" }
+
+[workspace]

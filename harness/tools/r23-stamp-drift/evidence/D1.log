@@ -1,0 +1,30 @@
+1
+== D1 offline edit rc=0
+== D1 up (marker present) RC=0 netdev: -netdev user,id=net0,restrict=on,hostfwd=tcp:127.0.0.1:45643-:22
+    Environment is up. The guest's only route out is the managed core (`creance escape-test` proves it).
+== D1 in-guest (restrict=on):
+    stamp: root 644 2026-11-22 12:52:30.815000000 +0000
+      :OUTPUT DROP [0:0]
+      -A OUTPUT -o lo -j ACCEPT
+      -A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+      -A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT
+      -A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT
+      -A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT
+      -A OUTPUT -d 10.0.2.3/32 -p udp -m udp --dport 67 -j ACCEPT
+      -A OUTPUT -d 10.0.2.3/32 -p icmp -j ACCEPT
+      -A OUTPUT -o e+ -j ACCEPT
+    probe=fw-armed
+    egress-lock=active drift-unit=inactive
+    rules.v4 tail: -A OUTPUT -p icmp -d 10.0.2.3/32 -j ACCEPT;-A OUTPUT -o e+ -j ACCEPT;COMMIT;
+    tcp-1.1.1.1:443=blocked
+    tcp-10.0.2.2:22=blocked
+== escape-test RC=1 net/fw verdicts:
+    PROBE net-direct-egress PASS
+    PROBE net-dns-external PASS
+    PROBE net-ipv6 PASS
+    PROBE net-icmp-external PASS
+    PROBE proxy-path ESCAPE
+== D1 CONTROL up (marker absent) RC=1 netdev: 
+    guest 防火墙未生效（直连可达），VM 已停止；请 creance stop 后 creance setup 重建环境。探针原始输出："tcp-open\nicmp-open\nfw-armed\n"
+== D1 restored rc=0
+== marker restored: present

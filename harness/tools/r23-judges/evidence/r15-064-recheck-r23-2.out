@@ -1,0 +1,7 @@
+[NC1] 修复前形态：expected 集合 = 25 条（11 个去重 id），无 fs-flag-readable —— r14 裁判 [A] 会 die
+[NC2] 修复前形态：11 行 PASS（fs-flag 行不存在）→ missing 为空 —— r14 裁判 [E] 会 die
+[PF1] 修复后：提取网去重后恰为 12 个字面 id，与清单逐一相等
+[PF2] 修复后：fs-flag-readable 行缺失 → missing 非空（fail-closed）
+[EQ1] 修复前/后发射块两种世界输出逐字节一致（PASS/ESCAPE）
+[EQ2] 修复后整份 guest_script `sh -n` 语法通过
+ALL SECTIONS DONE (NC1/NC2 证裁判鉴别力；PF1/PF2/EQ1/EQ2 证修复落地且无行为回归)

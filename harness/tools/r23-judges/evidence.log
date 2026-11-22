@@ -1,0 +1,9 @@
+r14-convergence run1 RC=0 md5=ac301449 lines=8
+r14-convergence run2 RC=0 md5=ac301449 lines=8
+r15-064-recheck run1 RC=101 md5=fbccd0b2 lines=4
+r15-064-recheck run2 RC=101 md5=946a6d77 lines=4
+r14-convergence-r23 run1 RC=0 md5=2ecbd0c1 lines=8
+r14-convergence-r23 run2 RC=0 md5=2ecbd0c1 lines=8
+r15-064-recheck-r23 run1 RC=0 md5=965e444c lines=7
+r15-064-recheck-r23 run2 RC=0 md5=965e444c lines=7
+J RC=0

@@ -1,0 +1,53 @@
+NC-R: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+NC-R2: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+NC-073q: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+NC-073l: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+NC-074: grep-c before=0 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+NC-074b: grep-c before=0 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+NC-074c: grep-c before=0 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+NC-RO: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+NC-F: grep-c before=0 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+NC-F2: grep-c before=0 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+NC-SIG: grep-c before=0 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+NC-RMF: grep-c before=1 after=2 crates=creance test-RC=0 failed=0 compile-err=0
+NC-CLd: grep-c before=0 after=1 crates=creance-net creance-gate creance test-RC=101 failed=3 compile-err=1
+NC-CLx: grep-c before=0 after=1 crates=creance-net creance-gate creance test-RC=101 failed=3 compile-err=1
+NC-TE: grep-c before=0 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+NC-TE2: grep-c before=1 after=0 crates=creance test-RC=101 failed=3 compile-err=1
+NC-CLs: grep-c before=0 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+NC-NODE: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+NC-NOCK: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-NOCK2: grep-c before=4 after=5 crates=creance-vm test-RC=101 failed=3 compile-err=1
+NC-NOCK3: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-DIG: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+NC-DIG2: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+NC-URL: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+NC-EXP: grep-c before=2 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+NC-STAMP: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+NC-STAMPf: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-STAMPr: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-RST: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=9 compile-err=1
+NC-RST2: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-RST3: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-FW: grep-c before=0 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+NC-VOK: grep-c before=0 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+NC-PRB: grep-c before=0 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+NC-PRB2: grep-c before=0 after=1 crates=creance test-RC=0 failed=0 compile-err=0
+NC-PRB3: grep-c before=0 after=1 crates=creance test-RC=0 failed=0 compile-err=0
+NC-PRB4: grep-c before=1 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+NC-PRB5: grep-c before=0 after=1 crates=creance test-RC=0 failed=0 compile-err=0
+NC-MK: grep-c before=0 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+NC-MK3: grep-c before=0 after=1 crates=creance test-RC=0 failed=0 compile-err=0
+NC-MK4: grep-c before=0 after=1 crates=creance test-RC=0 failed=0 compile-err=0
+NC-MK2: grep-c before=0 after=1 crates=creance-vm creance test-RC=0 failed=0 compile-err=0
+NC-MP: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+crates/creance/src/escape.rs: OK
+crates/creance-vm/src/qemu/runner.rs: OK
+crates/creance/src/main.rs: OK
+crates/creance-vm/src/qemu/provision.rs: OK
+crates/creance-vm/src/lima.rs: OK
+crates/creance-vm/src/provision.rs: OK
+crates/creance-vm/src/qemu/mod.rs: OK
+crates/creance-net/src/wire.rs: OK
+crates/creance/src/serve.rs: OK
+NC done RC=0

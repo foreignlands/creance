@@ -1,0 +1,26 @@
+
+running 62 tests
+.............................. 30/62
+provision::tests::lockdown_survives_reboots_and_scopes_its_allows --- FAILED
+......................==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-714503 -N -R 18765:127.0.0.1:18765' for reading: No such file or directory
+......==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-714503 -N -R 18765:127.0.0.1:18765' for reading==> /dev/null <==
+: No such file or directory
+tail: cannot open 'HostKeyAlias=creance-test-inst-714503' for reading: No such file or directory
+...
+failures:
+
+---- provision::tests::lockdown_survives_reboots_and_scopes_its_allows stdout ----
+
+thread 'provision::tests::lockdown_survives_reboots_and_scopes_its_allows' (85060) panicked at crates/creance-vm/src/provision.rs:257:9:
+assertion failed: s2.contains("9d942932535988091034dc94cc5f42b6dc8784d6366df3a36c4c9ccb3996f0c2")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    provision::tests::lockdown_survives_reboots_and_scopes_its_allows
+
+test result: FAILED. 61 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+error: test failed, to rerun pass `-p creance-vm --lib`

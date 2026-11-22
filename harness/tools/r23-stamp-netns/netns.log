@@ -1,0 +1,67 @@
+stamp cmd: /usr/sbin/iptables-save -t filter | /usr/bin/grep -E "^:OUTPUT|^-A OUTPUT" > /tmp/r23-stamp.XStC25/egress-armed
+probe fw line: if [ -f /tmp/r23-stamp.XStC25/egress-armed ] && grep -q '^:OUTPUT DROP' /tmp/r23-stamp.XStC25/egress-armed && ! grep -qxF -- '-A OUTPUT -j ACCEPT' /tmp/r23-stamp.XStC25/egress-armed; then echo fw-armed; else echo fw-down; fi
+== V01-product-shape
+   fw (uid 65534, PATH=/usr/bin:/bin): fw-armed
+   live OUTPUT: -P OUTPUT DROP;-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;
+   stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;
+   udp 8.8.8.8:53 send: blocked
+== V02-bare-accept
+   fw (uid 65534, PATH=/usr/bin:/bin): fw-down
+   live OUTPUT: -P OUTPUT DROP;-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;-A OUTPUT -j ACCEPT;
+   stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;-A OUTPUT -j ACCEPT;
+   udp 8.8.8.8:53 send: SENT
+== V03-iface-accept
+   fw (uid 65534, PATH=/usr/bin:/bin): fw-armed
+   live OUTPUT: -P OUTPUT DROP;-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;-A OUTPUT -o d0 -j ACCEPT;
+   stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;-A OUTPUT -o d0 -j ACCEPT;
+   udp 8.8.8.8:53 send: SENT
+== V04-wildcard-iface
+   fw (uid 65534, PATH=/usr/bin:/bin): fw-armed
+   live OUTPUT: -P OUTPUT DROP;-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;-A OUTPUT -o d+ -j ACCEPT;
+   stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;-A OUTPUT -o d+ -j ACCEPT;
+   udp 8.8.8.8:53 send: SENT
+== V05-proto-accepts
+   fw (uid 65534, PATH=/usr/bin:/bin): fw-armed
+   live OUTPUT: -P OUTPUT DROP;-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;-A OUTPUT -p tcp -j ACCEPT;-A OUTPUT -p udp -j ACCEPT;
+   stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;-A OUTPUT -p tcp -j ACCEPT;-A OUTPUT -p udp -j ACCEPT;
+   udp 8.8.8.8:53 send: SENT
+== V06-dst-0/0
+   fw (uid 65534, PATH=/usr/bin:/bin): fw-down
+   live OUTPUT: -P OUTPUT DROP;-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;-A OUTPUT -j ACCEPT;
+   stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;-A OUTPUT -j ACCEPT;
+   udp 8.8.8.8:53 send: SENT
+== V07-comment-accept
+   fw (uid 65534, PATH=/usr/bin:/bin): fw-armed
+   live OUTPUT: -P OUTPUT DROP;-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;-A OUTPUT -m comment --comment keep -j ACCEPT;
+   stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;-A OUTPUT -m comment --comment keep -j ACCEPT;
+   udp 8.8.8.8:53 send: SENT
+== V08-jump-userchain
+   fw (uid 65534, PATH=/usr/bin:/bin): fw-armed
+   live OUTPUT: -P OUTPUT DROP;-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;-A OUTPUT -j LEAK;
+   stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;-A OUTPUT -j LEAK;
+   udp 8.8.8.8:53 send: SENT
+== V09-state-new
+   fw (uid 65534, PATH=/usr/bin:/bin): fw-armed
+   live OUTPUT: -P OUTPUT DROP;-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;-A OUTPUT -m conntrack --ctstate NEW -j ACCEPT;
+   stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;-A OUTPUT -m conntrack --ctstate NEW -j ACCEPT;
+   udp 8.8.8.8:53 send: SENT
+== V10-insert-first-bare
+   fw (uid 65534, PATH=/usr/bin:/bin): fw-armed
+   live OUTPUT: -P OUTPUT DROP;-A OUTPUT -j ACCEPT;-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;
+   stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;
+   udp 8.8.8.8:53 send: SENT
+== V11-post-stamp-policy-accept
+   fw (uid 65534, PATH=/usr/bin:/bin): fw-armed
+   live OUTPUT: -P OUTPUT ACCEPT;-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;
+   stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;
+   udp 8.8.8.8:53 send: SENT
+== V12-post-stamp-flush
+   fw (uid 65534, PATH=/usr/bin:/bin): fw-armed
+   live OUTPUT: -P OUTPUT ACCEPT;
+   stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;
+   udp 8.8.8.8:53 send: SENT
+== V13-policy-accept-at-load
+   fw (uid 65534, PATH=/usr/bin:/bin): fw-down
+   live OUTPUT: -P OUTPUT ACCEPT;-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;
+   stamp: :OUTPUT ACCEPT [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT;
+   udp 8.8.8.8:53 send: SENT

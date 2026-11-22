@@ -3,6 +3,10 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 086 | S4 | v0.6.14 fw-armed 判据只拒字面裸 ACCEPT 且为 apply 时快照：`-o e+` 等限定 ACCEPT 或盖章后规则漂移下 restrict=on 的 up 实机全绿（F-081/083 遮蔽复现） | H1 / F-082+083 修复面 | 待修复 |
+| 087 | S5 | v0.6.14 修复面 13 例变异仍全绿：probe 语义未执行测试、marker 源码序只比首次出现、mark_provisioned/stamp 内容/restart 腿/node 校验门条件无守护 | H1 / F-084 修复面 | 待修复 |
+| 088 | S5 | CHANGELOG 0.6.10–0.6.14 不对账：v0.6.14 tag 无自身条目、[0.6.13] 记入 v0.6.14 改动、[0.6.10]/[0.6.11] 各提前一版、3783863/b144b77（含平台收缩）漏记 | 发版规程 / F-085 修复面 | 待修复 |
+| 089 | S5 | 1c55b30 给 r14/r15 裁判传不可写 /nonexistent-flag：guest_script 自落盘失败转 SKIP 世界，r15 在 main 上 panic，r14 绿但判的是另一形态 | harness 裁判 / F-084 波及面 | 待修复 |
 | 082 | S4 | fw-armed 探针无特权运行 iptables -L：PATH 无 /usr/sbin + Permission denied，v0.6.13 每次 up 恒失败停机、provisioned 永不写入 | H1 / F-081 修复面 | 已修复（main-session，实机复验） |
 | 083 | S4 | fw-armed 只看默认策略：DROP 策略 + 裸 -A OUTPUT -j ACCEPT 仍判 armed | H1 / F-081 修复面 | 已修复（main-session，实机复验） |
 | 084 | S5 | v0.6.13 修复面 10 例变异仍全绿：F-078 调用点、F-079 TE/node 校验/Lima digest 键、F-081 五例 | H1 / F-076 同类 | 已修复（main-session，实机复验） |

@@ -1,0 +1,26 @@
+
+running 62 tests
+.................................................. 50/62
+qemu::provision::tests::bootstrap_and_mount_split_across_two_runcmds --- FAILED
+........==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-a530de -N -R 18765:127.0.0.1:18765' for reading: No such file or directory
+==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-a530de -N -R 18765:127.0.0.1:18765' for reading: No such file or directory
+==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-a530de' for reading: No such file or directory
+...
+failures:
+
+---- qemu::provision::tests::bootstrap_and_mount_split_across_two_runcmds stdout ----
+
+thread 'qemu::provision::tests::bootstrap_and_mount_split_across_two_runcmds' (72670) panicked at crates/creance-vm/src/qemu/provision.rs:145:9:
+assertion failed: first.contains("mount -t 9p")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    qemu::provision::tests::bootstrap_and_mount_split_across_two_runcmds
+
+test result: FAILED. 61 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+error: test failed, to rerun pass `-p creance-vm --lib`

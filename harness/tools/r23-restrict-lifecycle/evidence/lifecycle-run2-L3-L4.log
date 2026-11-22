@@ -1,0 +1,17 @@
+### L3 active-oneshot restart
+unit added rc=0
+up RC=0
+    guest: before=2026-11-22 13:16:15.475000000 +0000
+    guest: ExecMainStartTimestamp=Sun 2026-11-22 13:16:15 UTC
+    guest: restart-rc=0
+    guest: after=2026-11-22 13:16:27.055000000 +0000
+    guest: ExecMainStartTimestamp=Sun 2026-11-22 13:16:27 UTC
+unit removed rc=0
+### L4 we_started=false + mount-missing (ws=/home/ubuntu/r23-lab/prof-downloads)
+unit added rc=0
+up#A RC=0 alive pid=125761
+    Environment is up. The guest's only route out is the managed core (`creance escape-test` proves it).
+    guest: unmounted
+up#B RC=1 alive pid=125761 marker=present
+    guest 工作区未挂载（"mount-missing\n"）——请 creance stop 后 creance setup 重建环境
+unit removed rc=0

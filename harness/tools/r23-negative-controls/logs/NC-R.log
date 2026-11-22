@@ -1,0 +1,26 @@
+
+running 62 tests
+............................................. 45/62
+qemu::runner::tests::restrict_lands_only_after_provisioning --- FAILED
+...........==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-304293 -N -R 18765:127.0.0.1:18765' for reading: No such file or directory
+..==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-304293 -N -R 18765:127.0.0.1:18765' for reading: No such file or directory
+==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-304293' for reading: No such file or directory
+...
+failures:
+
+---- qemu::runner::tests::restrict_lands_only_after_provisioning stdout ----
+
+thread 'qemu::runner::tests::restrict_lands_only_after_provisioning' (66083) panicked at crates/creance-vm/src/qemu/runner.rs:421:9:
+-machine q35,accel=kvm -cpu host -smp 4 -m 8G -drive file=/tmp/creance-runner-991e98e8/disk.qcow2,if=none,id=boot,format=qcow2,discard=on -device virtio-blk-pci,drive=boot,bootindex=1 -drive file=/tmp/creance-runner-991e98e8/seed.img,if=none,id=seed,format=raw,readonly=on -device virtio-blk-pci,drive=seed -netdev user,id=net0,hostfwd=tcp:127.0.0.1:40022-:22 -device virtio-net-pci,netdev=net0 -device virtio-rng-pci -fsdev local,id=host0,path=/home/me/ws,security_model=mapped-xattr -device virtio-9p-pci,fsdev=host0,mount_tag=creance -display none -serial file:/tmp/creance-runner-991e98e8/serial.log -monitor none -qmp unix:/tmp/creance-runner-991e98e8/qmp.sock,server,nowait -name creance-ws-0123abcd
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    qemu::runner::tests::restrict_lands_only_after_provisioning
+
+test result: FAILED. 61 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+error: test failed, to rerun pass `-p creance-vm --lib`

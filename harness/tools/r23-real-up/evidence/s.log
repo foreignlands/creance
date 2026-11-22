@@ -1,0 +1,7 @@
+downloading ubuntu-24.04-server-cloudimg-amd64.img (first setup only, ~600 MB)…
+instance prof-downloads-6f0539c5 created; run `creance up` to start it
+
+real	0m24.789s
+user	0m4.269s
+sys	0m1.801s
+setup RC=0

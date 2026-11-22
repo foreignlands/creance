@@ -1,0 +1,37 @@
+### L0 idempotent re-up
+up#A RC=0 netdev=-netdev user,id=net0,restrict=on,hostfwd=tcp:127.0.0.1:45643-:22 alive pid=109352
+up#B RC=0 alive pid=109352 same-pid=yes
+    Environment is up. The guest's only route out is the managed core (`creance escape-test` proves it).
+### L4 we_started=false + mount-missing (ws=/home/ubuntu/r23-lab/prof-downloads)
+unit added rc=0
+up#A RC=1 dead
+    guest 工作区未挂载（"mount-missing\n"）——请 creance stop 后 creance setup 重建环境
+    guest: instance prof-downloads-6f0539c5 is not running
+up#B RC=1 dead marker=present
+    guest 工作区未挂载（"mount-missing\n"）——请 creance stop 后 creance setup 重建环境
+unit removed rc=0
+### L3 active-oneshot restart
+unit added rc=0
+up RC=0
+    guest: before=/etc/systemd/system/r23-restart.service
+    guest: ExecMainStartTimestamp=Sun 2026-11-22 13:05:27 UTC
+    guest: restart-rc=0
+    guest: after=/etc/systemd/system/r23-restart.service
+    guest: ExecMainStartTimestamp=Sun 2026-11-22 13:05:39 UTC
+unit removed rc=0
+### L2 old-instance (unit without ExecStartPost)
+unit downgraded rc=0
+up RC=1 dead marker=present
+    guest 第一道防线（iptables 锁闭）未在武装状态——restrict=on 下的绿色直连判定不可信，按未验证拒绝交付，VM 已停止；请 creance stop 后 creance setup 重建环境。探针原始输出："tcp-blocked\nicmp-blocked\nfw-down\n"
+1
+unit restored rc=0
+### L1 marker deleted
+up#A RC=0 netdev=-netdev user,id=net0,hostfwd=tcp:127.0.0.1:45643-:22 marker-after=present
+    供给完成——下次 creance stop && creance up 起 slirp restrict=on 第二道防线生效
+    Environment is up. The guest's only route out is the managed core (`creance escape-test` proves it).
+up#B RC=0 netdev=-netdev user,id=net0,restrict=on,hostfwd=tcp:127.0.0.1:45643-:22
+### L5 instance dir renamed
+up RC=1
+    实例 prof-downloads-6f0539c5 不存在（未 setup 或已被删除）；拒绝启动，请先 creance setup
+prof-downloads-6f0539c5.renamed
+restored marker=present

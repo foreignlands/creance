@@ -1,0 +1,14 @@
+stamp: root 644 2026-11-22 12:55:00.879000000 +0000
+  :OUTPUT DROP [0:0]
+  -A OUTPUT -o lo -j ACCEPT
+  -A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+  -A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT
+  -A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT
+  -A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT
+  -A OUTPUT -d 10.0.2.3/32 -p udp -m udp --dport 67 -j ACCEPT
+  -A OUTPUT -d 10.0.2.3/32 -p icmp -j ACCEPT
+probe=fw-armed
+egress-lock=active drift-unit=active
+rules.v4 tail: -A OUTPUT -p udp --dport 67 -d 10.0.2.3/32 -j ACCEPT;-A OUTPUT -p icmp -d 10.0.2.3/32 -j ACCEPT;COMMIT;
+tcp-1.1.1.1:443=blocked
+tcp-10.0.2.2:22=blocked

@@ -1,0 +1,133 @@
+
+running 17 tests
+... 3/17
+escape::tests::guest_script_is_posix_and_flags_every_probe --- FAILED
+.............
+failures:
+
+---- escape::tests::guest_script_is_posix_and_flags_every_probe stdout ----
+
+thread 'escape::tests::guest_script_is_posix_and_flags_every_probe' (69528) panicked at crates/creance/src/escape.rs:818:9:
+assertion `left == right` failed: #!/bin/sh
+# creance escape probes (in-guest). A flag file placed on the host is the
+# escape oracle: if any probe can read it, containment failed.
+#
+# F-062: PATH hard-reset first. The transport (guest login shell) sources
+# ~/.bashrc on Ubuntu's patched bash even for non-interactive ssh, and rc
+# files are guest-writable — a shadowed PATH used to decide the verdicts.
+# Absolute paths cover the probe bodies (FINDING-011); this reset covers
+# the remaining bare commands. Still not defeatable from inside: stdout
+# redirection and interpreter shadowing — the host-side consumer now
+# treats a missing probe line as failure, and the README says plainly
+# that guest probes are telemetry, not the security control.
+export PATH=/usr/bin:/bin
+FLAG=/nonexistent-flag
+# Filesystem: the host flag must not be reachable by any guest path.
+# F-064: literal emission like every other probe — a helper-routed id was
+# invisible to the host-side expected-line net.
+echo "PROBE fs-flag-readable PASS"
+echo "PROBE fs-flag-readable SKIP — oracle flag 未能落盘"
+# Identity (020/022): the session runs as the generated identity, and no
+# privilege path may exist — root inside the guest could lift the firewall.
+if [ "$(/usr/bin/id -un)" != "devabc12345" ]; then
+  echo "PROBE guest-identity ESCAPE"
+else
+  echo "PROBE guest-identity PASS"
+fi
+if /usr/bin/sudo -n true 2>/dev/null; then
+  echo "PROBE guest-privilege ESCAPE"
+else
+  echo "PROBE guest-privilege PASS"
+fi
+# Credentials: no host secrets in the guest environment. The external
+# commands are spelled with absolute paths so a polluted guest PATH cannot
+# fake the oracle (FINDING-011).
+if /usr/bin/env | /usr/bin/grep -qE 'ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|_API_KEY='; then
+  echo "PROBE env-credentials ESCAPE"
+else
+  echo "PROBE env-credentials PASS"
+fi
+# Credentials, token shape (F-022): the session token is the ONLY 48-hex
+# secret the environment may carry.
+if /usr/bin/env | /usr/bin/grep -v '^CREANCE_SESSION_TOKEN=' | /usr/bin/grep -qE '[0-9a-f]{48}'; then
+  echo "PROBE env-hex-tokens ESCAPE"
+else
+  echo "PROBE env-hex-tokens PASS"
+fi
+# SSH: no agent socket, no host keys carried in — a finding IS an escape
+# of the containment boundary, not an unmeasurable case.
+if [ -n "$SSH_AUTH_SOCK" ] || /usr/bin/ls ~/.ssh/id_* >/dev/null 2>&1; then
+  echo "PROBE ssh-material ESCAPE"
+else
+  echo "PROBE ssh-material PASS"
+fi
+# Sockets: no docker/lima sockets to abuse.
+for s in /var/run/docker.sock /run/docker.sock /var/run/lima-guestagent.sock; do
+  [ -S "$s" ] && echo "PROBE sock-$s ESCAPE"
+done
+# Abstract-socket abuse is not checked yet: report SKIP so it can never
+# fake a pass (FINDING-011).
+echo "PROBE sock-abstract SKIP"
+# 0.3 ENFORCED NETWORK PROBES — the topology firewall must hold:
+# direct egress to external IPs is dropped, external DNS is dropped,
+# IPv6 is disabled. Escape = any of them succeeds.
+if command -v curl >/dev/null 2>&1; then
+  if curl -m 5 -s -o /dev/null https://1.1.1.1/ || curl -m 5 -s -o /dev/null http://93.184.216.34/; then
+    echo "PROBE net-direct-egress ESCAPE"
+  else
+    echo "PROBE net-direct-egress PASS"
+  fi
+else
+  echo "PROBE net-direct-egress SKIP"
+fi
+if command -v getent >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
+  if timeout 4 getent hosts example.com >/dev/null 2>&1; then
+    echo "PROBE net-dns-external ESCAPE"
+  else
+    echo "PROBE net-dns-external PASS"
+  fi
+else
+  echo "PROBE net-dns-external SKIP"
+fi
+if command -v ip >/dev/null 2>&1; then
+  if ip -6 addr show scope global 2>/dev/null | grep -q inet6; then
+    echo "PROBE net-ipv6 ESCAPE"
+  else
+    echo "PROBE net-ipv6 PASS"
+  fi
+else
+  echo "PROBE net-ipv6 SKIP"
+fi
+# F-060: ICMP used to be allowed to ANY destination — an echo channel the
+# TCP/DNS probes never watched. External echoes must die (only the NAT
+# subnets keep ICMP for path-MTU); no ping binary = honestly SKIP.
+if command -v ping >/dev/null 2>&1; then
+  if timeout 3 ping -c1 -W2 1.1.1.1 >/dev/null 2>&1; then
+    echo "PROBE net-icmp-external ESCAPE"
+  else
+    echo "PROBE net-icmp-external PASS"
+  fi
+else
+  echo "PROBE net-icmp-external SKIP"
+fi
+# Positive control: the ONLY route (loopback tunnel to the host core) works.
+# The username must match the core's configured auth (store::endpoint's
+# 'session' — a drift here fails the probe honestly, as the 2026-11-21
+# sweep's first live round demonstrated).
+if curl -m 8 -s --socks5-hostname "session:deadbeef"@127.0.0.1:17896 https://1.1.1.1/cdn-cgi/trace | grep -q ip=; then
+  echo "PROBE proxy-path PASS"
+else
+  echo "PROBE proxy-path ESCAPE"
+fi
+
+  left: 2
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    escape::tests::guest_script_is_posix_and_flags_every_probe
+
+test result: FAILED. 16 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p creance --lib`

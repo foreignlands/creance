@@ -1,0 +1,24 @@
+
+running 17 tests
+. 1/17
+escape::tests::egress_probe_reads_only_unprivileged_evidence --- FAILED
+...............
+failures:
+
+---- escape::tests::egress_probe_reads_only_unprivileged_evidence stdout ----
+
+thread 'escape::tests::egress_probe_reads_only_unprivileged_evidence' (98374) panicked at crates/creance/src/escape.rs:932:9:
+export PATH=/usr/bin:/bin
+if /usr/bin/timeout 1 /bin/true; then /usr/bin/timeout 5 /bin/bash -c '</dev/tcp/1.1.1.1/443' 2>/dev/null && echo tcp-open || echo tcp-blocked; else echo tcp-unknown; fi
+if [ -x /usr/bin/ping ]; then /usr/bin/timeout 3 /usr/bin/ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo icmp-open || echo icmp-blocked; else echo icmp-unknown; fi
+echo fw-armed
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    escape::tests::egress_probe_reads_only_unprivileged_evidence
+
+test result: FAILED. 16 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p creance --lib`
