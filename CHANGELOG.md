@@ -4,6 +4,25 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.6.14] — 2026-11-22
+
+### Fixed — night-22 (R22 audit round)
+
+- F-082 (S4): the fw-armed probe ran `iptables -L` as the unprivileged
+  guest user — permission denied made every `up` fail closed. The
+  egress-lock unit now stamps the live OUTPUT section into root-owned
+  `/run/egress-armed` (ExecStartPost); the apply leg `systemctl
+  restart`s the unit so apply and stamp share one path.
+- F-083 (S4): a DROP policy plus a bare `-A OUTPUT -j ACCEPT` no longer
+  reads as armed — the probe rejects the unqualified accept.
+- F-084 (S5): probe script and verdict factored into
+  `escape::egress_probe_script`/`egress_verdict` with per-branch tests;
+  `guest_script` places the oracle flag itself (the `oracle_ready`
+  parameter is gone); source-order guard pins the provisioned marker
+  after the verdict; workbench TE and duplicate-CL get socket-level
+  400 tests; provision/Lima pin assertions hardened.
+- F-085 (S5): CHANGELOG backfilled for 0.6.10–0.6.13.
+
 ## [0.6.13] — 2026-11-22
 
 ### Fixed — night-21/22 (R21/R22 audit rounds)
