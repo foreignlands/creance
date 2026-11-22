@@ -115,7 +115,7 @@ mod tests {
         assert!(ud.contains("lock_passwd: true"));
         assert!(ud.contains("- ssh-ed25519 AAAA test"));
         // The shared bootstrap rides in runcmd, lockdown included.
-        assert!(ud.contains("iptables-restore < /etc/iptables/rules.v4"));
+        assert!(ud.contains("iptables-restore /etc/iptables/rules.v4"));
         assert!(ud.contains("CREANCE_SESSION_TOKEN="));
         // 9p mount leg present, tagged, fstab-persisted.
         assert!(ud.contains("mount -t 9p"));
@@ -144,7 +144,7 @@ mod tests {
         let second = runcmd[1][2].as_str().unwrap();
         assert!(first.contains("mount -t 9p"));
         assert!(!first.contains("iptables"));
-        assert!(second.contains("iptables-restore < /etc/iptables/rules.v4"));
+        assert!(second.contains("systemctl restart egress-lock.service"));
         // F-076/F-073: QEMU's table must hold slirp's hosts as /32 and
         // never a foreign (Lima usernet) range — the S2 leak that
         // motivated per-backend rendering must stay impossible.

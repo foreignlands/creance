@@ -60,7 +60,7 @@ fn die(section: &str, msg: String) -> ! {
 }
 
 fn main() {
-    let post = creance::escape::guest_script("/nonexistent-flag", true, "deadbeef", 17896, "devabc12345");
+    let post = creance::escape::guest_script("/nonexistent-flag", "deadbeef", 17896, "devabc12345");
     let pre = revert_to_prefix(&post);
     let expected_pre = expected_ids(&pre);
 

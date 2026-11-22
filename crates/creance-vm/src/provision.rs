@@ -96,6 +96,10 @@ Wants=network-pre.target
 [Service]
 Type=oneshot
 ExecStart=/usr/sbin/iptables-restore /etc/iptables/rules.v4
+# F-082: the up-gate runs unprivileged and cannot read netfilter — the
+# unit stamps the LIVE OUTPUT section into a root-owned file under /run
+# (tmpfs; the guest user cannot write /run, so it cannot be forged).
+ExecStartPost=/bin/sh -c '/usr/sbin/iptables-save -t filter | /usr/bin/grep -E "^:OUTPUT|^-A OUTPUT" > /run/egress-armed'
 RemainAfterExit=yes
 
 [Install]
@@ -172,8 +176,13 @@ timeout "$TOOLCHAIN_BUDGET" sh -c '
 # so the applied set and the persisted set cannot drift. Lima replays
 # this script on every start and cloud-init runs it once; restore is
 # idempotent either way. (`up` additionally verifies behaviorally; see
-# main.rs.)
-/usr/sbin/iptables-restore < /etc/iptables/rules.v4
+# main.rs.) The unit is started rather than replaying the ruleset by
+# hand so the /run/egress-armed stamp (F-082) is written by the same
+# code path that will run at every later boot — one apply, one stamp.
+# `restart`, not `start`: a RemainAfterExit oneshot already active is a
+# no-op under start, but Lima replays this script and must re-apply
+# + re-stamp.
+systemctl restart egress-lock.service
 
 # 020 PRIVILEGE RETIREMENT — cloud-init unconditionally grants the guest
 # user sudo (NOPASSWD, or a random password parked in ~/password when
@@ -256,14 +265,24 @@ mod tests {
             "the ruleset is persisted to disk before the toolchain leg"
         );
         assert!(
-            s.contains("iptables-restore < /etc/iptables/rules.v4"),
-            "the runtime apply replays the persisted file verbatim"
+            s.contains("ExecStart=/usr/sbin/iptables-restore /etc/iptables/rules.v4"),
+            "the unit replays the persisted file verbatim"
+        );
+        assert!(
+            s.contains("systemctl restart egress-lock.service"),
+            "the runtime apply goes through the unit (restore + stamp)"
         );
         // Restore replaces the whole table — idempotent under Lima's
-        // every-boot replay and cloud-init's once-run alike.
+        // every-boot replay and cloud-init's once-run alike. iptables-save
+        // is allowed only in the read-only /run/egress-armed stamp — never
+        // into rules.v4 (LIMADNS contamination).
         assert!(
-            !s.contains("iptables-save"),
-            "no capture-based persistence (LIMADNS contamination)"
+            !s.contains("iptables-save > /etc"),
+            "no capture-based persistence into rules.v4 (LIMADNS contamination)"
+        );
+        assert!(
+            !s.contains("iptables-save -f"),
+            "no capture-based persistence into rules.v4 (LIMADNS contamination)"
         );
     }
 
@@ -272,7 +291,7 @@ mod tests {
         let s = script();
         let toolchain = s.find("TOOLCHAIN_BUDGET").expect("toolchain leg");
         let lockdown = s
-            .find("iptables-restore < /etc/iptables/rules.v4")
+            .find("systemctl restart egress-lock.service")
             .expect("runtime lockdown apply");
         assert!(
             toolchain < lockdown,
@@ -293,10 +312,32 @@ mod tests {
             "the boot-replay unit must be enabled before the toolchain leg"
         );
         // No `|| true` on the policy flip itself — it must land or fail loud.
-        let flip = s.find("iptables-restore < /etc/iptables/rules.v4").unwrap();
+        let flip = s.find("systemctl restart egress-lock.service").unwrap();
         let rest = &s[flip..];
         let line_end = rest.find('\n').unwrap();
         assert!(!rest[..line_end].contains("|| true"));
+    }
+
+    #[test]
+    fn armed_stamp_is_root_written_from_live_rules() {
+        // F-082/F-083: the unprivileged up-gate reads /run/egress-armed;
+        // it must be produced by the unit (root) from the LIVE ruleset —
+        // not by any path the guest user controls.
+        let s = script();
+        assert!(
+            s.contains("ExecStartPost=/bin/sh -c '/usr/sbin/iptables-save -t filter"),
+            "{s}"
+        );
+        assert!(s.contains("> /run/egress-armed"), "{s}");
+        // The stamp covers the OUTPUT policy line AND its rules, so a
+        // bare -A OUTPUT -j ACCEPT cannot masquerade as armed (F-083).
+        assert!(s.contains("^:OUTPUT|^-A OUTPUT"), "{s}");
+        // The apply leg goes through the unit — the stamp is written by
+        // the same code path that runs at every later boot.
+        assert!(s.contains("systemctl restart egress-lock.service"), "{s}");
+        // F-084: a bad node checksum must never be unpacked — the rm
+        // gate rides on the same line as the verify.
+        assert!(s.contains("sha256sum -c - >> /var/log/creance-toolchain.log 2>&1 || rm -f /tmp/creance-node.tar.gz"), "{s}");
     }
 
     #[test]

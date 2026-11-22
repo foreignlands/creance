@@ -3,6 +3,10 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 082 | S4 | fw-armed 探针无特权运行 iptables -L：PATH 无 /usr/sbin + Permission denied，v0.6.13 每次 up 恒失败停机、provisioned 永不写入 | H1 / F-081 修复面 | 已修复（main-session，实机复验） |
+| 083 | S4 | fw-armed 只看默认策略：DROP 策略 + 裸 -A OUTPUT -j ACCEPT 仍判 armed | H1 / F-081 修复面 | 已修复（main-session，实机复验） |
+| 084 | S5 | v0.6.13 修复面 10 例变异仍全绿：F-078 调用点、F-079 TE/node 校验/Lima digest 键、F-081 五例 | H1 / F-076 同类 | 已修复（main-session，实机复验） |
+| 085 | S5 | CHANGELOG 停在 0.6.9，0.6.10–0.6.13 无条目 | 发版规程 | 已修复（main-session） |
 | 078 | S5 | F-076 修复残留：flag_placed 仍内联于 cmd_up 且其与 oracle_ready 的接线零守护 | H1 / F-074+076 修复面 | 已修复（main-session，实机复验） |
 | 079 | S5 | v0.6.12 新面零行为守护：strict_content_length 拒绝矩阵、gate 重复 CL→400、node sha256 钉值、Lima digest 钉值均无测试 | H1 / F-076 同类 | 已修复（main-session，实机复验） |
 | 080 | S4 | Lima digest 钉在滚动 release/ URL：下次 Ubuntu 刷新 digest 必失配，全部 setup 失败关闭 | H1 / a7ac0e3 修复面 | 已修复（main-session，实机复验） |

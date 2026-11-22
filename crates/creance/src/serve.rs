@@ -321,3 +321,44 @@ pub fn gate_instance_dir(profile: &str) -> String {
         &vm::instance_name(profile, &vm::environment_dir(profile)),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+
+    fn roundtrip(request: &str) -> String {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let ctx = ServeCtx {
+            profile: "t".into(),
+            config_path: "/nonexistent".into(),
+        };
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            handle(stream, port, ctx);
+        });
+        let mut c = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        c.write_all(request.as_bytes()).unwrap();
+        let _ = c.shutdown(std::net::Shutdown::Write);
+        let mut buf = String::new();
+        let _ = c.read_to_string(&mut buf);
+        buf
+    }
+
+    #[test]
+    fn transfer_encoding_is_rejected() {
+        // F-079/F-084: TE must stay a hard 400 — removing the check lets
+        // a chunked body desync the parser (request smuggling).
+        assert!(
+            roundtrip("POST /api/x HTTP/1.1\r\nHost: 127.0.0.1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n")
+                .starts_with("HTTP/1.1 400"),
+            "TE request must be refused"
+        );
+        assert!(
+            roundtrip("POST /api/x HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\n{}")
+                .starts_with("HTTP/1.1 400"),
+            "duplicated Content-Length must be refused"
+        );
+    }
+}

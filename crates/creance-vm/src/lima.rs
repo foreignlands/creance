@@ -282,9 +282,11 @@ mod tests {
         // mirror serves next.
         let yaml = String::from_utf8(generate_lima_yaml(&options()).unwrap()).unwrap();
         assert!(yaml.contains("release-20261017/"), "{yaml}");
+        // Assert key+value as one string — renaming the `digest` key
+        // (which silently disables verification) must also go red.
         assert!(
             yaml.contains(
-                "sha256:50e24e1fb79e89116e939d90aa7738f7af48c442fa1bc2510131e0b39c50348e"
+                "digest: sha256:50e24e1fb79e89116e939d90aa7738f7af48c442fa1bc2510131e0b39c50348e"
             ),
             "{yaml}"
         );

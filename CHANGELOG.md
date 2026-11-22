@@ -4,6 +4,82 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.6.13] — 2026-11-22
+
+### Fixed — night-21/22 (R21/R22 audit rounds)
+
+- F-078/F-084: `guest_script` places the fs-flag oracle itself — no
+  caller-supplied `oracle_ready` to wire wrong.
+- F-079: request-side strictness proven — `strict_content_length`
+  ambiguity matrix tests, gate duplicate Content-Length → 400 socket
+  test, workbench Transfer-Encoding → 400 socket test, node tarball
+  sha256 gate and Lima image digest pinned assertions.
+- F-080: Lima cloud image URL moved from the rolling `release/` dir to
+  the immutable dated `release-20261017/` — the pinned digest can no
+  longer be invalidated by an Ubuntu refresh (every setup would have
+  failed closed).
+- F-081: `up` gate now requires positive first-line evidence
+  (`fw-armed`) — slirp restrict=on can no longer mask a disarmed guest
+  firewall; the `provisioned` marker is written only after every gate
+  passes.
+- F-082/F-083: the fw-armed evidence is `/run/egress-armed` — a
+  root-owned stamp the egress-lock unit writes from the LIVE ruleset
+  via ExecStartPost (the apply leg now `systemctl restart`s the unit so
+  apply and stamp share one path). The unprivileged guest probe can
+  read it; `iptables -L` needed root and always printed fw-down, and a
+  bare `-A OUTPUT -j ACCEPT` no longer masquerades as armed.
+- F-084: `egress_probe_script`/`egress_verdict` factored into
+  creance::escape with per-branch tests; source-order guard pins the
+  provisioned-marker write after the verdict.
+
+## [0.6.12] — 2026-11-22
+
+### Fixed — night-20 (R20 audit round)
+
+- F-076: behavior guards for the v0.6.11 fix surfaces — restrict=on
+  lands only with the provisioned marker, QEMU/Lima /32 NAT allow
+  tables mutually exclusive, oracle_ready=false single-SKIP, runcmd
+  mount-before-bootstrap ordering; r14/r15 verdict tools repaired.
+- F-077: restrict=on declaration surfaces aligned; first-provision
+  `up` prints the stop+up hint.
+
+## [0.6.11] — 2026-11-22
+
+### Fixed — night-19/20 (R19 audit round)
+
+- F-073 (S2): rules.v4 rendered per-backend /32 allows only (QEMU
+  10.0.2.2/.3, Lima 192.168.5.2/.3) — a routable path to the host NIC
+  is closed.
+- F-074: fs-flag probe emits a single SKIP when the oracle cannot be
+  placed (no more PASS+SKIP dual verdict).
+- F-075: QEMU runcmd mounts before bootstrap; `up` verifies the
+  workspace mount (`mountpoint -q`, `mount -a` fallback, honest
+  failure).
+- slirp `restrict=on`: second line of defense — after provisioning the
+  guest's raw-IP egress is cut at NAT level even if in-guest iptables
+  is fully bypassed.
+- HTTP header parsing consolidated into `creance-net::wire`
+  (`parse_header_block` + `strict_content_length`); gate and workbench
+  reject ambiguous Content-Length.
+- Supply chain: node v22.14.0 tarball sha256-pinned per arch; Lima
+  cloudimg digest-pinned.
+
+## [0.6.10] — 2026-11-22
+
+### Fixed — night-18/19 (R18 audit round)
+
+- F-071 (S2): QEMU `up` waited only for sshd, firing the egress probe
+  inside the cloud-init provisioning window and killing healthy first
+  boots; waits for provisioning to finish.
+- F-072 (S2): lockdown lands as persisted artifacts first (rules.v4 +
+  egress-lock.service enabled before the toolchain leg); an
+  interrupted provision converges to "network up, locked" instead of
+  a silently unarmed guest.
+- F-068/069/070: probe-oracle and declaration-surface corrections.
+- `creance up` is idempotent: an instance already running is reused
+  (instance-level flock); a second qemu can no longer clobber qemu.pid
+  and orphan the real VM.
+
 ## [0.6.9] — 2026-11-22
 
 ### Fixed — night-19 (R17 handoff)

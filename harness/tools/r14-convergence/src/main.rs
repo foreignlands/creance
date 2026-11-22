@@ -61,7 +61,7 @@ fn die(section: &str, msg: String) -> ! {
 }
 
 fn main() {
-    let script = guest_script("/nonexistent-flag", true, "deadbeef", 17896, "devabc12345");
+    let script = guest_script("/nonexistent-flag", "deadbeef", 17896, "devabc12345");
     let expected = expected_ids(&script);
 
     // [A] 集合本身

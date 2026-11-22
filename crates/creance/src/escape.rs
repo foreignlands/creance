@@ -299,11 +299,46 @@ fn scan_unknown_tokens(profile: &str) -> Result<Vec<(String, String)>, String> {
     Ok(unknown)
 }
 
+/// The `creance up` in-guest egress probe (F-059/F-081/F-082). Runs as
+/// the unprivileged guest user — every check must be readable without
+/// root. `fw-armed` reads /run/egress-armed: a root-owned stamp the
+/// egress-lock unit writes from the LIVE ruleset after each restore
+/// (unprivileged users cannot create files in /run, so the stamp
+/// cannot be forged from the guest account).
+pub fn egress_probe_script() -> &'static str {
+    "export PATH=/usr/bin:/bin\n\
+     if /usr/bin/timeout 1 /bin/true; then /usr/bin/timeout 5 /bin/bash -c '</dev/tcp/1.1.1.1/443' 2>/dev/null && echo tcp-open || echo tcp-blocked; else echo tcp-unknown; fi\n\
+     if [ -x /usr/bin/ping ]; then /usr/bin/timeout 3 /usr/bin/ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo icmp-open || echo icmp-blocked; else echo icmp-unknown; fi\n\
+     if [ -f /run/egress-armed ] && grep -q '^:OUTPUT DROP' /run/egress-armed && ! grep -qxF -- '-A OUTPUT -j ACCEPT' /run/egress-armed; then echo fw-armed; else echo fw-down; fi\n"
+}
+
+/// Verdict of the up-gate probe output. Err(reason) refuses delivery —
+/// fail-closed: any missing or unexpected evidence is a refusal, never
+/// a soft pass (F-062/F-081/F-083).
+pub fn egress_verdict(out: &str) -> Result<(), &'static str> {
+    let tcp_ok = out.contains("tcp-blocked") && !out.contains("tcp-open");
+    let icmp_ok = out.contains("icmp-blocked")
+        || (out.contains("icmp-unknown") && !out.contains("icmp-open"));
+    // F-081: once slirp restrict=on arms, tcp/icmp stay "blocked" even
+    // with the in-guest firewall flushed — the second line masks a dead
+    // first line. Require fw-armed or a disarmed guest goes green.
+    let fw_ok = out.contains("fw-armed");
+    if tcp_ok && icmp_ok && fw_ok {
+        return Ok(());
+    }
+    Err(if out.contains("tcp-open") || out.contains("icmp-open") {
+        "guest 防火墙未生效（直连可达）"
+    } else if !fw_ok {
+        "guest 第一道防线（iptables 锁闭）未在武装状态——restrict=on 下的绿色直连判定不可信，按未验证拒绝交付"
+    } else {
+        "无法取得防火墙正向证据（探针输出缺失或被干扰，按未验证拒绝交付）"
+    })
+}
+
 /// Places the fs-flag oracle on the host. Returns whether the flag
-/// actually landed — the caller feeds that into [`guest_script`] as
-/// `oracle_ready`, so a flag that never existed can never produce a
-/// vacuous PASS (F-078).
-pub fn place_oracle_flag(path: &str) -> bool {
+/// actually landed — [`guest_script`] calls this itself so a flag that
+/// never existed can never produce a vacuous PASS (F-078).
+fn place_oracle_flag(path: &str) -> bool {
     std::fs::write(path, b"creance-escape-oracle\n").is_ok()
 }
 
@@ -311,16 +346,12 @@ pub fn place_oracle_flag(path: &str) -> bool {
 /// RESULT` line per check (RESULT in PASS/ESCAPE/SKIP). Kept POSIX-sh so it
 /// runs on any guest. `expected_user` is the generated guest identity the
 /// VM must be running as (F-022).
-pub fn guest_script(
-    flag_path: &str,
-    oracle_ready: bool,
-    auth: &str,
-    port: u16,
-    expected_user: &str,
-) -> String {
-    // F-074: the fs probe must emit exactly one verdict. When the host
-    // could not place the oracle flag the probe is unmeasurable — SKIP,
-    // never a vacuous PASS alongside a second SKIP line.
+pub fn guest_script(flag_path: &str, auth: &str, port: u16, expected_user: &str) -> String {
+    // F-074/F-078: the flag is placed here, inside the same call that
+    // renders the probe — a caller can never pass a flag state that
+    // does not match the disk. Unplaceable flag → SKIP fragment, never
+    // a vacuous PASS alongside a second SKIP line.
+    let oracle_ready = place_oracle_flag(flag_path);
     let fs_probe = if oracle_ready {
         r#"if [ -f "$FLAG" ]; then
   echo "PROBE fs-flag-readable ESCAPE"
@@ -774,11 +805,15 @@ mod tests {
 
     #[test]
     fn guest_script_is_posix_and_flags_every_probe() {
-        let script = guest_script("/nonexistent-flag", true, "deadbeef", 17896, "devabc12345");
+        // A flag path that lands → the real probe fragment.
+        let flag = std::env::temp_dir().join(format!("creance-test-flag-{}", std::process::id()));
+        let flag = flag.to_str().unwrap().to_owned();
+        let script = guest_script(&flag, "deadbeef", 17896, "devabc12345");
+        assert!(script.contains("PROBE fs-flag-readable ESCAPE"), "{script}");
         assert!(script.starts_with("#!/bin/sh"));
         // F-074/F-076: without the oracle the fs probe emits exactly one
         // SKIP line — never a vacuous PASS beside it.
-        let no_oracle = guest_script("/nonexistent-flag", false, "deadbeef", 17896, "devabc12345");
+        let no_oracle = guest_script("/nonexistent-flag", "deadbeef", 17896, "devabc12345");
         assert_eq!(
             no_oracle.matches("PROBE fs-flag-readable").count(),
             1,
@@ -788,14 +823,11 @@ mod tests {
             no_oracle.contains("PROBE fs-flag-readable SKIP"),
             "{no_oracle}"
         );
-        // F-078: the host-side wiring — a flag that cannot be placed
-        // must produce the SKIP script, not the real probe.
+        // F-078/F-084: a flag path that cannot be placed must produce
+        // the SKIP script — guest_script places it internally, so this
+        // is the same code path the caller runs (no wiring to fake).
         let unwritable = "/nonexistent-dir-nope/flag";
-        assert!(!place_oracle_flag(unwritable));
-        assert!(
-            guest_script(unwritable, place_oracle_flag(unwritable), "a", 1, "u")
-                .contains("PROBE fs-flag-readable SKIP")
-        );
+        assert!(guest_script(unwritable, "a", 1, "u").contains("PROBE fs-flag-readable SKIP"));
         for required in [
             "PROBE fs-flag-readable ESCAPE",
             "PROBE fs-flag-readable PASS",
@@ -859,5 +891,50 @@ mod tests {
             }
             std::fs::remove_dir_all(&profile).unwrap();
         }
+    }
+
+    #[test]
+    fn egress_verdict_is_fail_closed_per_branch() {
+        // F-084: every refusal branch must be reachable — a verdict
+        // that lost the fw_ok or open-check branch goes silently green.
+        assert!(egress_verdict("tcp-blocked\nicmp-blocked\nfw-armed\n").is_ok());
+        // Open direct path → the "direct reachable" reason.
+        assert_eq!(
+            egress_verdict("tcp-open\nicmp-blocked\nfw-armed\n").unwrap_err(),
+            "guest 防火墙未生效（直连可达）"
+        );
+        assert_eq!(
+            egress_verdict("tcp-blocked\nicmp-open\nfw-armed\n").unwrap_err(),
+            "guest 防火墙未生效（直连可达）"
+        );
+        // First line disarmed → the dedicated fw reason (not the generic).
+        assert!(egress_verdict("tcp-blocked\nicmp-blocked\nfw-down\n")
+            .unwrap_err()
+            .contains("第一道防线"));
+        // Missing/garbled evidence → fw evidence absent takes priority;
+        // fw-armed alone (tcp/icmp lines missing) → generic refusal.
+        assert!(egress_verdict("").unwrap_err().contains("第一道防线"));
+        assert!(egress_verdict("garbage")
+            .unwrap_err()
+            .contains("第一道防线"));
+        assert!(egress_verdict("fw-armed").unwrap_err().contains("正向证据"));
+        // ICMP tool absent is not a failure; ICMP open is.
+        assert!(egress_verdict("tcp-blocked\nicmp-unknown\nfw-armed\n").is_ok());
+    }
+
+    #[test]
+    fn egress_probe_reads_only_unprivileged_evidence() {
+        // F-082: no netfilter read (needs root), no PATH outside
+        // /usr/bin:/bin binaries — the stamp file is the contract.
+        let p = egress_probe_script();
+        assert!(!p.contains("iptables"), "{p}");
+        assert!(!p.contains("nft"), "{p}");
+        assert!(p.contains("/run/egress-armed"), "{p}");
+        assert!(p.contains("^:OUTPUT DROP"), "{p}");
+        // F-083: a bare blanket ACCEPT must not read as armed.
+        assert!(p.contains("'-A OUTPUT -j ACCEPT'"), "{p}");
+        assert!(p.contains("/dev/tcp/1.1.1.1/443"), "{p}");
+        // F-062: PATH reset survives.
+        assert!(p.contains("export PATH=/usr/bin:/bin"), "{p}");
     }
 }

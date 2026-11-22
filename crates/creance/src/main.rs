@@ -357,12 +357,10 @@ fn cmd_escape_test() -> i32 {
         // The flag is the oracle: it must exist on the host for the guest
         // probe to have anything to look for. Without it fs-flag-readable
         // was a vacuous PASS (F-068).
-        let flag_placed = escape::place_oracle_flag(&flag);
         let store = creance_proxy::load(&profile).ok();
         let guest = creance_vm::guestprofile::Profile::load_or_create(&profile).ok();
         let script = escape::guest_script(
             &flag,
-            flag_placed,
             &store.as_ref().map(|s| s.auth.clone()).unwrap_or_default(),
             store
                 .as_ref()
@@ -419,11 +417,9 @@ fn cmd_escape_test() -> i32 {
             }
             Err(e) => eprintln!("cannot run in-guest probes: {e}"),
         }
-        if flag_placed {
-            let _ = std::fs::remove_file(&flag);
-        }
-        // !flag_placed already emitted its own SKIP inside the script —
-        // one verdict per probe (F-074).
+        // The flag was placed (or attempted) inside guest_script itself;
+        // removing it unconditionally is harmless when it never landed.
+        let _ = std::fs::remove_file(&flag);
     }
     code
 }
@@ -748,30 +744,14 @@ fn cmd_up() -> i32 {
         // (Not defeatable from here: stdout redirection in rc files and
         // interpreter shadowing — the README's honest-boundaries section
         // says so; the host-side gate evidence is the security control.)
-        let probe = "export PATH=/usr/bin:/bin\n\
-                     if /usr/bin/timeout 1 /bin/true; then /usr/bin/timeout 5 /bin/bash -c '</dev/tcp/1.1.1.1/443' 2>/dev/null && echo tcp-open || echo tcp-blocked; else echo tcp-unknown; fi\n\
-                     if [ -x /usr/bin/ping ]; then /usr/bin/timeout 3 /usr/bin/ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo icmp-open || echo icmp-blocked; else echo icmp-unknown; fi\n\
-                     if iptables -L OUTPUT -n 2>/dev/null | head -1 | grep -q 'policy DROP'; then echo fw-armed; else echo fw-down; fi\n";
-        match creance_vm::vm::guest_script(&profile, &instance, probe) {
+        // F-082: the probe runs as the unprivileged guest user — the
+        // fw-armed evidence is a root-owned stamp under /run (written
+        // by the egress-lock unit from the LIVE ruleset), not an
+        // iptables read the guest user cannot perform.
+        match creance_vm::vm::guest_script(&profile, &instance, escape::egress_probe_script()) {
             Ok(out) => {
-                let tcp_ok = out.contains("tcp-blocked") && !out.contains("tcp-open");
-                let icmp_ok = out.contains("icmp-blocked")
-                    || (out.contains("icmp-unknown") && !out.contains("icmp-open"));
-                // F-081: once slirp restrict=on arms, tcp/icmp stay
-                // "blocked" even with the in-guest firewall flushed —
-                // the second line masks a dead first line. Require the
-                // OUTPUT policy itself to still be DROP, or a disarmed
-                // guest would go green indefinitely.
-                let fw_ok = out.contains("fw-armed");
-                if !tcp_ok || !icmp_ok || !fw_ok {
+                if let Err(reason) = escape::egress_verdict(&out) {
                     let _ = creance_vm::vm::stop_vm(&profile, &instance);
-                    let reason = if out.contains("tcp-open") || out.contains("icmp-open") {
-                        "guest 防火墙未生效（直连可达）"
-                    } else if !fw_ok {
-                        "guest 第一道防线（iptables 锁闭）未在武装状态——restrict=on 下的绿色直连判定不可信，按未验证拒绝交付"
-                    } else {
-                        "无法取得防火墙正向证据（探针输出缺失或被干扰，按未验证拒绝交付）"
-                    };
                     return fail(format!(
                         "{reason}，VM 已停止；请 creance stop 后 creance setup 重建环境。探针原始输出：{out:?}"
                     ));
@@ -809,4 +789,26 @@ fn cmd_shell(command: Vec<String>) -> i32 {
     let instance = instance();
     let refs: Vec<&str> = command.iter().map(String::as_str).collect();
     creance_vm::vm::shell(&profile, &instance, &refs)
+}
+
+#[cfg(test)]
+mod up_gate_tests {
+    #[test]
+    fn provisioned_marker_only_after_verdict() {
+        // F-081/F-084: restrict=on must arm only after the behavioral
+        // gates pass — the marker write stays textually after the
+        // verdict call, never inside vm::up or ahead of a failure exit.
+        let src = include_str!("main.rs");
+        let verdict = src.find("escape::egress_verdict").expect("verdict call");
+        let mark = src
+            .find("creance_vm::vm::mark_provisioned")
+            .expect("marker write");
+        assert!(mark > verdict, "provisioned 标记必须写在守门判定之后");
+        assert!(
+            !src.contains(
+                "vm::up(&profile, &instance);\n    let _ = creance_vm::vm::mark_provisioned"
+            ),
+            "标记不得移回 vm::up 调用紧邻处"
+        );
+    }
 }
