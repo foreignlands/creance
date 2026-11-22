@@ -1,0 +1,24 @@
+id: uid=1000(dev21aac701) gid=1000(dev21aac701) groups=1000(dev21aac701)
+--- /run/egress-armed: mtime=2026-11-22 14:04:27.423000000 +0000 owner=root mode=644
+:OUTPUT DROP [0:0]
+-A OUTPUT -o lo -j ACCEPT
+-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT
+-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT
+-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT
+-A OUTPUT -d 10.0.2.3/32 -p udp -m udp --dport 67 -j ACCEPT
+-A OUTPUT -d 10.0.2.3/32 -p icmp -j ACCEPT
+--- rules.v4 OUTPUT: owner=root mode=644
+:OUTPUT DROP [0:0]
+-A OUTPUT -o lo -j ACCEPT
+-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT
+-A OUTPUT -p udp --dport 67 -d 10.0.2.2/32 -j ACCEPT
+-A OUTPUT -p icmp -d 10.0.2.2/32 -j ACCEPT
+-A OUTPUT -p udp --dport 67 -d 10.0.2.3/32 -j ACCEPT
+-A OUTPUT -p icmp -d 10.0.2.3/32 -j ACCEPT
+--- egress-lock: active=active enabled=enabled
+--- boot: 4537a501-a652-4177-b844-cb1383aa391f
+--- write attempts: stamp=[sh: 1: cannot create /run/egress-armed: Permission denied] rules=[sh: 1: cannot create /etc/iptables/rules.v4: Permission denied]
+--- direct tcp: blocked
+--- sudo: sudo: a password is required

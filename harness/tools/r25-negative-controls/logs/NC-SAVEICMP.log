@@ -1,0 +1,40 @@
+
+running 18 tests
+. 1/18
+escape::tests::egress_probe_reads_only_unprivileged_evidence --- FAILED
+.............. 16/18
+escape::tests::fw_probe_fragment_real_shell_truth_table --- FAILED
+.
+failures:
+
+---- escape::tests::egress_probe_reads_only_unprivileged_evidence stdout ----
+
+thread 'escape::tests::egress_probe_reads_only_unprivileged_evidence' (42812) panicked at crates/creance/src/escape.rs:1035:9:
+export PATH=/usr/bin:/bin
+if /usr/bin/timeout 1 /bin/true; then /usr/bin/timeout 5 /bin/bash -c '</dev/tcp/1.1.1.1/443' 2>/dev/null && echo tcp-open || echo tcp-blocked; else echo tcp-unknown; fi
+if [ -x /usr/bin/ping ]; then /usr/bin/timeout 3 /usr/bin/ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo icmp-open || echo icmp-blocked; else echo icmp-unknown; fi
+STAMP=${CREANCE_STAMP:-/run/egress-armed}; WANT=${CREANCE_RULES:-/etc/iptables/rules.v4}
+ok=0
+if [ -f "$STAMP" ] && [ -f "$WANT" ] && grep -q '^:OUTPUT DROP' "$STAMP" && grep -q '^:OUTPUT DROP' "$WANT"; then
+bad=$(cat "$STAMP" "$WANT" | grep -hE '^-A OUTPUT' | grep -vxF -e '-A OUTPUT -o lo -j ACCEPT' -e '-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT' -e '-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT' -e '-A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT' -e '-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT' -e '-A OUTPUT -p udp --dport 67 -d 10.0.2.2/32 -j ACCEPT' -e '-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT' -e '-A OUTPUT -p icmp -d 10.0.2.2/32 -j ACCEPT' -e '-A OUTPUT -p udp --dport 67 -d 10.0.2.3/32 -j ACCEPT' -e '-A OUTPUT -d 10.0.2.3/32 -p udp -m udp --dport 67 -j ACCEPT' -e '-A OUTPUT -p icmp -d 10.0.2.3/32 -j ACCEPT')
+[ -z "$bad" ] && ok=1
+fi
+if [ "$ok" = 1 ]; then echo fw-armed; else echo fw-down; fi
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- escape::tests::fw_probe_fragment_real_shell_truth_table stdout ----
+
+thread 'escape::tests::fw_probe_fragment_real_shell_truth_table' (42816) panicked at crates/creance/src/escape.rs:1061:9:
+assertion `left == right` failed
+  left: "fw-down"
+ right: "fw-armed"
+
+
+failures:
+    escape::tests::egress_probe_reads_only_unprivileged_evidence
+    escape::tests::fw_probe_fragment_real_shell_truth_table
+
+test result: FAILED. 16 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p creance --lib`

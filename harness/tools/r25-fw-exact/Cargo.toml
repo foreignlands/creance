@@ -1,0 +1,15 @@
+[package]
+name = "r25-fw-exact"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# R25: dumps the REAL v0.6.16 up-gate probe (escape::egress_probe_script fed by
+# creance_vm::vm::NAT_HOSTS_*) and the REAL rules.v4 heredoc rendered by
+# provision::guest_bootstrap for the same NAT table, so netns.sh replays both verbatim.
+
+[dependencies]
+creance = { path = "../../../crates/creance" }
+creance-vm = { path = "../../../crates/creance-vm" }
+
+[workspace]

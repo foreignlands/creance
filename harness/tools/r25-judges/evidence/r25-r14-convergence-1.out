@@ -1,0 +1,8 @@
+[A] expected ids (27): ["fs-flag-readable", "fs-flag-readable", "guest-identity", "guest-identity", "guest-privilege", "guest-privilege", "env-credentials", "env-credentials", "env-hex-tokens", "env-hex-tokens", "ssh-material", "ssh-material", "sock-abstract", "net-direct-egress", "net-direct-egress", "net-direct-egress", "net-dns-external", "net-dns-external", "net-dns-external", "net-ipv6", "net-ipv6", "net-ipv6", "net-icmp-external", "net-icmp-external", "net-icmp-external", "proxy-path", "proxy-path"]
+[B] 提取器与独立发射点枚举一致（12 字面 id）
+[C] 健康模拟：27 行全到，missing 为空
+[D] 致盲模拟：空输出 → 27 个全 missing（对字面探针 fail-closed）
+[E] 部分致盲：fs-flag-readable 行缺失 → missing=["fs-flag-readable", "fs-flag-readable"]（非空，fail-closed）
+[F] 子串碰撞矩阵：27 id × 83 行，无误匹配
+[G] up 守门真值表 10 行全过（fail-closed 方向成立）
+ALL SECTIONS DONE (night-16 后：[A]/[E] 均为修复后断言)

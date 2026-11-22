@@ -1,0 +1,3 @@
+供给完成——下次 creance stop && creance up 起 slirp restrict=on 第二道防线生效
+Environment is up. The guest's only route out is the managed core (`creance escape-test` proves it).
+up1 RC=0 (58s)

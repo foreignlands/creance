@@ -1,0 +1,26 @@
+
+running 65 tests
+...................................................... 54/65
+qemu::tests::write_marker_writes_once_then_refuses --- FAILED
+.......==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-3bd926 -N -R 18765:127.0.0.1:18765' for reading: No such file or directory
+==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-3bd926' for reading==> /dev/null <==
+: No such file or directorytail: 
+cannot open 'HostKeyAlias=creance-test-inst-3bd926 -N -R 18765:127.0.0.1:18765' for reading: No such file or directory
+...
+failures:
+
+---- qemu::tests::write_marker_writes_once_then_refuses stdout ----
+
+thread 'qemu::tests::write_marker_writes_once_then_refuses' (38619) panicked at crates/creance-vm/src/qemu/mod.rs:556:47:
+called `Result::unwrap()` on an `Err` value: Os { code: 2, kind: NotFound, message: "No such file or directory" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    qemu::tests::write_marker_writes_once_then_refuses
+
+test result: FAILED. 64 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+error: test failed, to rerun pass `-p creance-vm --lib`

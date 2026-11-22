@@ -3,6 +3,8 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 092 | S4 | fw-armed 的 rules.v4 半边只看 `^-A OUTPUT`：`-I`/`--append`/`-R`/空白变体/`:OUTPUT ACCEPT` 重声明/第二 `*filter` 块判 armed，下一 boot 全放行（盖章兜住，up 失败关闭） | H1 / F-090 修复面 | 待修复 |
+| 093 | S5 | v0.6.16 守护加固 9 例变异全绿：`use … as`/括号路径/臂重排绕 marker 守护、vm.rs 不钉位置、`write_marker` 直调、temp_dir 前缀 gate、`>/run`/`tee` 伪盖章、`nft flush` | H1 / F-091 修复面 | 待修复 |
 | 090 | S4 | fw-armed 白名单是逐行子串正则：注释伪造令牌/`NEW,ESTABLISHED`/`!` 取反/端口区间/tcp+注释全判 armed | H1 / F-086 修复面 | 已修复（main-session，实机复验：armed 实例 up RC=0 + 15 例伪造真值表） |
 | 091 | S5 | v0.6.15 修复面守护缺口：marker 守护漏别名/Err 臂/vm.rs，stamp 唯一写点/apply 后净面/NAT 表/探针参数面无钉 | H1 / F-087 同类 | 已修复（main-session，CI 全绿） |
 | 086 | S4 | fw-armed 判据是黑名单+apply 时快照：限定 ACCEPT/跳链/rules.v4 漂移全判 armed | H1 / F-083 修复面 | 已修复（main-session，实机复验） |

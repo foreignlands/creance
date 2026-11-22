@@ -1,0 +1,1 @@
+guest 防火墙未生效（直连可达），VM 已停止；请 creance stop 后 creance setup 重建环境。探针原始输出："tcp-open\nicmp-open\nfw-down\n"
