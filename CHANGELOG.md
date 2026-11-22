@@ -4,6 +4,18 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.6.9] — 2026-11-22
+
+### Fixed — night-19 (R17 handoff)
+
+- F-067 (S5): README's enforced-probe list still claimed the deleted
+  'numeric proxy endpoint' (the space-separated phrase dodged four
+  rounds of hyphenated-id sweeps). Removed with an annotation, the
+  enumeration completed (external ICMP, positive egress control), and
+  README now carries a gate-checked enforced block — all three
+  declaration surfaces (ROADMAP, QUICKSTART, README) share the same
+  probe-id gate strength.
+
 ## [0.6.8] — 2026-11-22
 
 ### Fixed — night-18 (R16 handoff)
