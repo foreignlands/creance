@@ -2,9 +2,10 @@
 //!
 //! No Lima, no vmnet, no root: one `qemu-system-x86_64` per instance on
 //! KVM, slirp user networking whose ONLY opening is the hostfwd'd ssh port
-//! (`restrict=on`: the guest cannot reach the host or the outside by
-//! itself — a second, topology-level enforcement under the in-guest
-//! firewall), a NoCloud seed on virtio-blk, and the single 9p workspace
+//! (after provisioning the `restrict=on` marker arms the second,
+//! topology-level enforcement: the guest cannot reach the host or the
+//! outside by itself — the first boot still needs open NAT to install),
+//! a NoCloud seed on virtio-blk, and the single 9p workspace
 //! share. All instance facts live in `instance.json`; the host-side ssh
 //! keypair is ours, generated per instance at setup.
 
@@ -17,6 +18,7 @@ use crate::paths;
 use crate::pidfile;
 use crate::vm::{self, SetupOptions, SshTarget};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 /// The QEMU backend runs x86_64 Linux guests on x86_64 hosts only (KVM is
 /// a hard requirement; TCG's 8–12× slowdown is no sandbox an agent can
@@ -285,7 +287,13 @@ pub fn up(profile: &str, instance: &str) -> i32 {
             // Provisioning verified end to end: next boot slirp gets
             // restrict=on (runner::build_args), so raw guest egress is
             // dead at the NAT even if the in-guest firewall fails.
-            let _ = std::fs::write(paths::join(&dir, "provisioned"), b"ok\n");
+            let marker = paths::join(&dir, "provisioned");
+            if !Path::new(&marker).is_file() {
+                let _ = std::fs::write(&marker, b"ok\n");
+                println!(
+                    "供给完成——下次 creance stop && creance up 起 slirp restrict=on 第二道防线生效"
+                );
+            }
             0
         }
         Ok(out) => {

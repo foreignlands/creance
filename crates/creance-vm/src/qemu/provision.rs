@@ -145,5 +145,13 @@ mod tests {
         assert!(first.contains("mount -t 9p"));
         assert!(!first.contains("iptables"));
         assert!(second.contains("iptables-restore < /etc/iptables/rules.v4"));
+        // F-076/F-073: QEMU's table must hold slirp's hosts as /32 and
+        // never a foreign (Lima usernet) range — the S2 leak that
+        // motivated per-backend rendering must stay impossible.
+        assert!(second.contains("-d 10.0.2.2/32 -j ACCEPT"), "{second}");
+        assert!(second.contains("-d 10.0.2.3/32 -j ACCEPT"), "{second}");
+        for foreign in ["10.0.2.0/24", "192.168.5."] {
+            assert!(!second.contains(foreign), "leaked: {foreign}");
+        }
     }
 }

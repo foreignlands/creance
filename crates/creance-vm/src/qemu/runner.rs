@@ -369,8 +369,10 @@ mod tests {
         let joined = args.join(" ");
         // KVM hard-required, never silent TCG.
         assert!(joined.contains("accel=kvm"), "{joined}");
-        // slirp NAT, no restrict until provisioning completes (ROADMAP).
-        // Exactly one netdev, one hostfwd: ssh to the guest, nothing else.
+        // slirp NAT: restrict=on lands only after provisioning (the
+        // `provisioned` marker). Exactly one netdev, one hostfwd: ssh to
+        // the guest, nothing else.
+        assert!(!joined.contains("restrict=on"), "{joined}");
         assert_eq!(joined.matches("hostfwd=").count(), 1);
         assert_eq!(joined.matches("-netdev").count(), 1);
         assert!(joined.contains("hostfwd=tcp:127.0.0.1:40022-:22"));
@@ -402,6 +404,22 @@ mod tests {
         let err = build_args(&inst(), &empty, &state).unwrap_err();
         assert!(err.contains("缺少实例文件"), "{err}");
         std::fs::remove_dir_all(&empty).unwrap();
+        std::fs::remove_dir_all(&state).unwrap();
+    }
+
+    #[test]
+    fn restrict_lands_only_after_provisioning() {
+        // F-076/F-077: the marker alone decides the second line of
+        // defense — same dir, one flag flip, restrict toggles.
+        let dir = dir_with_files();
+        let state = dir_with_files();
+        let base = super::super::image::base_image_path(&state, "amd64");
+        std::fs::create_dir_all(Path::new(&base).parent().unwrap()).unwrap();
+        std::fs::write(&base, b"x").unwrap();
+        std::fs::write(Path::new(&dir).join("provisioned"), b"ok\n").unwrap();
+        let args = build_args(&inst(), &dir, &state).unwrap().join(" ");
+        assert!(args.contains("user,id=net0,restrict=on,hostfwd="), "{args}");
+        std::fs::remove_dir_all(&dir).unwrap();
         std::fs::remove_dir_all(&state).unwrap();
     }
 }

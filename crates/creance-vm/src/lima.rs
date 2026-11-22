@@ -261,6 +261,18 @@ mod tests {
     }
 
     #[test]
+    fn lima_egress_table_holds_only_usernet_hosts() {
+        // F-076/F-073: Lima's table must hold usernet's /32 hosts and
+        // never slirp's — the two tables are rendered per backend.
+        let yaml = String::from_utf8(generate_lima_yaml(&options()).unwrap()).unwrap();
+        assert!(yaml.contains("-d 192.168.5.2/32 -j ACCEPT"), "{yaml}");
+        assert!(yaml.contains("-d 192.168.5.3/32 -j ACCEPT"), "{yaml}");
+        for foreign in ["192.168.5.0/24", "10.0.2."] {
+            assert!(!yaml.contains(foreign), "leaked: {foreign}");
+        }
+    }
+
+    #[test]
     #[cfg(target_os = "macos")]
     fn deep_profiles_fail_with_an_actionable_error() {
         // F-023: a home past the socket budget must fail here with advice,

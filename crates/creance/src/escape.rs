@@ -768,6 +768,18 @@ mod tests {
     fn guest_script_is_posix_and_flags_every_probe() {
         let script = guest_script("/nonexistent-flag", true, "deadbeef", 17896, "devabc12345");
         assert!(script.starts_with("#!/bin/sh"));
+        // F-074/F-076: without the oracle the fs probe emits exactly one
+        // SKIP line — never a vacuous PASS beside it.
+        let no_oracle = guest_script("/nonexistent-flag", false, "deadbeef", 17896, "devabc12345");
+        assert_eq!(
+            no_oracle.matches("PROBE fs-flag-readable").count(),
+            1,
+            "{no_oracle}"
+        );
+        assert!(
+            no_oracle.contains("PROBE fs-flag-readable SKIP"),
+            "{no_oracle}"
+        );
         for required in [
             "PROBE fs-flag-readable ESCAPE",
             "PROBE fs-flag-readable PASS",
