@@ -3,6 +3,10 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 081 | S4 | restrict=on 武装后遮蔽第一道防线：guest 防火墙全放行时 up 守门与 escape-test net-* 全绿；标记写在出口校验前，失败的 up 也补写标记 | H1 / 1ca32c8+23b0da2 × F-059 | 待修复 |
+| 080 | S4 | Lima 镜像 digest 钉在滚动的 releases/24.04/release/ URL 上：Ubuntu 下次刷新后 macOS setup 全部被 digest 拒绝 | 供应链 / a7ac0e3 | 待修复 |
+| 079 | S5 | v0.6.12 新增面零行为守护：wire 严格 CL、workbench 拒 TE、node sha256、Lima digest 七例注入全绿；wire.rs"tunnel 读者共用/一致拒绝"注释不实 | A7+B3 / 98865d5、a7ac0e3 | 待修复 |
+| 078 | S5 | F-076 修复漏一例：main.rs flag_placed 恒真（NC-F）仍 cargo test 全绿 | E2 / F-076 修复面 | 待修复 |
 | 077 | S5 | restrict=on 声明面漂移：qemu/mod.rs 称无条件生效、ROADMAP 列待办、runner 注释过时；供给会话无第二道防线且零提示 | H1 / 1ca32c8 | 已修复（main-session，实机复验） |
 | 076 | S5 | v0.6.11 修复面零行为守护：五例注入（删 restrict、/32 表互换、双判词回退等）cargo test 全绿 | H1 / F-073+F-074 修复面 | 已修复（main-session，实机复验） |
 | 075 | S4 | F-072 中断收敛只收敛防火墙：QEMU 首启 runcmd 被打断后 9p 挂载腿永不执行，up 全绿但 workspace 不共享 | H1 / F-072 修复面 | 已修复（main-session，实机复验） |

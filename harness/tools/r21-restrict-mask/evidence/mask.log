@@ -1,0 +1,80 @@
+== up#1 (provisioning session) netdev: -netdev user,id=net0,hostfwd=tcp:127.0.0.1:35893-:22  marker=present
+== up#1 in-guest:
+export DBUS_SESSION_BUS_ADDRESS='unix:path=/run/user/1000/bus'
+export HOME='/home/dev681745f0'
+export LANG='en_US.UTF-8'
+export LOGNAME='dev681745f0'
+export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin'
+export PWD='/home/dev681745f0'
+export SHELL='/bin/bash'
+export SHLVL='1'
+export SSH_CLIENT='10.0.2.2 47994 22'
+export SSH_CONNECTION='10.0.2.2 47994 10.0.2.15 22'
+export USER='dev681745f0'
+export XDG_RUNTIME_DIR='/run/user/1000'
+export XDG_SESSION_CLASS='user'
+export XDG_SESSION_ID='18'
+export XDG_SESSION_TYPE='tty'
+export _='/usr/bin/sh'
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT DROP [0:0]
+-A OUTPUT -o lo -j ACCEPT
+-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT
+-A OUTPUT -p udp --dport 67 -d 10.0.2.2/32 -j ACCEPT
+-A OUTPUT -p icmp -d 10.0.2.2/32 -j ACCEPT
+-A OUTPUT -p udp --dport 67 -d 10.0.2.3/32 -j ACCEPT
+-A OUTPUT -p icmp -d 10.0.2.3/32 -j 
+--- systemctl:
+inactive
+tcp-1.1.1.1:443-blocked
+stop RC=0
+== firewall broken offline: rc=0 (rules.v4 := ACCEPT-all)
+== up#2 (marker present, firewall dead) RC=0 netdev: -netdev user,id=net0,restrict=on,hostfwd=tcp:127.0.0.1:35893-:22
+    Environment is up. The guest's only route out is the managed core (`creance escape-test` proves it).
+== up#2 in-guest:
+    export DBUS_SESSION_BUS_ADDRESS='unix:path=/run/user/1000/bus'
+    export HOME='/home/dev681745f0'
+    export LANG='en_US.UTF-8'
+    export LOGNAME='dev681745f0'
+    export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin'
+    export PWD='/home/dev681745f0'
+    export SHELL='/bin/bash'
+    export SHLVL='1'
+    export SSH_CLIENT='10.0.2.2 43964 22'
+    export SSH_CONNECTION='10.0.2.2 43964 10.0.2.15 22'
+    export USER='dev681745f0'
+    export XDG_RUNTIME_DIR='/run/user/1000'
+    export XDG_SESSION_CLASS='user'
+    export XDG_SESSION_ID='6'
+    export XDG_SESSION_TYPE='tty'
+    export _='/usr/bin/sh'
+    *filter
+    :INPUT ACCEPT [0:0]
+    :FORWARD ACCEPT [0:0]
+    :OUTPUT ACCEPT [0:0]
+    COMMIT
+    
+    --- systemctl:
+    active
+    tcp-1.1.1.1:443-blocked
+== escape-test RC=1 verdicts:
+    PROBE fs-flag-readable PASS
+    PROBE guest-identity PASS
+    PROBE guest-privilege PASS
+    PROBE env-credentials PASS
+    PROBE env-hex-tokens PASS
+    PROBE ssh-material PASS
+    PROBE sock-abstract SKIP
+    PROBE net-direct-egress PASS
+    PROBE net-dns-external PASS
+    PROBE net-ipv6 PASS
+    PROBE net-icmp-external PASS
+    PROBE proxy-path ESCAPE
+== up#3 CONTROL (marker absent, firewall dead) RC=1
+    供给完成——下次 creance stop && creance up 起 slirp restrict=on 第二道防线生效
+    guest 防火墙未生效（直连可达），VM 已停止；请 creance stop 后 creance setup 重建环境。探针原始输出："tcp-open\nicmp-open\n"
+== rules.v4 restored rc=0
+== marker restored: present

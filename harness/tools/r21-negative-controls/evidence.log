@@ -1,0 +1,43 @@
+NC-R: inject-grep-c=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 59 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+    error: test failed, to rerun pass `-p creance-vm --lib`
+NC-R2: inject-grep-c=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 59 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+    error: test failed, to rerun pass `-p creance-vm --lib`
+NC-F: inject-grep-c=1 crates=creance test-RC=0 failed=0 compile-err=0
+NC-073q: inject-grep-c=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 59 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+    error: test failed, to rerun pass `-p creance-vm --lib`
+NC-073l: inject-grep-c=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 59 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+    error: test failed, to rerun pass `-p creance-vm --lib`
+NC-074: inject-grep-c=1 crates=creance test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 13 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+    error: test failed, to rerun pass `-p creance --lib`
+NC-074b: inject-grep-c=1 crates=creance test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 13 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+    error: test failed, to rerun pass `-p creance --lib`
+NC-074c: inject-grep-c=1 crates=creance test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 13 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+    error: test failed, to rerun pass `-p creance --lib`
+NC-RO: inject-grep-c=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+    test result: FAILED. 59 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+    error: test failed, to rerun pass `-p creance-vm --lib`
+NC-M: inject-grep-c=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-CLd: inject-grep-c=1 crates=creance-net creance-gate creance test-RC=0 failed=0 compile-err=0
+NC-CLx: inject-grep-c=1 crates=creance-net creance-gate creance test-RC=0 failed=0 compile-err=0
+NC-TE: inject-grep-c=1 crates=creance test-RC=0 failed=0 compile-err=0
+NC-NODE: inject-grep-c=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-NOCK: inject-grep-c=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-DIG: inject-grep-c=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-DIG2: inject-grep-c=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+crates/creance/src/escape.rs: OK
+crates/creance-vm/src/qemu/runner.rs: OK
+crates/creance/src/main.rs: OK
+crates/creance-vm/src/qemu/provision.rs: OK
+crates/creance-vm/src/lima.rs: OK
+crates/creance-vm/src/provision.rs: OK
+crates/creance-vm/src/qemu/mod.rs: OK
+crates/creance-net/src/wire.rs: OK
+crates/creance/src/serve.rs: OK
+NC done RC=0

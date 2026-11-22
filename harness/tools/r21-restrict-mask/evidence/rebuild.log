@@ -1,0 +1,5 @@
+before rebuild: marker=present
+rebuilding existing instance prof-downloads-0dbaccc6 (VM disk replaced; workspace untouched)
+instance prof-downloads-0dbaccc6 created; run `creance up` to start it
+setup RC=0
+after rebuild: marker=absent
