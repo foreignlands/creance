@@ -1,0 +1,8 @@
+marker before rebuild: present
+setup RC=0
+marker after rebuild: absent
+first boot netdev: -netdev user,id=net0,hostfwd=tcp:127.0.0.1:39913-:22
+after interrupt: qemu alive=no marker=absent
+up#2 RC=1; last line: Connection reset by 127.0.0.1 port 39913）；请查看实例目录 serial.log
+up#2 netdev:   marker=absent
+stopped

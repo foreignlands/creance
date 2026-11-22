@@ -1,0 +1,17 @@
+[package]
+name = "r14-convergence"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# R14 收敛轮探针：走**真实 crate**（path-dep），复刻的是 main.rs 里两段消费
+# 逻辑（escape-test 的缺行提取器 / up 的防火墙守门真值表），输入用真
+# guest_script() 渲染产物。F-033 的教训：复刻对修复复验无效——这里"逻辑
+# 镜像 + 真输入"的组合是因为两段消费逻辑内联在 bin crate 的 cmd_* 里
+# 不可导入，镜像逐字符拷贝自 6155c1f 的 main.rs（头部注明基线）。
+
+[dependencies]
+creance = { path = "../../../../crates/creance" }
+creance-vm = { path = "../../../../crates/creance-vm" }
+
+[workspace]

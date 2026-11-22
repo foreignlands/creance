@@ -3,6 +3,8 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 077 | S5 | restrict=on 声明面漂移：qemu/mod.rs:4-7 称无条件生效、ROADMAP:11 仍列待办、runner.rs:372 注释过时；完成供给的会话全程无第二道防线（实机 pid 不变、无 restrict）且用户侧零提示 | H1 / 1ca32c8 | 待修复 |
+| 076 | S5 | v0.6.11 修复面零行为守护：删 restrict=on、QEMU/Lima /32 主机表互换（F-073 S2 同形）、F-074 双判词回退、flag_placed 恒真——五例注入 cargo test 全绿 | H1 / F-073+F-074 修复面 | 待修复 |
 | 075 | S4 | F-072 中断收敛只收敛防火墙：QEMU 首启 runcmd 被打断后 9p 挂载腿永不执行，up 全绿但 workspace 不共享 | H1 / F-072 修复面 | 已修复（main-session，实机复验） |
 | 074 | S5 | F-068 修复残留：旗标不可落盘时 guest 空真 PASS 与 SKIP 双判词；oracle_ready 参数化后只发 SKIP | E2 / F-068 修复面 | 已修复（main-session，实机复验） |
 | 073 | S2 | rules.v4 含两后端网段：QEMU/slirp 上 192.168.5.0/24 可路由——UDP/67+ICMP 实测经宿主 ens5 离开；按后端 /32 渲染（QEMU 10.0.2.2/.3，Lima 192.168.5.2/.3） | H1 / F-060+F-072 修复面 | 已修复（main-session，实机复验） |

@@ -1,0 +1,22 @@
+rules.v4: /32 lines=4 subnet lines=0
+qemu-system-x86_64: warning: host doesn't support requested feature: CPUID.80000001H:ECX.svm [bit 2]
+qemu-system-x86_64: warning: host doesn't support requested feature: CPUID.80000001H:ECX.svm [bit 2]
+netdev: user,id=net0,restrict=on,hostfwd=tcp:127.0.0.1:2400-:22
+P0 inbound ssh via hostfwd: OK
+P1 tcp 1.1.1.1:443 blocked
+P1 udp 192.168.5.77 67 rejected OSError
+P1 udp 10.0.2.77 67 rejected PermissionError
+P1 udp 1.0.0.1 53 rejected OSError
+P1 icmp 1.1.1.1 rc=2
+P1 icmp 192.168.5.77 rc=2
+P1 icmp 10.0.2.77 rc=1
+-P OUTPUT ACCEPT
+P2 tcp 1.1.1.1:443 blocked
+P2 udp 192.168.5.77 67 rejected OSError
+P2 udp 10.0.2.77 67 kernel-accepted
+P2 udp 1.0.0.1 53 rejected OSError
+P2 icmp 1.1.1.1 rc=2
+P2 icmp 192.168.5.77 rc=2
+P2 icmp 10.0.2.77 rc=1
+P3 ssh -R tunnel guest->host listener http=200
+== host capture: packets that left the guest via slirp (count by dst):

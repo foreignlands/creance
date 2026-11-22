@@ -1,0 +1,10 @@
+NC-R: inject-grep-c=1 crate=creance-vm test-RC=0 failed=0
+NC-F: inject-grep-c=1 crate=creance test-RC=0 failed=0
+NC-073q: inject-grep-c=1 crate=creance-vm test-RC=0 failed=0
+NC-073l: inject-grep-c=1 crate=creance-vm test-RC=0 failed=0
+NC-074: inject-grep-c=1 crate=creance test-RC=0 failed=0
+crates/creance/src/escape.rs: OK
+crates/creance-vm/src/qemu/runner.rs: OK
+crates/creance/src/main.rs: OK
+crates/creance-vm/src/qemu/provision.rs: OK
+crates/creance-vm/src/lima.rs: OK
