@@ -362,6 +362,7 @@ fn cmd_escape_test() -> i32 {
         let guest = creance_vm::guestprofile::Profile::load_or_create(&profile).ok();
         let script = escape::guest_script(
             &flag,
+            flag_placed,
             &store.as_ref().map(|s| s.auth.clone()).unwrap_or_default(),
             store
                 .as_ref()
@@ -420,11 +421,9 @@ fn cmd_escape_test() -> i32 {
         }
         if flag_placed {
             let _ = std::fs::remove_file(&flag);
-        } else {
-            // No oracle, no verdict: the fs probe answered against a
-            // missing flag, which is not evidence of containment.
-            println!("PROBE fs-flag-readable SKIP — oracle flag 未能落盘");
         }
+        // !flag_placed already emitted its own SKIP inside the script —
+        // one verdict per probe (F-074).
     }
     code
 }

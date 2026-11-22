@@ -261,9 +261,36 @@ pub fn up(profile: &str, instance: &str) -> i32 {
         &pid_file,
         std::time::Duration::from_secs(600),
     ) {
-        Ok(()) => 0,
+        Ok(()) => {}
         Err(e) => {
             eprintln!("{e}");
+            if we_started {
+                let _ = runner::stop(&dir);
+            }
+            return 1;
+        }
+    }
+    // F-075: cloud-init "done" does not prove the workspace mount landed —
+    // an interrupted provision skips every runcmd leg that never ran, and
+    // the semaphore means they never re-run. The fstab line persists, so
+    // `mount -a` heals it; a still-absent mount fails honestly instead of
+    // handing back a VM that silently drops work on its local disk.
+    let ws = inst.workspace.replace('\\', "\\\\").replace('\'', "\\'");
+    let check = format!(
+        "export PATH=/usr/bin:/bin\n\
+         if mountpoint -q '{ws}' 2>/dev/null || (mount -a 2>/dev/null && mountpoint -q '{ws}'); then echo mount-ok; else echo mount-missing; fi\n"
+    );
+    match vm::guest_script(profile, instance, &check) {
+        Ok(out) if out.contains("mount-ok") => 0,
+        Ok(out) => {
+            eprintln!("guest 工作区未挂载（{out:?}）——请 creance stop 后 creance setup 重建环境");
+            if we_started {
+                let _ = runner::stop(&dir);
+            }
+            1
+        }
+        Err(e) => {
+            eprintln!("无法校验 guest 工作区挂载：{e}");
             if we_started {
                 let _ = runner::stop(&dir);
             }

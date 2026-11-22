@@ -303,7 +303,25 @@ fn scan_unknown_tokens(profile: &str) -> Result<Vec<(String, String)>, String> {
 /// RESULT` line per check (RESULT in PASS/ESCAPE/SKIP). Kept POSIX-sh so it
 /// runs on any guest. `expected_user` is the generated guest identity the
 /// VM must be running as (F-022).
-pub fn guest_script(flag_path: &str, auth: &str, port: u16, expected_user: &str) -> String {
+pub fn guest_script(
+    flag_path: &str,
+    oracle_ready: bool,
+    auth: &str,
+    port: u16,
+    expected_user: &str,
+) -> String {
+    // F-074: the fs probe must emit exactly one verdict. When the host
+    // could not place the oracle flag the probe is unmeasurable — SKIP,
+    // never a vacuous PASS alongside a second SKIP line.
+    let fs_probe = if oracle_ready {
+        r#"if [ -f "$FLAG" ]; then
+  echo "PROBE fs-flag-readable ESCAPE"
+else
+  echo "PROBE fs-flag-readable PASS"
+fi"#
+    } else {
+        r#"echo "PROBE fs-flag-readable SKIP — oracle flag 未能落盘""#
+    };
     format!(
         r#"#!/bin/sh
 # creance escape probes (in-guest). A flag file placed on the host is the
@@ -322,11 +340,7 @@ FLAG={flag_path}
 # Filesystem: the host flag must not be reachable by any guest path.
 # F-064: literal emission like every other probe — a helper-routed id was
 # invisible to the host-side expected-line net.
-if [ -f "$FLAG" ]; then
-  echo "PROBE fs-flag-readable ESCAPE"
-else
-  echo "PROBE fs-flag-readable PASS"
-fi
+{fs_probe}
 # Identity (020/022): the session runs as the generated identity, and no
 # privilege path may exist — root inside the guest could lift the firewall.
 if [ "$(/usr/bin/id -un)" != "{expected_user}" ]; then
@@ -752,7 +766,7 @@ mod tests {
 
     #[test]
     fn guest_script_is_posix_and_flags_every_probe() {
-        let script = guest_script("/nonexistent-flag", "deadbeef", 17896, "devabc12345");
+        let script = guest_script("/nonexistent-flag", true, "deadbeef", 17896, "devabc12345");
         assert!(script.starts_with("#!/bin/sh"));
         for required in [
             "PROBE fs-flag-readable ESCAPE",

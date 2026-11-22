@@ -14,6 +14,10 @@ pub const UBUNTU_RELEASE: &str = "24.04";
 /// The guest bootstrap: fingerprint (timezone/locale) first, then the tool
 /// chain. Guest networking is not yet gated (see ROADMAP); the apt step
 /// runs on the VM's NAT until the cage network layer is in place.
+/// `nat_allows` is the backend's own virtual hosts — the ONLY fixed
+/// destinations the egress lockdown permits (DHCP/ICMP to the gateway).
+/// Each backend passes its own: allowing a foreign backend's subnet lets
+/// the VM NAT route it straight out the host NIC (F-073).
 pub fn guest_bootstrap(
     locale: &str,
     timezone: &str,
@@ -21,7 +25,14 @@ pub fn guest_bootstrap(
     session_token: &str,
     hostname: &str,
     username: &str,
+    nat_allows: &[&str],
 ) -> String {
+    let mut nat_rules = String::new();
+    for host in nat_allows {
+        nat_rules.push_str(&format!(
+            "-A OUTPUT -p udp --dport 67 -d {host}/32 -j ACCEPT\n-A OUTPUT -p icmp -d {host}/32 -j ACCEPT\n"
+        ));
+    }
     format!(
         r#"#!/bin/sh
 set -e
@@ -55,12 +66,12 @@ update-locale LANG={locale} >/dev/null 2>&1 || true
 sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null
 printf 'net.ipv6.conf.all.disable_ipv6=1\n' > /etc/sysctl.d/99-creance-noipv6.conf
 mkdir -p /etc/iptables
-# F-060: the DHCP and ICMP allowances exist for the virtual NAT gateway
-# (lease renewal, path-MTU signals). Scoped to the NAT subnets — slirp's
-# 10.0.2.0/24, Lima usernet's 192.168.5.0/24, plus DHCP broadcast — so
-# neither can carry traffic to a real destination. This file is the single
-# source of truth: the boot unit restores it verbatim and the runtime
-# apply below replays the same file (no second copy to drift).
+# F-060/F-073: the DHCP and ICMP allowances exist for the virtual NAT
+# gateway (lease renewal, path-MTU signals), scoped to the /32 hosts
+# this backend itself owns plus DHCP broadcast — a subnet-wide allow
+# is a live exfil channel on any backend whose NAT does not own that
+# range. This file is the single source of truth: the boot unit restores it verbatim and the
+# runtime apply below replays the same file (no second copy to drift).
 cat > /etc/iptables/rules.v4 <<'EGRESSRULES'
 *filter
 :INPUT ACCEPT [0:0]
@@ -68,12 +79,8 @@ cat > /etc/iptables/rules.v4 <<'EGRESSRULES'
 :OUTPUT DROP [0:0]
 -A OUTPUT -o lo -j ACCEPT
 -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
--A OUTPUT -p udp --dport 67 -d 10.0.2.0/24 -j ACCEPT
--A OUTPUT -p udp --dport 67 -d 192.168.5.0/24 -j ACCEPT
 -A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT
--A OUTPUT -p icmp -d 10.0.2.0/24 -j ACCEPT
--A OUTPUT -p icmp -d 192.168.5.0/24 -j ACCEPT
-COMMIT
+{nat_rules}COMMIT
 EGRESSRULES
 # The boot replay: restore the ruleset before the network is up, so no
 # boot window exists with an open egress. Neutral name — the unit list
@@ -183,6 +190,7 @@ mod tests {
             "a".repeat(48).as_str(),
             "nitro-012a",
             "dev0123abcd",
+            &["10.0.2.2", "10.0.2.3"],
         )
     }
 
@@ -212,8 +220,16 @@ mod tests {
         for bare in ["-p udp --dport 67 -j ACCEPT", "-p icmp -j ACCEPT"] {
             assert!(!s.contains(bare), "bare allowance leaked: {bare}");
         }
-        assert!(s.contains("-p icmp -d 10.0.2.0/24 -j ACCEPT"));
-        assert!(s.contains("-p udp --dport 67 -d 192.168.5.0/24 -j ACCEPT"));
+        // F-073: only this backend's hosts, as /32 — never a foreign
+        // backend's subnet.
+        assert!(s.contains("-p icmp -d 10.0.2.2/32 -j ACCEPT"));
+        assert!(s.contains("-p udp --dport 67 -d 10.0.2.3/32 -j ACCEPT"));
+        for foreign in ["10.0.2.0/24", "192.168.5.0/24"] {
+            assert!(
+                !s.contains(foreign),
+                "foreign/subnet allow leaked: {foreign}"
+            );
+        }
         // The persisted ruleset is the single source of truth: the same
         // file the boot unit restores is what the runtime apply replays —
         // no iptables-save capture (Lima's guestagent NAT used to leak

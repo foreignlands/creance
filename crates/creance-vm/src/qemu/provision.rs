@@ -41,16 +41,23 @@ pub fn user_data(options: &SetupOptions, ssh_pubkey: &str) -> Result<String, Str
         &options.guest.session_token,
         &options.guest.hostname,
         &options.guest.username,
+        // QEMU slirp: host alias .2, DNS/DHCP .3 — /32 only (F-073:
+        // 10.0.2.0/24 is slirp's own, but any foreign range routes out
+        // the host NIC).
+        &["10.0.2.2", "10.0.2.3"],
     );
     root.insert(
         "runcmd".into(),
         Yaml::Sequence(vec![
-            Yaml::Sequence(vec!["sh".into(), "-c".into(), Yaml::from(bootstrap)]),
+            // F-075: the mount leg runs FIRST — an interrupted bootstrap
+            // leaves the fstab line + mount in place, and later boots heal
+            // via fstab. Behind the toolchain leg it would simply never run.
             Yaml::Sequence(vec![
                 "sh".into(),
                 "-c".into(),
                 Yaml::from(mount_script(&options.workspace, &options.guest.username)),
             ]),
+            Yaml::Sequence(vec!["sh".into(), "-c".into(), Yaml::from(bootstrap)]),
         ]),
     );
     // serde_yaml does not emit the #cloud-config signature — cloud-init
@@ -131,10 +138,12 @@ mod tests {
         let v: Yaml = serde_yaml::from_str(&ud).unwrap();
         let runcmd = v["runcmd"].as_sequence().unwrap();
         assert_eq!(runcmd.len(), 2);
+        // F-075: the mount leg leads so an interrupted bootstrap cannot
+        // leave the VM up-but-unmounted.
         let first = runcmd[0][2].as_str().unwrap();
         let second = runcmd[1][2].as_str().unwrap();
-        assert!(first.contains("iptables-restore < /etc/iptables/rules.v4"));
-        assert!(second.contains("mount -t 9p"));
-        assert!(!second.contains("iptables"));
+        assert!(first.contains("mount -t 9p"));
+        assert!(!first.contains("iptables"));
+        assert!(second.contains("iptables-restore < /etc/iptables/rules.v4"));
     }
 }
