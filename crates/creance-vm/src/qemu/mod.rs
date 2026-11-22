@@ -281,7 +281,13 @@ pub fn up(profile: &str, instance: &str) -> i32 {
          if mountpoint -q '{ws}' 2>/dev/null || (mount -a 2>/dev/null && mountpoint -q '{ws}'); then echo mount-ok; else echo mount-missing; fi\n"
     );
     match vm::guest_script(profile, instance, &check) {
-        Ok(out) if out.contains("mount-ok") => 0,
+        Ok(out) if out.contains("mount-ok") => {
+            // Provisioning verified end to end: next boot slirp gets
+            // restrict=on (runner::build_args), so raw guest egress is
+            // dead at the NAT even if the in-guest firewall fails.
+            let _ = std::fs::write(paths::join(&dir, "provisioned"), b"ok\n");
+            0
+        }
         Ok(out) => {
             eprintln!("guest 工作区未挂载（{out:?}）——请 creance stop 后 creance setup 重建环境");
             if we_started {

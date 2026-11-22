@@ -113,6 +113,7 @@ pub fn build_args(inst: &Instance, dir: &str, state: &str) -> Result<Vec<String>
             return Err(format!("缺少实例文件 {required}；请重新 creance setup"));
         }
     }
+    let provisioned = Path::new(&paths::join(dir, "provisioned")).is_file();
     let args: Vec<String> = vec![
         "-machine".into(),
         machine.into(),
@@ -136,12 +137,17 @@ pub fn build_args(inst: &Instance, dir: &str, state: &str) -> Result<Vec<String>
         // macOS backend's usernet — the in-guest OUTPUT DROP firewall
         // (provision script) is the enforcement plane, so first-boot
         // provisioning (apt, node) still has a network until the lockdown
-        // lands. slirp-level restrict=on would block that provisioning;
-        // enabling it for already-provisioned instances is tracked as the
-        // next hardening step (ROADMAP 0.6.x).
+        // lands. Once the instance is provisioned, `restrict=on` is the
+        // second line of defense: slirp drops every guest-initiated
+        // packet — even to the host — so a guest that defeats iptables
+        // still has no raw egress. The sanctioned path is unaffected:
+        // ssh rides hostfwd inbound, and the managed core is reached
+        // through the ssh -R channel, not raw IP. restrict cannot be
+        // toggled on a live VM, so it applies from the next boot.
         "-netdev".into(),
         format!(
-            "user,id=net0,hostfwd=tcp:127.0.0.1:{}-:22",
+            "user,id=net0,{}hostfwd=tcp:127.0.0.1:{}-:22",
+            if provisioned { "restrict=on," } else { "" },
             inst.ssh_local_port
         ),
         "-device".into(),
