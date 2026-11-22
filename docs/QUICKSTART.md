@@ -82,7 +82,8 @@ creance escape-test
 
 输出 ✅（已强制层全过）/ ❌（逃逸，exit 1）/ ⏭️（未实现层如实标注）。
 宿主 6 项探针与 guest 的文件系统旗标、身份/权限、凭据（环境变量/hex 令牌/
-ssh 材料）与网络（直连、外部 DNS、IPv6、外部 ICMP）探针均已强制；出口正向
+ssh 材料）、socket 暴露（sock-* 家族，参数化发射，门禁看守其发射点）与
+网络（直连、外部 DNS、IPv6、外部 ICMP）探针均已强制；出口正向
 控制（proxy-path）需真实订阅节点；sock-abstract（unix abstract socket）为
 已知缺口、探针在场如实 ⏭️（ROADMAP 待做清单跟踪；清单与代码由
 scripts/check-probe-inventory.sh 双向差集门禁看守）。

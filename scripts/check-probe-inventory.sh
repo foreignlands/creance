@@ -77,6 +77,16 @@ for id in $host_enforced; do
   esac
 done
 
+# 4) parameterized-family guard (F-066): the sock-$s family is invisible
+#    to directions 1-2 by construction (ids are built at runtime), so
+#    direction 2's allowlist is a free pass for it. Its emission site
+#    must be textually present — deleting the probe has to fail HERE,
+#    not pass silently (R16's NC6 lesson).
+if ! grep -q 'echo "PROBE sock-\$s ESCAPE"' crates/creance/src/escape.rs; then
+  echo "FAIL: sock-\$s family emission site missing from escape.rs (enforced socket probe silently removed?)"
+  fail=1
+fi
+
 if [ "$fail" = 0 ]; then
   echo "probe inventory: bidirectional diff empty (guest $(echo "$guest_code" | wc -w | tr -d ' ') code ids, host $(echo "$host_code" | wc -w | tr -d ' '))"
 fi
