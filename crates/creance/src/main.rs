@@ -748,34 +748,19 @@ fn cmd_up() -> i32 {
         // fw-armed evidence is a root-owned stamp under /run (written
         // by the egress-lock unit from the LIVE ruleset), not an
         // iptables read the guest user cannot perform.
-        match creance_vm::vm::guest_script(
-            &profile,
-            &instance,
-            &escape::egress_probe_script(creance_vm::vm::nat_allow_hosts()),
-        ) {
-            Ok(out) => match escape::egress_verdict(&out) {
-                Err(reason) => {
-                    let _ = creance_vm::vm::stop_vm(&profile, &instance);
-                    return fail(format!(
-                        "{reason}，VM 已停止；请 creance stop 后 creance setup 重建环境。探针原始输出：{out:?}"
-                    ));
+        // F-099/F-100: the whole chain — probe, verdict, sealed token,
+        // marker — is ONE call into creance-vm. No `out` exists here to
+        // forge, no verdict result to neutralize, and the marker write
+        // requires a token only a passing verdict can mint.
+        match creance_vm::gateprobe::verify_and_mark(&profile, &instance) {
+            Ok(wrote) => {
+                if wrote {
+                    println!(
+                        "供给完成——下次 creance stop && creance up 起 slirp restrict=on 第二道防线生效"
+                    );
                 }
-                Ok(()) => {
-                    // F-081/F-087: the provisioned marker (slirp
-                    // restrict=on next boot) sits inside the Ok arm —
-                    // arming on ANY failure path would certify an
-                    // unverified guest.
-                    if creance_vm::vm::mark_provisioned(&profile, &instance) {
-                        println!(
-                            "供给完成——下次 creance stop && creance up 起 slirp restrict=on 第二道防线生效"
-                        );
-                    }
-                }
-            },
-            Err(e) => {
-                let _ = creance_vm::vm::stop_vm(&profile, &instance);
-                return fail(format!("无法在 guest 内验证防火墙状态，VM 已停止：{e}"));
             }
+            Err(e) => return fail(e),
         }
         println!("Environment is up. The guest's only route out is the managed core (`creance escape-test` proves it).");
     }
@@ -831,6 +816,14 @@ mod up_gate_tests {
                     continue;
                 }
                 let text = std::fs::read_to_string(&path).unwrap();
+                // F-099/NC-CUTinner+PATHmod: an inner cfg-test
+                // attribute is NOT counted by the `\n#[cfg(test)]`
+                // count, and a path-attribute module pulls its SOURCE
+                // outside src/ where the walk cannot see it — both
+                // banned. Needles are concat-built so this comment
+                // doesn't self-match.
+                assert!(!text.contains(concat!("#", "![cfg")), "{path:?}");
+                assert!(!text.contains(concat!("#", "[path")), "{path:?}");
                 assert!(
                     text.matches("\n#[cfg(test)]").count() <= 1,
                     "{path:?}: at most one #[cfg(test)] attribute per file"
@@ -854,40 +847,17 @@ mod up_gate_tests {
             }
         }
         assert_eq!(
-            total, 1,
-            "mark_provisioned はクレート全体で 1 箇所（他モジュール中継・別名・括弧・テスト後追記も不可）"
+            total, 0,
+            "mark_provisioned はクレート内では呼べない——封印トークンが要るので呼び出しは gateprobe::verify_and_mark だけ"
         );
         let src =
             &include_str!("main.rs")[..include_str!("main.rs").rfind("\n#[cfg(test)]").unwrap()];
-        // F-095/NC-VERD: the verdict must be consumed by a bare match —
-        // `.or_else(|_| Ok(()))` or any wrapper that neutralises Err
-        // changes this literal and arms the marker on a failed verdict.
+        // F-099/F-100: the up-gate delegates the ENTIRE chain to
+        // verify_and_mark — a single call is the only seam left to pin.
         assert_eq!(
-            src.matches("match escape::egress_verdict(&out) {").count(),
+            src.matches("verify_and_mark(").count(),
             1,
-            "egress_verdict の結果は素の match で消費される（Err 中和不可）"
-        );
-        // F-097/NC-VERDin: `out` must be the REAL probe's product —
-        // `egress_probe_script` and `guest_script` are each the single
-        // producer call; a `let out` shadow or a canned-output
-        // substitution removes one of them.
-        assert_eq!(
-            src.matches("egress_probe_script(").count(),
-            1,
-            "egress_probe_script 単一呼出（偽造入力不可）"
-        );
-        assert!(
-            !src.contains("let out "),
-            "verdict の入力は guest_script の Ok(out) のみ"
-        );
-        let verdict = src.find("escape::egress_verdict").expect("verdict call");
-        let ok_body =
-            verdict + src[verdict..].find("Ok(()) =>").expect("verdict Ok arm") + "Ok(()) =>".len();
-        let next_arm = ok_body + src[ok_body..].find("=>").expect("arm after Ok");
-        let mark = src.find("mark_provisioned").expect("marker write");
-        assert!(
-            ok_body < mark && mark < next_arm,
-            "provisioned マーカーは verdict の Ok(()) 分岐の本体内のみ"
+            "up ゲートは verify_and_mark 単一呼出（探針・verdict・marker の縫い目はもうここにはない）"
         );
     }
 }

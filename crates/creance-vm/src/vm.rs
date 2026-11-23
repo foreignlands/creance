@@ -338,10 +338,17 @@ pub fn nat_allow_hosts() -> &'static [&'static str] {
 }
 
 /// Arms the post-provisioning second line of defense (QEMU slirp
-/// `restrict=on`) once the up-time egress guard has passed. The Lima
-/// backend has no restrict equivalent — a no-op there. Returns true
-/// only when this call armed it.
-pub fn mark_provisioned(profile: &str, instance: &str) -> bool {
+/// `restrict=on`) once the up-time egress guard has passed. The
+/// `_proof` is the sealed token [`crate::gateprobe::egress_verdict`]
+/// mints only on a real pass — a call site that did not come out of a
+/// passing verdict cannot type-check (F-099/F-100). The Lima backend
+/// has no restrict equivalent — a no-op there. Returns true only when
+/// this call armed it.
+pub fn mark_provisioned(
+    profile: &str,
+    instance: &str,
+    _proof: &crate::gateprobe::EgressVerified,
+) -> bool {
     #[cfg(target_os = "macos")]
     {
         let _ = (profile, instance);
@@ -349,7 +356,7 @@ pub fn mark_provisioned(profile: &str, instance: &str) -> bool {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        crate::qemu::mark_provisioned(profile, instance)
+        crate::qemu::mark_provisioned(profile, instance, _proof)
     }
 }
 

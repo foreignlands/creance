@@ -360,16 +360,29 @@ mod tests {
         // (`egress-"armed"`). The bare keyword count catches all of it:
         // a second post line, spaced or quoted, is count 2.
         assert_eq!(s.matches("ExecStartPost").count(), 1, "{s}");
-        // F-097/NC-UNITsep: exactly one unit FILE is written — a
-        // second .service (After=egress-lock, flipping the policy)
-        // slips past both the ExecStartPost and stamp counts.
-        assert_eq!(s.matches("cat > /etc/systemd/system/").count(), 1, "{s}");
-        // F-096: the rules.v4 heredoc is checked STRUCTURALLY — one
-        // bare terminator line and a body byte-exact equal to
-        // rules_v4_text. A stray terminator line (the v0.6.18 brick),
-        // a misspelled one (heredoc swallows the script), a comment or
-        // a dropped rule inside the body all fail here.
-        assert_eq!(s.lines().filter(|l| *l == "EGRESSRULES").count(), 1, "{s}");
+        // F-097/F-101/NC-UNITsep+UNITns+UNITtee: exactly ONE unit-file
+        // path under systemd's dir — counted by the broad `systemd/system/`
+        // path (covers /etc and /lib spellings), not by the `cat > `
+        // spelling: `cat >/x`, `tee /x`, `printf > /x`, drop-in dirs
+        // and a second unit that flips the policy after egress-lock's
+        // ExecStartPost all bump the count.
+        assert_eq!(s.matches("systemd/system/").count(), 1, "{s}");
+        // F-096/F-098: the rules.v4 heredoc is checked STRUCTURALLY AND
+        // EXECUTED. Structure: the `cat >` line is exactly the literal
+        // (no `if`/`&&` prefix can mask it), exactly two lines mention
+        // EGRESSRULES (open + bare terminator — a whitespace-prefixed
+        // extra terminator line bumps the count), body byte-exact vs
+        // rules_v4_text.
+        let cat_line = s
+            .lines()
+            .find(|l| l.contains("cat > /etc/iptables/rules.v4"))
+            .expect("rules.v4 cat line");
+        assert_eq!(cat_line, "cat > /etc/iptables/rules.v4 <<'EGRESSRULES'");
+        assert_eq!(
+            s.lines().filter(|l| l.contains("EGRESSRULES")).count(),
+            2,
+            "{s}"
+        );
         let open = s.find("<<'EGRESSRULES'\n").expect("heredoc open") + "<<'EGRESSRULES'\n".len();
         let term = s[open..]
             .find("\nEGRESSRULES\n")
@@ -379,6 +392,41 @@ mod tests {
             &rules_v4_text(&["10.0.2.2", "10.0.2.3"]),
             "rules.v4 heredoc body must be the renderer's own bytes"
         );
+        // Executed second line: run the segment — heredoc PLUS whatever
+        // line follows the terminator — under `sh -e` in a temp dir.
+        // A stray terminator-shaped line after `EGRESSRULES` (the
+        // v0.6.18 brick, whitespace variants included) runs as a
+        // command → RC=127; a wrapped `if false …`/`fi` tail breaks the
+        // syntax. The byte-exact body assert covers CONTENT; this
+        // covers the ENVELOPE.
+        let seg_start = s.find("cat > /etc/iptables/rules.v4").unwrap();
+        let term_end =
+            seg_start + s[seg_start..].find("\nEGRESSRULES\n").unwrap() + "\nEGRESSRULES\n".len();
+        let seg_end = s[term_end..]
+            .find('\n')
+            .map(|i| term_end + i + 1)
+            .unwrap_or(s.len());
+        let dir = std::env::temp_dir().join(format!("creance-heredoc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("rules.v4");
+        let segment =
+            s[seg_start..seg_end].replace("/etc/iptables/rules.v4", target.to_str().unwrap());
+        let status = std::process::Command::new("sh")
+            .arg("-ec")
+            .arg(&segment)
+            .status()
+            .unwrap();
+        assert!(
+            status.success(),
+            "heredoc segment must execute clean: {segment}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            rules_v4_text(&["10.0.2.2", "10.0.2.3"]),
+            "executed heredoc must write the renderer's bytes"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
         // ...and the tail after the apply leg is byte-exact — any
         // injected netfilter touch (`iptables -P`, `nft flush`,
         // another stamp write) changes the bytes and fails this.

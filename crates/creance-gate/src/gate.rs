@@ -1825,9 +1825,14 @@ mod tests {
             inner.opened_at = Some(Instant::now());
             inner.lease = Duration::from_secs(600);
         }
+        // F-102/NC-WDthr8: the fuse must fire within ~2s — a widened
+        // threshold (>=8 ticks ≈ 4s) would still pass a bare "closes
+        // eventually" check. Measure the latency, don't just poll for
+        // the end state.
+        let t0 = Instant::now();
         let deadline = Instant::now() + Duration::from_secs(5);
         let status = loop {
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(50));
             let inner = lock_or_recover(&handle.gate.inner);
             if inner.state == GateState::Closed || Instant::now() > deadline {
                 break inner.status(&handle.gate.run_id);
@@ -1835,7 +1840,11 @@ mod tests {
         };
         assert_eq!(status.state, GateState::Closed, "{status:?}");
         assert!(status.reason.contains("熔断"), "{status:?}");
-        drop(handle);
+        assert!(
+            t0.elapsed() <= Duration::from_millis(2500),
+            "fuse must land inside ~3 ticks: {:?}",
+            t0.elapsed()
+        );
 
         // Live listener → no fuse.
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1861,6 +1870,140 @@ mod tests {
         drop(handle);
         drop(listener);
         fs::remove_dir_all(&profile).unwrap();
+    }
+
+    #[test]
+    fn watchdog_does_not_fuse_during_checking() {
+        // F-102/NC-WDany: a dead core during the Checking window must
+        // NOT fuse — Checking has its own lease and fusing it would
+        // kill a gate mid-startup. Only Open ticks the counter.
+        let (profile, config_path) = prepare_profile();
+        let instance_dir = creance_vm::paths::join(&profile, "qemu/check-vm");
+        fs::create_dir_all(&instance_dir).unwrap();
+        let dead_port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let handle = Gate::start(
+            &instance_dir,
+            &config_path,
+            &profile,
+            "fuse-inst-checking",
+            dead_port,
+        )
+        .unwrap();
+        {
+            let mut inner = lock_or_recover(&handle.gate.inner);
+            inner.state = GateState::Checking;
+            inner.opened_at = Some(Instant::now());
+            inner.lease = Duration::from_secs(600);
+        }
+        std::thread::sleep(Duration::from_millis(2500));
+        let inner = lock_or_recover(&handle.gate.inner);
+        assert_eq!(
+            inner.state,
+            GateState::Checking,
+            "dead core during Checking must not fuse"
+        );
+        drop(inner);
+        drop(handle);
+        fs::remove_dir_all(&profile).unwrap();
+    }
+
+    #[test]
+    fn watchdog_fused_gate_cuts_the_wire() {
+        // F-102/NC-WDnocut: after the fuse closes the gate, the very
+        // next tick's closed branch must kill the wire — observable as
+        // the tunnel pidfile's process dying, not just state=Closed.
+        // A `sleep` child stands in for the tunnel: only `tunnel::stop`
+        // (pidfile-owned pid) kills it — `reap_orphans` skips the pid
+        // the file owns.
+        let (profile, config_path) = prepare_profile();
+        let instance_dir = creance_vm::paths::join(&profile, "qemu/cut-vm");
+        fs::create_dir_all(&instance_dir).unwrap();
+        let dead_port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let mut wire = std::process::Command::new("sleep")
+            .arg("300")
+            .spawn()
+            .unwrap();
+        creance_vm::pidfile::write(
+            &creance_vm::pidfile::proxy_pid_file(&profile, "tunnel.pid"),
+            wire.id() as i32,
+        )
+        .unwrap();
+        let handle = Gate::start(
+            &instance_dir,
+            &config_path,
+            &profile,
+            "fuse-inst-wire",
+            dead_port,
+        )
+        .unwrap();
+        {
+            let mut inner = lock_or_recover(&handle.gate.inner);
+            inner.state = GateState::Open;
+            inner.opened_at = Some(Instant::now());
+            inner.lease = Duration::from_secs(600);
+        }
+        let deadline = Instant::now() + Duration::from_secs(6);
+        let mut dead = false;
+        while Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(100));
+            if wire.try_wait().unwrap().is_some() {
+                dead = true;
+                break;
+            }
+        }
+        assert!(dead, "fused gate must kill the wire process");
+        drop(handle);
+        let _ = wire.kill();
+        let _ = wire.wait();
+        fs::remove_dir_all(&profile).unwrap();
+    }
+
+    #[test]
+    fn watchdog_fuse_source_pins() {
+        // F-102: textual pins on the watchdog loop's own region —
+        // behavioural tests cover the endpoints, these pin the
+        // semantics in between that a mutation preserves: the 250ms
+        // sample timeout (a 30s timeout starves every tick), the >=3
+        // threshold, BOTH counter resets (on success and after fusing),
+        // Open-only counting, and the closed branch cutting the wire.
+        let src = include_str!("gate.rs");
+        let prod = &src[..src.rfind("\n#[cfg(test)]").unwrap()];
+        // Global prod-region counts: pinning the loop's region by brace
+        // matching is brittle, and a duplicated counter elsewhere is a
+        // finding anyway — the whole prod file is the honest region.
+        assert_eq!(prod.matches("from_millis(250)").count(), 1);
+        assert_eq!(prod.matches("core_down_ticks >= 3").count(), 1);
+        assert_eq!(prod.matches("core_down_ticks += 1").count(), 1);
+        assert_eq!(
+            prod.matches("core_down_ticks = 0;").count(),
+            2,
+            "success reset + post-fuse reset both required (the `= 0u32;` declaration doesn't match)"
+        );
+        assert!(prod.contains("let open = inner.state == GateState::Open"));
+        // `let core_up = !open || probe` — the `||` sits on the next
+        // line after fmt, so the needle stops at `!open`. Both shapes
+        // matter: `!open` exempts non-Open states from sampling, the
+        // connect probe is the only other input.
+        assert!(prod.contains("let core_up = !open"));
+        assert_eq!(
+            prod.matches("tunnel::stop(&watchdog.profile_dir)").count(),
+            1,
+            "the watchdog's own closed-branch cut must exist"
+        );
+        assert_eq!(
+            prod.matches("tunnel::ensure(").count(),
+            1,
+            "the open-path ensure leg must exist"
+        );
+        assert!(prod.contains("代理核心不可达，自动熔断"));
     }
 
     fn call_raw(record: &GateRecord, body: &str) -> Result<(String, serde_json::Value), String> {

@@ -310,8 +310,14 @@ pub fn up(profile: &str, instance: &str) -> i32 {
 /// guard has passed — `runner::build_args` arms slirp `restrict=on` from
 /// the next boot. F-081: the marker must follow the gate, never precede
 /// it, or a failed gate would still arm the second line unverified.
-/// Returns true only when this call wrote it.
-pub fn mark_provisioned(profile: &str, instance: &str) -> bool {
+/// F-099: the sealed `_proof` makes "without a passing verdict" a
+/// compile error, not a convention. Returns true only when this call
+/// wrote it.
+pub fn mark_provisioned(
+    profile: &str,
+    instance: &str,
+    _proof: &crate::gateprobe::EgressVerified,
+) -> bool {
     write_marker(&instance_dir(profile, instance))
 }
 
@@ -587,6 +593,17 @@ mod tests {
                 .join("prof")
                 .to_string_lossy()
                 .into_owned(),
+            // F-099/NC-MPhome2: a dir carrying BOTH `/.creance/` AND
+            // `/state/qemu/` — a two-condition gate would survive the
+            // one-condition shapes above.
+            std::env::temp_dir()
+                .join(format!("y-{}", crate::token()[..8].to_owned()))
+                .join(".creance")
+                .join("state")
+                .join("qemu")
+                .join("inst")
+                .to_string_lossy()
+                .into_owned(),
         ] {
             std::fs::create_dir_all(&dir).unwrap();
             assert!(write_marker(&dir), "{dir}");
@@ -619,9 +636,16 @@ mod tests {
         // `#[cfg(test)]` attribute; the prod region is the file minus
         // ONLY the trailing test module — code appended after its
         // column-0 `}` still counts (NC-WMtail/NC-VMtail). Global
-        // totals: mark_provisioned — mod.rs def 1 + vm.rs def+call 2
-        // = 3; write_marker — mod.rs def+call = 2.
+        // totals: bare `mark_provisioned` — mod.rs def 1 + vm.rs
+        // def+call 2 + gateprobe.rs call 1 + gateprobe.rs doc mentions
+        // 2 = 6 (comments count too — a smuggled call or a new mention
+        // both bump it). `mark_provisioned(` — def/call sites only = 4.
+        // write_marker — mod.rs def+call = 2. Inner cfg-attrs and
+        // path-attribute module indirection (source outside src/) are
+        // banned outright; needles are concat-built where this comment
+        // would self-match.
         let mut marks = 0usize;
+        let mut calls = 0usize;
         let mut writes = 0usize;
         let mut dirs = vec![std::path::PathBuf::from(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -638,6 +662,8 @@ mod tests {
                     continue;
                 }
                 let text = std::fs::read_to_string(&path).unwrap();
+                assert!(!text.contains(concat!("#", "![cfg")), "{path:?}");
+                assert!(!text.contains(concat!("#", "[path")), "{path:?}");
                 assert!(
                     text.matches("\n#[cfg(test)]").count() <= 1,
                     "{path:?}: at most one #[cfg(test)] attribute per file"
@@ -655,23 +681,55 @@ mod tests {
                 };
                 assert!(!prod.contains("tests::"), "{path:?}");
                 marks += prod.matches(concat!("mark", "_provisioned")).count();
+                calls += prod.matches("mark_provisioned(").count();
                 writes += prod.matches("write_marker").count();
             }
         }
         assert_eq!(
-            (marks, writes),
-            (3, 2),
-            "mark_provisioned/write_marker bare-name totals across the whole creance-vm crate"
+            (marks, calls, writes),
+            (6, 4, 2),
+            "mark_provisioned/write_marker totals across the whole creance-vm crate"
         );
-        // F-097/NC-MPcfg: a compile-gate inside write_marker
-        // (`cfg!(test)`, `cfg!(debug_assertions)`) is invisible to
-        // every behavioural test — pin its body textually.
+        // F-097/F-099: a compile- or path-gate inside the marker write
+        // path is invisible to every behavioural test — cfg-macro
+        // calls, cfg-attributes, and ANY `.contains(` on the dir path
+        // (NC-MPcfg/MPattr/MPhome/MPhome2) are banned in BOTH
+        // write_marker and the vm.rs dispatch body. Needles are
+        // concat-built so these comments can't self-match.
         let mod_src = include_str!("mod.rs");
         let def = mod_src.find("fn write_marker").unwrap();
         let body_end = def + mod_src[def..].find("\n}").unwrap();
+        let body = &mod_src[def..body_end];
         assert!(
-            !mod_src[def..def + body_end].contains("cfg!"),
-            "write_marker must not compile-gate its write"
+            !body.contains(concat!("cfg", "!")),
+            "write_marker must not compile-gate"
+        );
+        assert!(
+            !body.contains(concat!("#", "[cfg")),
+            "write_marker must not attr-gate"
+        );
+        assert!(
+            !body.contains(".contains("),
+            "write_marker must not path-gate its write"
+        );
+        let vm_src = include_str!("../vm.rs");
+        let def = vm_src.find("fn mark_provisioned").unwrap();
+        let body_end = def + vm_src[def..].find("\n}").unwrap();
+        let body = &vm_src[def..body_end];
+        // The dispatch legitimately carries target-cfg BLOCKS; banned
+        // are gates on the WRITE decision itself — cfg-macro calls,
+        // a test-cfg attribute, and `.contains(` path checks.
+        assert!(
+            !body.contains(concat!("cfg", "!")),
+            "dispatch must not compile-gate"
+        );
+        assert!(
+            !body.contains(concat!("#", "[cfg(test")),
+            "dispatch must not test-gate"
+        );
+        assert!(
+            !body.contains(".contains("),
+            "dispatch must not path-gate the marker write"
         );
         // Position: vm.rs's call must be inside the dispatch fn body —
         // between `pub fn mark_provisioned` and that function's closing

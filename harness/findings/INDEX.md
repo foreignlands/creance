@@ -3,6 +3,12 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 103 | S5 | F-096 教训"实机复验必须 FRESH setup"未沉淀到 OPERATOR-PROMPT/docs | 流程 / F-096 | 已修复（OPERATOR-PROMPT 铁律 4：每批复验至少一条 fresh init+setup→up 腿） |
+| 102 | S5 | v0.6.19 watchdog 熔断 6 项语义无测试：阈值放宽到 8、非 Open 态计数、超时 30s、两处复位、closed 分支不切 wire 全绿 | v0.6.19 watchdog | 已修复（Checking 豁免+熔断≤2.5s+pidfile 真实杀 wire 测试+源码钉） |
+| 101 | S5 | 允许集 `-e '` 计数/unit 唯一计数只数形状：替换条目、条目内嵌换行、`tee`/`cat >/etc/..` 第二 unit 全绿 | F-097 修复面 | 已修复（verbatim 允许集钉+systemd/system/ 宽路径计数） |
+| 100 | S5 | up-gate verdict 输入仍可伪造：丢弃探针结果、`.map` 改写、`let (out, _)`、局部 `mod escape` 遮蔽全绿 | F-097 修复面 | 已修复（sealed EgressVerified：verdict 输出发型令牌，mark_provisioned 强制取证） |
+| 099 | S5 | marker 守护 7 例绕过：单行 `mod t {}` 让 `find("\n}")` 吞掉产品 fn、`#![cfg(test)]`、`#[path]` 出 src/、`/state/qemu/` 双条件 gate、`#[cfg(not(test))]` 属性、vm.rs `cfg!` | F-097 修复面 | 已修复（递归 walk+prod 区钉形+#[path]/#![cfg 禁令+双条件目录+cfg/contains 禁体） |
+| 098 | S5 | F-096 结构校验只数裸终止行：空白变体多余 `EGRESSRULES` 行实测 RC=127 变砖而 CI 全绿；`if false` 包裹亦绿 | F-096 修复面 | 已修复（heredoc 段 sh -e 真实执行+cat 行字面钉+EGRESSRULES 行数==2） |
 | 096 | S4 | bootstrap rules.v4 heredoc 双重终止行：`EGRESSRULES: not found` RC=127 → set -e 中止 → fresh setup 100% 变砖（供给全断） | H1 / F-094 修复面 | 已修复（main-session，实机复验：fresh setup→up 全绿，egress-lock 实装） |
 | 097 | S5 | v0.6.18 守护加固 15 例绕过：rfind 截尾后追记/非递归扫目录/verdict 输入未钉/产品形家目录 gate/cfg! 门/带空 ExecStartPost/引号拆词 stamp/第二 unit/tcp 入允许集 | H1 / F-095 修复面 | 已修复（main-session，实机复验） |
 | 092 | S4 | rules.v4 半边只筛 `^-A OUTPUT` 行：`-I`/`--append`/`-R`/空白变体/`:OUTPUT ACCEPT` 重声明/第二 `*filter` 块被 restore 应用但探针不可见 | H1 / F-090 修复面 | 已修复（main-session，实机复验 up RC=0 + S01-S09 真值表全 fw-down） |

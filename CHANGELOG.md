@@ -4,6 +4,53 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.6.21] — 2026-11-23
+
+### Fixed — night-25 (R28 audit round)
+
+- F-099/F-100 (S5): the up-gate verdict chain is now SEALED at the type
+  level. New `creance-vm::gateprobe` module mints `EgressVerified` —
+  an unforgeable token with a private field — only inside
+  `egress_verdict`'s Ok arm; `mark_provisioned` (vm.rs dispatch and
+  qemu backend) now takes `&EgressVerified`, so arming the restrict=on
+  marker without a real passing verdict is a compile error, not a
+  convention a mutation can quietly relax. The whole probe → verdict →
+  token → marker chain collapsed into ONE call
+  (`gateprobe::verify_and_mark`): main.rs holds no `out` to forge, no
+  verdict result to neutralize, no marker call to reorder.
+- F-099 (S5): the seven marker-guard bypasses are closed — the source
+  walk is recursive and per-file, prod-region slicing pins the
+  `#[cfg(test)]` mod to its real shape (a one-line `mod t {}` can no
+  longer swallow prod code), inner `#![cfg` attrs and `#[path]` module
+  indirection are banned outright, the write path bans `cfg!`/attr
+  gates and ANY `.contains(` on the dir (incl. a dual
+  `/.creance/`+`/state/qemu/` shape), and the vm.rs dispatch body gets
+  the same treatment.
+- F-098 (S5): the rules.v4 heredoc is now EXECUTED, not just counted —
+  the test slices `cat > … <<'EGRESSRULES' … EGRESSRULES` plus the
+  following line into a temp dir and runs it under `sh -e`: a stray
+  terminator-shaped line (the v0.6.18 brick, whitespace variants
+  included) runs as a command and fails RC=127; `if false` wrapping
+  breaks the syntax. Structure pins too: the cat line is literal-equal
+  and exactly two lines mention EGRESSRULES.
+- F-101 (S5): the fw-fragment allow-set pin now compares the shipped
+  `grep -vxF` arg list VERBATIM against the canonical 13-argument set
+  built from the renderer's own inputs (entry replacement or embedded
+  newlines change the bytes); the systemd unit count uses the broad
+  `systemd/system/` path — `cat >/x`, `tee`, drop-ins and second units
+  all bump it.
+- F-102 (S5): watchdog fuse semantics now have behavioural coverage —
+  a dead core during Checking does NOT fuse, fuse latency is asserted
+  ≤2.5s, and a fused gate observably kills a real wire process through
+  the pidfile path (a spawned `sleep` stands in for the tunnel;
+  `reap_orphans` alone won't touch it). Source pins hold the middle:
+  250ms sample, >=3 threshold, both counter resets, Open-only
+  counting, `tunnel::stop`/`ensure` legs.
+- F-103 (S5): OPERATOR-PROMPT 铁律 4 codified — every fix batch's
+  real-machine re-verify must include at least one FRESH
+  `init → setup → up` leg (the v0.6.18 brick only ever showed on new
+  bootstraps).
+
 ## [0.6.20] — 2026-11-23
 
 ### Fixed — night-24 (R27 audit round)
