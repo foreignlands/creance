@@ -1,0 +1,29 @@
+main.rs writes the marker file itself
+
+$ cargo fmt --all
+
+$ cargo test --workspace --locked -q
+
+running 15 tests
+...............
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 1 test
+up_gate_tests::provisioned_marker_only_after_verdict --- FAILED
+
+failures:
+
+---- up_gate_tests::provisioned_marker_only_after_verdict stdout ----
+
+thread 'up_gate_tests::provisioned_marker_only_after_verdict' (102353) panicked at crates/creance/src/main.rs:875:9:
+verify_and_mark の拒否は fail(e) で伝播する
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    up_gate_tests::provisioned_marker_only_after_verdict
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p creance --bin creance`

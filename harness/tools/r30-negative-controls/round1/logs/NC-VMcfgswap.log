@@ -1,0 +1,95 @@
+Linux dispatch becomes the no-op: restrict=on never arms
+
+$ cargo fmt --all
+
+$ cargo test --workspace --locked -q
+warning: function `mark_provisioned` is never used
+   --> crates/creance-vm/src/qemu/mod.rs:316:15
+    |
+316 | pub(crate) fn mark_provisioned(
+    |               ^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `write_marker` is never used
+   --> crates/creance-vm/src/qemu/mod.rs:326:4
+    |
+326 | fn write_marker(dir: &str) -> bool {
+    |    ^^^^^^^^^^^^
+
+
+running 15 tests
+...............
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+
+running 16 tests
+................
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.07s
+
+
+running 30 tests
+..............................
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+
+running 11 tests
+ii.........
+test result: ok. 9 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 45 tests
+.............................................
+test result: ok. 45 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+
+running 70 tests
+.......... 10/70
+gateprobe::tests::verify_and_mark_refuses_and_stops_on_every_bad_input --- FAILED
+..............................................==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-938158 -N -R 18765:127.0.0.1:18765' for reading: No such file or directory
+ 57/70
+qemu::tests::mark_provisioned_is_called_only_from_the_cli_crate --- FAILED
+........==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-938158 -N -R 18765:127.0.0.1:18765' for reading: No such file or directory
+==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-938158' for reading: No such file or directory
+....
+failures:
+
+---- gateprobe::tests::verify_and_mark_refuses_and_stops_on_every_bad_input stdout ----
+
+thread 'gateprobe::tests::verify_and_mark_refuses_and_stops_on_every_bad_input' (97261) panicked at crates/creance-vm/src/gateprobe.rs:331:9:
+assertion `left == right` failed: Ok(false)
+  left: Ok(false)
+ right: Ok(true)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- qemu::tests::mark_provisioned_is_called_only_from_the_cli_crate stdout ----
+
+thread 'qemu::tests::mark_provisioned_is_called_only_from_the_cli_crate' (97311) panicked at crates/creance-vm/src/qemu/mod.rs:727:9:
+dispatch arms must keep their target names
+
+
+failures:
+    gateprobe::tests::verify_and_mark_refuses_and_stops_on_every_bad_input
+    qemu::tests::mark_provisioned_is_called_only_from_the_cli_crate
+
+test result: FAILED. 68 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+error: test failed, to rerun pass `-p creance-vm --lib`

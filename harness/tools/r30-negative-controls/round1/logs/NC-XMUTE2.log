@@ -1,0 +1,24 @@
+workspace unsafe_code is `deny` (not forbid): local #[allow] re-opens transmute minting
+
+$ cargo fmt --all
+
+$ cargo test --workspace --locked -q
+error[E0603]: function `mark_provisioned` is private
+   --> crates/creance-gate/src/lib.rs:14:21
+    |
+ 14 |     creance_vm::vm::mark_provisioned(p, i, &t)
+    |                     ^^^^^^^^^^^^^^^^ private function
+    |
+note: the function `mark_provisioned` is defined here
+   --> crates/creance-vm/src/vm.rs:347:1
+    |
+347 | / pub(crate) fn mark_provisioned(
+348 | |     profile: &str,
+349 | |     instance: &str,
+350 | |     _proof: &crate::gateprobe::EgressVerified,
+351 | | ) -> bool {
+    | |_________^
+
+For more information about this error, try `rustc --explain E0603`.
+error: could not compile `creance-gate` (lib) due to 1 previous error
+error: could not compile `creance-gate` (lib test) due to 1 previous error

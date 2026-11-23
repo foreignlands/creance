@@ -1,0 +1,73 @@
+allow entry pushed after the NAT loop
+
+$ cargo fmt --all
+
+$ cargo test --workspace --locked -q
+
+running 15 tests
+...............
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+
+running 16 tests
+................
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.06s
+
+
+running 30 tests
+..............................
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+
+running 11 tests
+ii.........
+test result: ok. 9 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 45 tests
+.............................................
+test result: ok. 45 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+
+running 70 tests
+........ 8/70
+gateprobe::tests::egress_probe_reads_only_unprivileged_evidence --- FAILED
+......................................................==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-289b2a -N -R 18765:127.0.0.1:18765' for reading: No such file or directory
+...==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-289b2a -N -R 18765:127.0.0.1:18765' for reading: No such file or directory
+==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-289b2a' for reading: No such file or directory
+....
+failures:
+
+---- gateprobe::tests::egress_probe_reads_only_unprivileged_evidence stdout ----
+
+thread 'gateprobe::tests::egress_probe_reads_only_unprivileged_evidence' (119952) panicked at crates/creance-vm/src/gateprobe.rs:416:9:
+assertion `left == right` failed: allowset line must be the canonical list and nothing else
+  left: "live=$(grep -hE '^-A OUTPUT' \"$STAMP\" | grep -vxF -e '-A OUTPUT -o lo -j ACCEPT' -e '-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT' -e '-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT' -e '-A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT' -e '-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT' -e '-A OUTPUT -p udp --dport 67 -d 10.0.2.2/32 -j ACCEPT' -e '-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT' -e '-A OUTPUT -p icmp -d 10.0.2.2/32 -j ACCEPT' -e '-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT' -e '-A OUTPUT -p udp --dport 67 -d 10.0.2.3/32 -j ACCEPT' -e '-A OUTPUT -d 10.0.2.3/32 -p udp -m udp --dport 67 -j ACCEPT' -e '-A OUTPUT -p icmp -d 10.0.2.3/32 -j ACCEPT' -e '-A OUTPUT -d 10.0.2.3/32 -p icmp -j ACCEPT' -e '-A OUTPUT -p tcp -j ACCEPT')"
+ right: "live=$(grep -hE '^-A OUTPUT' \"$STAMP\" | grep -vxF -e '-A OUTPUT -o lo -j ACCEPT' -e '-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT' -e '-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT' -e '-A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT' -e '-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT' -e '-A OUTPUT -p udp --dport 67 -d 10.0.2.2/32 -j ACCEPT' -e '-A OUTPUT -d 10.0.2.2/32 -p udp -m udp --dport 67 -j ACCEPT' -e '-A OUTPUT -p icmp -d 10.0.2.2/32 -j ACCEPT' -e '-A OUTPUT -d 10.0.2.2/32 -p icmp -j ACCEPT' -e '-A OUTPUT -p udp --dport 67 -d 10.0.2.3/32 -j ACCEPT' -e '-A OUTPUT -d 10.0.2.3/32 -p udp -m udp --dport 67 -j ACCEPT' -e '-A OUTPUT -p icmp -d 10.0.2.3/32 -j ACCEPT' -e '-A OUTPUT -d 10.0.2.3/32 -p icmp -j ACCEPT')"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    gateprobe::tests::egress_probe_reads_only_unprivileged_evidence
+
+test result: FAILED. 69 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+error: test failed, to rerun pass `-p creance-vm --lib`
