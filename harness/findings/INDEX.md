@@ -3,6 +3,13 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 110 | S5 | F-102 watchdog 钉可绕：`let _core_down_ticks = 0;` 遮蔽两处复位、`from_millis(250).max(30s)`、阈值放宽到 4 tick 全绿 | F-102 修复面 | 待修复 |
+| 109 | S5 | F-101 钉仍只数形状：enable 行注释、`cd`+相对路径/`./` 第二 unit、verbatim 允许集后追加条目（实为 contains）全绿 | F-101 修复面 | 待修复 |
+| 108 | S5 | F-098 执行测试只切 cat 行起的段：段外 `if false; then`/外层 `: <<'SKIPRULES'` 包裹全绿，CHANGELOG "if false breaks the syntax" 证伪 | F-098 修复面 | 待修复 |
+| 107 | S5 | main.rs `match verify_and_mark … Ok(wrote)` 未钉：`Err(e) => eprintln!` 吞拒绝、Err 臂 `std::fs::write` 自写 marker 全绿 | v0.6.21 up-gate | 待修复 |
+| 106 | S5 | Linux marker 分发可静默 noop：vm.rs cfg macos↔linux 对调、qemu `instance_dir` 实参对调全绿（restrict=on 永不武装） | F-099 修复面 | 待修复 |
+| 105 | S5 | `EgressVerified` 封印可绕：derive(Default)、`Self { _sealed }` 第二构造点、他 crate 经 pub `egress_verdict(字面量)` 铸令牌、`&Result` 签名降级全绿 | F-099/F-100 修复面 | 待修复 |
+| 104 | S5 | `verify_and_mark` 内输入仍可伪造：verdict 判字面量、canned echo 探针、guest 失败喂通过串、`.map` 改写、`let out` 遮蔽全绿 | F-100 修复面 | 待修复 |
 | 103 | S5 | F-096 教训"实机复验必须 FRESH setup"未沉淀到 OPERATOR-PROMPT/docs | 流程 / F-096 | 已修复（OPERATOR-PROMPT 铁律 4：每批复验至少一条 fresh init+setup→up 腿） |
 | 102 | S5 | v0.6.19 watchdog 熔断 6 项语义无测试：阈值放宽到 8、非 Open 态计数、超时 30s、两处复位、closed 分支不切 wire 全绿 | v0.6.19 watchdog | 已修复（Checking 豁免+熔断≤2.5s+pidfile 真实杀 wire 测试+源码钉） |
 | 101 | S5 | 允许集 `-e '` 计数/unit 唯一计数只数形状：替换条目、条目内嵌换行、`tee`/`cat >/etc/..` 第二 unit 全绿 | F-097 修复面 | 已修复（verbatim 允许集钉+systemd/system/ 宽路径计数） |

@@ -1,0 +1,15 @@
+NC-GPforge: needle before=4 after=5 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-GPcanned: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-GPerr: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-GPmap: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-GPshadow: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=101 => red
+NC-GPdefault: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-GPself: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-SEALcnt: needle before=0 after=1 test-RC=101 panicked/FAILED=3 compile-err=0 clippy-RC=- => red
+NC-SIGres: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-VMcfgswap: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-QMswap: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-XGATE: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-XMUTE: needle before=0 after=1 test-RC=101 panicked/FAILED=0 compile-err=2 clippy-RC=- => HARNESS-ERROR(compile)
+NC-MAINfs: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+md5-restore: OK (7 files)

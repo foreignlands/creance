@@ -1,0 +1,23 @@
+NC-GPforge: needle before=4 after=5 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-GPcanned: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-GPerr: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-GPmap: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-GPdefault: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-GPself: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-SIGres: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-VMcfgswap: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-QMswap: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-XGATE: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-MAINfs: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-UPerr: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-HDiffalse: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-HDnull: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-ENcomment: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-UNITcd: needle before=0 after=2 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-UNITdot: needle before=0 after=2 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-ALLOWapp: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-ALLOWpush: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-WDshS: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-WDshF: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-WDto: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+md5-restore: OK (7 files)

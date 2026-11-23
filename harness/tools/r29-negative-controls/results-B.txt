@@ -1,0 +1,16 @@
+NC-UPerr: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-HDiffalse: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-HDnull: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-HDws2: needle before=0 after=1 test-RC=101 panicked/FAILED=3 compile-err=0 clippy-RC=- => red
+NC-ENcomment: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-UNITcd: needle before=0 after=2 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-UNITdot: needle before=0 after=2 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-ALLOWapp: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-ALLOWpush: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-WDshS: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-WDshF: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-WDto: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-WDthr4: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=101 => red
+NC-WDopenC: needle before=0 after=1 test-RC=101 panicked/FAILED=3 compile-err=0 clippy-RC=- => red
+NC-WDcutdead: needle before=0 after=1 test-RC=101 panicked/FAILED=3 compile-err=0 clippy-RC=- => red
+md5-restore: OK (7 files)

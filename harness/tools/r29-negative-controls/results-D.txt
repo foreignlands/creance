@@ -1,0 +1,3 @@
+NC-XMUTE2: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-WDthr4c: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+md5-restore: OK (7 files)

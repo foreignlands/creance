@@ -1,0 +1,45 @@
+CONTROL: threshold 10 ticks (5s) — behaviour test must red
+
+$ cargo fmt --all
+
+$ cargo test --workspace --locked -q
+
+running 15 tests
+...............
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+
+running 16 tests
+.............. 14/16
+gate::tests::watchdog_fuses_open_gate_when_core_unreachable --- FAILED
+.
+failures:
+
+---- gate::tests::watchdog_fuses_open_gate_when_core_unreachable stdout ----
+
+thread 'gate::tests::watchdog_fuses_open_gate_when_core_unreachable' (101506) panicked at crates/creance-gate/src/gate.rs:1843:9:
+fuse must land inside ~3 ticks: 5.012220293s
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    gate::tests::watchdog_fuses_open_gate_when_core_unreachable
+
+test result: FAILED. 15 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.52s
+
+error: test failed, to rerun pass `-p creance-gate --lib`
