@@ -360,13 +360,22 @@ mod tests {
         // (`egress-"armed"`). The bare keyword count catches all of it:
         // a second post line, spaced or quoted, is count 2.
         assert_eq!(s.matches("ExecStartPost").count(), 1, "{s}");
-        // F-097/F-101/NC-UNITsep+UNITns+UNITtee: exactly ONE unit-file
-        // path under systemd's dir — counted by the broad `systemd/system/`
-        // path (covers /etc and /lib spellings), not by the `cat > `
-        // spelling: `cat >/x`, `tee /x`, `printf > /x`, drop-in dirs
-        // and a second unit that flips the policy after egress-lock's
-        // ExecStartPost all bump the count.
-        assert_eq!(s.matches("systemd/system/").count(), 1, "{s}");
+        // F-097/F-101/F-109: exactly ONE unit-file path under systemd's
+        // dir — counted by the broad `systemd/` substring so
+        // `/etc/systemd/./system/` infixes and /etc-vs-/lib spellings
+        // all bump it; `cat >` count is exactly 3 (session-env +
+        // rules.v4 + the unit) so a `cd`-into-the-dir + relative write
+        // adds a fourth, and `cd` is banned outright anyway. The enable
+        // line must exist AS A LINE — a `#`-commented one doesn't
+        // satisfy line equality (NC-ENcomment).
+        assert_eq!(s.matches("systemd/").count(), 1, "{s}");
+        assert_eq!(s.matches("cat > ").count(), 3, "{s}");
+        assert!(!s.contains("\ncd "), "{s}");
+        assert!(
+            s.lines()
+                .any(|l| l == "systemctl enable egress-lock.service >/dev/null"),
+            "{s}"
+        );
         // F-096/F-098: the rules.v4 heredoc is checked STRUCTURALLY AND
         // EXECUTED. Structure: the `cat >` line is exactly the literal
         // (no `if`/`&&` prefix can mask it), exactly two lines mention
@@ -406,6 +415,25 @@ mod tests {
             .find('\n')
             .map(|i| term_end + i + 1)
             .unwrap_or(s.len());
+        // F-108: the cat line must also be TOP-LEVEL — a wrapper opened
+        // before it (`if false; then`, `: <<'SKIPRULES'`) closes after
+        // the segment and never enters the executed slice. `sh -n` on
+        // the prefix+`exit 0` fails on any unclosed construct, and
+        // `sh -n` on the whole script catches unbalanced `fi`/EOF.
+        let prefix_ok = std::process::Command::new("sh")
+            .arg("-nc")
+            .arg(format!("{}\nexit 0\n", &s[..seg_start]))
+            .status()
+            .unwrap()
+            .success();
+        assert!(prefix_ok, "bootstrap prefix must be top-level shell");
+        let whole_ok = std::process::Command::new("sh")
+            .arg("-nc")
+            .arg(&s)
+            .status()
+            .unwrap()
+            .success();
+        assert!(whole_ok, "rendered bootstrap must be balanced shell");
         let dir = std::env::temp_dir().join(format!("creance-heredoc-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();

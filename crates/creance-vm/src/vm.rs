@@ -344,7 +344,7 @@ pub fn nat_allow_hosts() -> &'static [&'static str] {
 /// passing verdict cannot type-check (F-099/F-100). The Lima backend
 /// has no restrict equivalent — a no-op there. Returns true only when
 /// this call armed it.
-pub fn mark_provisioned(
+pub(crate) fn mark_provisioned(
     profile: &str,
     instance: &str,
     _proof: &crate::gateprobe::EgressVerified,

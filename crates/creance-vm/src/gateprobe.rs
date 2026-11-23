@@ -109,7 +109,9 @@ fn fw_probe_fragment(nat_hosts: &[&str]) -> String {
 /// fail-closed: any missing or unexpected evidence is a refusal, never
 /// a soft pass (F-062/F-081/F-083). The Ok value is the sealed token:
 /// reaching `mark_provisioned` requires it.
-pub fn egress_verdict(out: &str) -> Result<EgressVerified, &'static str> {
+/// F-105: PRIVATE — a token minted anywhere but inside this module's
+/// own probe→verdict chain is a compile error across the workspace.
+fn egress_verdict(out: &str) -> Result<EgressVerified, &'static str> {
     let tcp_ok = out.contains("tcp-blocked") && !out.contains("tcp-open");
     let icmp_ok = out.contains("icmp-blocked")
         || (out.contains("icmp-unknown") && !out.contains("icmp-open"));
@@ -137,20 +139,38 @@ pub fn egress_verdict(out: &str) -> Result<EgressVerified, &'static str> {
 /// reason — fail-closed end to end. Returns true only when this call
 /// armed the marker.
 pub fn verify_and_mark(profile: &str, instance: &str) -> Result<bool, String> {
-    let out = match vm::guest_script(
+    verify_and_mark_with(profile, instance, vm::guest_script, |p, i| {
+        let _ = vm::stop_vm(p, i);
+    })
+}
+
+/// The seam with the guest runner and stop action injected — the
+/// behavioural tests drive it with fakes (F-104): bad output must
+/// refuse AND stop, good output must arm.
+fn verify_and_mark_with<F, S>(
+    profile: &str,
+    instance: &str,
+    run: F,
+    stop: S,
+) -> Result<bool, String>
+where
+    F: FnOnce(&str, &str, &str) -> Result<String, String>,
+    S: FnOnce(&str, &str),
+{
+    let out = match run(
         profile,
         instance,
         &egress_probe_script(vm::nat_allow_hosts()),
     ) {
         Ok(out) => out,
         Err(e) => {
-            let _ = vm::stop_vm(profile, instance);
+            stop(profile, instance);
             return Err(format!("无法在 guest 内验证防火墙状态，VM 已停止：{e}"));
         }
     };
     match egress_verdict(&out) {
         Err(reason) => {
-            let _ = vm::stop_vm(profile, instance);
+            stop(profile, instance);
             Err(format!(
                 "{reason}，VM 已停止；请 creance stop 后 creance setup 重建环境。探针原始输出：{out:?}"
             ))
@@ -197,23 +217,120 @@ mod tests {
 
     #[test]
     fn verdict_seals_the_token() {
-        // F-099/F-100: the Ok value is what arms the marker — it must
-        // exist ONLY here. A second construction site anywhere in the
-        // crate (a `mint()` helper, a `Default`) means a forged input
-        // can arm without a real verdict.
+        // F-099/F-100/F-105: the Ok value is what arms the marker — it
+        // must exist ONLY here. A second construction site anywhere in
+        // the crate (a `mint()` helper, `Self { _sealed }`, a `Default`
+        // or `Clone` derive, an `unsafe` mint) means a forged input can
+        // arm without a real verdict. `_sealed: ()` appears exactly
+        // twice: the field decl and the single mint.
         let src = include_str!("gateprobe.rs");
         let prod = &src[..src.rfind("\n#[cfg(test)]").unwrap()];
+        assert_eq!(
+            prod.matches("_sealed: ()").count(),
+            2,
+            "field decl + the single mint inside egress_verdict"
+        );
         assert_eq!(
             prod.matches("EgressVerified { _sealed").count(),
             1,
             "EgressVerified の構築点は egress_verdict の Ok 分岐のみ"
         );
+        assert_eq!(
+            prod.matches("Self { _sealed").count(),
+            0,
+            "Self-spelled construction is a second mint site"
+        );
+        assert!(
+            !prod.contains("impl EgressVerified"),
+            "no impl block may mint the token"
+        );
+        assert!(
+            !prod.contains("Default") && !prod.contains("Clone"),
+            "a Default/Clone mint is a second construction site"
+        );
+        assert!(
+            !prod.contains("unsafe") && !prod.contains("transmute"),
+            "an unsafe mint defeats the seal"
+        );
+        // The verdict fn stays private — `pub` lets ANY crate in the
+        // workspace feed it a literal and arm the marker (F-105/XGATE).
+        assert!(
+            !prod.contains("pub fn egress_verdict"),
+            "egress_verdict must stay private"
+        );
+        assert_eq!(prod.matches("fn egress_verdict(").count(), 1);
         assert_eq!(prod.matches("egress_verdict(").count(), 2, "{src}");
         assert_eq!(
             prod.matches("verify_and_mark(").count(),
             1,
             "def only — the single call site lives in creance's main.rs"
         );
+        assert_eq!(
+            prod.matches("verify_and_mark_with").count(),
+            2,
+            "def + the one production call inside verify_and_mark"
+        );
+        // F-104: inside verify_and_mark_with the verdict's input must be
+        // the REAL guest output — the body's literal is
+        // `match egress_verdict(&out)`, `let out` binds exactly once,
+        // no `.map`/rebind may sit between run() and the verdict, and
+        // the body must not contain the pass-strings it judges (a
+        // canned `"tcp-blocked"/"fw-armed"` literal IS the forgery).
+        let def = prod.find("fn verify_and_mark_with").unwrap();
+        let body_end = def + prod[def..].find("\n}").unwrap();
+        let body = &prod[def..body_end];
+        assert_eq!(body.matches("egress_verdict(&out)").count(), 1);
+        assert_eq!(body.matches("let out").count(), 1, "{body}");
+        assert!(!body.contains(".map("), "{body}");
+        assert!(!body.contains("tcp-blocked"), "{body}");
+        assert!(!body.contains("fw-armed"), "{body}");
+        assert!(!body.contains("icmp-blocked"), "{body}");
+        assert_eq!(body.matches("stop(").count(), 2, "{body}");
+        assert!(body.contains("return Err"), "{body}");
+        assert_eq!(body.matches("mark_provisioned(").count(), 1, "{body}");
+    }
+
+    #[test]
+    fn verify_and_mark_refuses_and_stops_on_every_bad_input() {
+        // F-104: drive the seam with injected runners — the verdict
+        // must see the REAL probe output, and every refusal must stop.
+        let stopped = std::cell::RefCell::new(0usize);
+        let run = |_p: &str, _i: &str, _s: &str| -> Result<String, String> {
+            Ok("tcp-open\nicmp-blocked\nfw-armed\n".to_owned())
+        };
+        let res = verify_and_mark_with("/tmp/nope", "nope", run, |_p, _i| {
+            *stopped.borrow_mut() += 1;
+        });
+        let err = res.unwrap_err();
+        assert!(err.contains("直连可达"), "{err}");
+        assert_eq!(*stopped.borrow(), 1, "refusal must stop the VM");
+        // Runner error → refuse + stop (a canned-pass conversion would
+        // have to swallow this — the Err arm pins it textually too).
+        let res = verify_and_mark_with(
+            "/tmp/nope",
+            "nope",
+            |_p, _i, _s| Err("ssh dead".to_owned()),
+            |_p, _i| *stopped.borrow_mut() += 1,
+        );
+        let err = res.unwrap_err();
+        assert!(err.contains("无法"), "{err}");
+        assert_eq!(*stopped.borrow(), 2);
+        // Passing output arms the marker AT the instance's own dir.
+        let profile = std::env::temp_dir()
+            .join(format!("creance-vam-{}", std::process::id()))
+            .to_string_lossy()
+            .into_owned();
+        let dir = crate::qemu::instance_dir(&profile, "good-inst");
+        std::fs::create_dir_all(&dir).unwrap();
+        let res = verify_and_mark_with(
+            &profile,
+            "good-inst",
+            |_p, _i, _s| Ok("tcp-blocked\nicmp-blocked\nfw-armed\n".to_owned()),
+            |_p, _i| panic!("a pass must not stop"),
+        );
+        assert_eq!(res, Ok(true), "{res:?}");
+        assert!(std::path::Path::new(&crate::paths::join(&dir, "provisioned")).exists());
+        let _ = std::fs::remove_dir_all(&profile);
     }
 
     /// Run the shipped fw fragment — sliced out of the real
@@ -292,10 +409,29 @@ mod tests {
             .lines()
             .find(|l| l.contains("grep -vxF"))
             .expect("allowset line");
-        assert!(
-            grep_line.contains(&format!("grep -vxF {expected_args}")),
-            "allowset must be exactly the canonical list, verbatim: {grep_line}"
+        // F-109/NC-ALLOWapp: FULL-line equality, not `contains` — a
+        // trailing `-e '…'` appended after the canonical args would
+        // keep a prefix-contains check green.
+        assert_eq!(
+            grep_line,
+            format!("live=$(grep -hE '^-A OUTPUT' \"$STAMP\" | grep -vxF {expected_args})"),
+            "allowset line must be the canonical list and nothing else"
         );
+        // NC-ALLOWpush: the builder may only assemble the set through
+        // the seeded vec + the per-host loop — count every `allowed.`
+        // use in fw_probe_fragment: 4 pushes (one per line shape in
+        // the loop) + 1 `.iter()` = 5. An extra push/extend/insert is
+        // count 6+.
+        let gp = include_str!("gateprobe.rs");
+        let prod = &gp[..gp.rfind("\n#[cfg(test)]").unwrap()];
+        let fs = prod.find("fn fw_probe_fragment").unwrap();
+        let fend = fs + prod[fs..].find("\n}").unwrap();
+        assert_eq!(
+            prod[fs..fend].matches("allowed").count(),
+            6,
+            "vec decl + 4 loop pushes + the .iter() read — an extra push/extend/insert bumps the count"
+        );
+        assert_eq!(prod[fs..fend].matches("allowed.push(").count(), 4);
         assert!(!p.contains("-e '-A OUTPUT -j ACCEPT'"), "{p}");
         assert!(!p.contains("conntrack --ctstate .*"), "{p}");
         assert!(p.contains("/etc/iptables/rules.v4"), "{p}");

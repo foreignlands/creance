@@ -313,7 +313,7 @@ pub fn up(profile: &str, instance: &str) -> i32 {
 /// F-099: the sealed `_proof` makes "without a passing verdict" a
 /// compile error, not a convention. Returns true only when this call
 /// wrote it.
-pub fn mark_provisioned(
+pub(crate) fn mark_provisioned(
     profile: &str,
     instance: &str,
     _proof: &crate::gateprobe::EgressVerified,
@@ -718,7 +718,17 @@ mod tests {
         let body = &vm_src[def..body_end];
         // The dispatch legitimately carries target-cfg BLOCKS; banned
         // are gates on the WRITE decision itself — cfg-macro calls,
-        // a test-cfg attribute, and `.contains(` path checks.
+        // a test-cfg attribute, and `.contains(` path checks. F-105:
+        // the sealed-token signature itself is pinned literally — a
+        // `&Result<…>` or `Option<&…>` downgrade would arm before the
+        // verdict is judged. F-106: BOTH cfg arms pinned by name —
+        // swapping "macos"→"linux" makes the Linux arm a silent noop.
+        assert!(body.contains("_proof: &crate::gateprobe::EgressVerified"));
+        assert!(
+            body.contains("#[cfg(target_os = \"macos\")]")
+                && body.contains("#[cfg(not(target_os = \"macos\"))]"),
+            "dispatch arms must keep their target names"
+        );
         assert!(
             !body.contains(concat!("cfg", "!")),
             "dispatch must not compile-gate"
@@ -732,16 +742,16 @@ mod tests {
             "dispatch must not path-gate the marker write"
         );
         // Position: vm.rs's call must be inside the dispatch fn body —
-        // between `pub fn mark_provisioned` and that function's closing
+        // between `mark_provisioned`'s fn line and its closing
         // brace at column 0.
         let vm = include_str!("../vm.rs");
         let prod = &vm[..vm.rfind("\n#[cfg(test)]").unwrap_or(vm.len())];
-        let def = prod.find("pub fn mark_provisioned").unwrap();
+        let def = prod.find("fn mark_provisioned").unwrap();
         let body_end = def + prod[def..].find("\n}").unwrap();
         let call = prod.rfind("mark_provisioned(").unwrap();
         assert!(
             def < call && call < body_end,
-            "vm.rs 的 dispatch 调用必须在 pub fn mark_provisioned 本体内"
+            "vm.rs 的 dispatch 调用必须在 mark_provisioned 本体内"
         );
     }
 }

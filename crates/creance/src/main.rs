@@ -852,12 +852,27 @@ mod up_gate_tests {
         );
         let src =
             &include_str!("main.rs")[..include_str!("main.rs").rfind("\n#[cfg(test)]").unwrap()];
-        // F-099/F-100: the up-gate delegates the ENTIRE chain to
-        // verify_and_mark — a single call is the only seam left to pin.
+        // F-099/F-100/F-107: the up-gate delegates the ENTIRE chain to
+        // verify_and_mark — a single call is the only seam left to pin,
+        // and its refusal must propagate (an `eprintln!`-and-continue
+        // Err arm reports "Environment is up" on a dead firewall).
         assert_eq!(
             src.matches("verify_and_mark(").count(),
             1,
             "up ゲートは verify_and_mark 単一呼出（探針・verdict・marker の縫い目はもうここにはない）"
+        );
+        let call = src.find("verify_and_mark(&profile, &instance)").unwrap();
+        let arm_region = &src[call..call + 600];
+        assert!(
+            arm_region.contains("Err(e) => return fail(e),"),
+            "verify_and_mark の拒否は fail(e) で伝播する"
+        );
+        // NC-MAINfs: writing the marker file directly — any literal
+        // "provisioned" or instance_dir() call in this crate bypasses
+        // the sealed token entirely.
+        assert!(
+            !src.contains("\"provisioned\"") && !src.contains("instance_dir(&profile"),
+            "main.rs must not touch the provisioned marker directly"
         );
     }
 }

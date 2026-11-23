@@ -1830,6 +1830,18 @@ mod tests {
         // eventually" check. Measure the latency, don't just poll for
         // the end state.
         let t0 = Instant::now();
+        // Lower bound too (F-110): at ~1.3s only two dead ticks have
+        // sampled (500ms loop) — fusing that early means the threshold
+        // shrank below 3.
+        std::thread::sleep(Duration::from_millis(1300));
+        {
+            let inner = lock_or_recover(&handle.gate.inner);
+            assert_eq!(
+                inner.state,
+                GateState::Open,
+                "two dead ticks must not fuse — threshold is 3"
+            );
+        }
         let deadline = Instant::now() + Duration::from_secs(5);
         let status = loop {
             std::thread::sleep(Duration::from_millis(50));
@@ -1841,7 +1853,7 @@ mod tests {
         assert_eq!(status.state, GateState::Closed, "{status:?}");
         assert!(status.reason.contains("熔断"), "{status:?}");
         assert!(
-            t0.elapsed() <= Duration::from_millis(2500),
+            t0.elapsed() <= Duration::from_millis(3000),
             "fuse must land inside ~3 ticks: {:?}",
             t0.elapsed()
         );
@@ -1979,9 +1991,25 @@ mod tests {
         // Global prod-region counts: pinning the loop's region by brace
         // matching is brittle, and a duplicated counter elsewhere is a
         // finding anyway — the whole prod file is the honest region.
-        assert_eq!(prod.matches("from_millis(250)").count(), 1);
-        assert_eq!(prod.matches("core_down_ticks >= 3").count(), 1);
+        // F-110: needles are shape-exact — `from_millis(250),` carries
+        // the trailing comma so a `.max(...)` chain breaks it; the
+        // threshold line is asserted verbatim so `&& is_multiple_of(4)`
+        // fails; shadow declarations (`let _core_down_ticks`) and
+        // rebinds are banned so a reset can't become a dead write.
+        assert_eq!(prod.matches("from_millis(250),").count(), 1);
+        assert_eq!(
+            prod.lines()
+                .filter(|l| l.trim() == "if core_down_ticks >= 3 {")
+                .count(),
+            1
+        );
         assert_eq!(prod.matches("core_down_ticks += 1").count(), 1);
+        assert!(!prod.contains("let _core_down_ticks"), "shadowed reset");
+        assert_eq!(
+            prod.matches("let mut core_down_ticks").count(),
+            1,
+            "the counter is declared exactly once"
+        );
         assert_eq!(
             prod.matches("core_down_ticks = 0;").count(),
             2,

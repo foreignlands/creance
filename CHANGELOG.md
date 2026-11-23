@@ -4,6 +4,63 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.6.22] — 2026-11-23
+
+### Fixed — night-26 (R29 audit round)
+
+Seven findings (104–110), all severity S5 — the sealed-token chain and
+its guards still carried bypass channels.
+
+- **F-104** — `verify_and_mark` is now a thin wrapper over
+  `verify_and_mark_with(profile, instance, run, stop)`: the guest
+  runner and the stop hook are injectable, so a behavioural test
+  drives the seam end-to-end — a forged-open output refuses AND stops
+  the VM, a runner error refuses AND stops, a pass arms the marker in
+  the instance's own `state/qemu/<inst>` directory. Body pins: the
+  verdict's input is literally `&out` (bound once), no `.map(`
+  between run and verdict, and the body may not contain the
+  pass-strings it judges — a canned `"tcp-blocked"` literal is the
+  forgery itself.
+- **F-105** — the token seal is now compile-enforced both ways:
+  `egress_verdict` is private (a `pub` verdict let any workspace crate
+  feed it a literal and mint), `mark_provisioned` is `pub(crate)` in
+  both vm.rs and qemu/mod.rs, the `_proof: &EgressVerified` signature
+  is pinned verbatim (a `&Result`/Option downgrade would arm before
+  judging), and the prod region bans `Self { _sealed`, an `impl`
+  block, `Default`/`Clone`, `unsafe`/`transmute` — `_sealed: ()`
+  exists exactly twice (decl + single mint).
+- **F-106** — the Linux marker dispatch could no-op silently (cfg arms
+  swapped macos↔linux, `instance_dir` args swapped). Both cfg arms are
+  pinned by literal name and the behavioural test asserts the file
+  lands at `<profile>/state/qemu/<inst>/provisioned`.
+- **F-107** — main.rs's `Err(e)` arm is pinned inside a 600-byte
+  window after the call (`return fail(e)` — an `eprintln!`-and-
+  continue arm reported "Environment is up" on a dead firewall), and
+  the whole creance crate bans a `"provisioned"` literal and
+  `instance_dir(&profile` — writing the marker directly there bypasses
+  the seal entirely.
+- **F-108** — the heredoc exec test sliced only from the `cat >` line,
+  so a wrapper opened before it (`if false; then`, an outer
+  `: <<'SKIPRULES'`) closed after the slice and never entered it.
+  `sh -n` now checks the prefix (wrapped to `exit 0`) and the whole
+  rendered script — an unclosed construct fails syntax-check outright.
+- **F-109** — substring pins became anchored: the enable line must be
+  a whole line (`#`-commented doesn't count), `systemd/` count is
+  exactly 1 across all spellings, `cat > ` is exactly 3, `\ncd ` is
+  banned, and the egress allowset compares the FULL `grep -vxF` line —
+  a trailing appended `-e` can no longer hide.
+- **F-110** — watchdog pins hardened: `from_millis(250),` carries its
+  trailing comma (a `.max(30s)` chain breaks it), the threshold is the
+  verbatim trimmed line `if core_down_ticks >= 3 {` (a `&&`-widened
+  condition fails), `let _core_down_ticks` shadow declarations are
+  banned (a dead write can't replace a reset), the counter is declared
+  exactly once, and the fuse test now asserts the lower bound — still
+  Open after ~1.3s, so two dead ticks cannot fuse.
+
+Real-machine re-verify (fresh, per 铁律 4): rm -rf → init → setup
+RC=0 → `up` RC=0 (供给完成, marker armed through the sealed chain) →
+stop → `up` RC=0 with `restrict=on` present in the qemu args.
+
 ## [0.6.21] — 2026-11-23
 
 ### Fixed — night-25 (R28 audit round)
