@@ -4,6 +4,45 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.6.25] — 2026-11-23
+
+### Fixed — night-28b (R32 self-audit; child-auditor session was
+quota-suspended, main session ran the round itself)
+
+Mutation-verified every R31 fix — 14 injected bypass shapes all went
+red — and closed five residuals the sweep found:
+
+- **fuse-region escape** — a `let mut warm = true;` declared just
+  BEFORE `let mut core_down_ticks` landed outside the pinned region
+  and passed everything. The writable-state helpers are now pinned
+  prod-wide: `let mut` == 18, `= true;` == 2, `= false;` == 2,
+  `mem::take`/`u32::from` absent; the region pins keep `let mut` == 2
+  and the `bool` ban inside the fuse body.
+- **ExecStartPost never executed** — the stub-root run proved the
+  bootstrap writes the unit, but `systemctl` being stubbed meant the
+  stamp line (`iptables-save | grep … > /run/egress-armed`) never
+  ran. The test now extracts the unit's literal `sh -c '…'` command,
+  replays `iptables-save`/`grep` against the written rules.v4 in the
+  same stub root, and asserts the stamp contains exactly the OUTPUT
+  rules the privileged probe reads back.
+- **rewrite-order corruption** — the stub-root path rewrite used
+  sequential `.replace()` calls: `/usr/` → `$STUB/usr/` inserted text
+  containing `/sbin/` and `/bin/`, which later passes re-rewrote into
+  garbage. Rewrites now run as a single left-to-right pass over the
+  earliest matching prefix.
+- **top-level verb gaps** — `mv`, `ln`, `chmod`, `chown`, `mkfifo`,
+  `mktemp`, `unlink`, `rmdir` added to the banned-token set (all
+  legit uses live inside the exempt inner `sh -c` block); `export
+  PATH`/`PATH=` line-start prefixes banned (a PATH redirect could
+  point `systemctl` at a planted binary).
+- Mutation evidence (prod-only, cp-restore harness): `|i, p|` swap,
+  dead-closure stop, `mem::zeroed` in vm.rs, fn-pointer verdict
+  export, unsafe in an unregistered new file, `Result::Err` guard
+  arm, `use … as idir` in lib.rs, bare `false`, `mv`, `export PATH`,
+  indented `EGRESSRULES` terminator, `exit 0`, split-quote
+  `/bin/systemctl disable`, compound 800ms sleep, pre-decl warm flag
+  — every one fails its guard.
+
 ## [0.6.24] — 2026-11-23
 
 ### Fixed — night-28 (R31 audit round)

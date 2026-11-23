@@ -445,7 +445,8 @@ mod tests {
         let banned_tokens = [
             "cd", "pushd", "popd", "builtin", "eval", "tee", "dd", "exit", "return", "exec",
             "false", "xargs", "install", "cp", "chroot", "setsid", "nohup", "sudo", "su", "source",
-            "wait", "trap", "kill",
+            "wait", "trap", "kill", "mv", "ln", "chmod", "chown", "mkfifo", "mktemp", "unlink",
+            "rmdir",
         ];
         for (li, l) in s.lines().enumerate() {
             if inside_span(li)
@@ -459,7 +460,7 @@ mod tests {
                 !ln.trim_start().starts_with('/'),
                 "absolute-path command: {l}"
             );
-            for starter in ["env ", "command ", "nice ", "sudo "] {
+            for starter in ["env ", "command ", "nice ", "sudo ", "export PATH", "PATH="] {
                 assert!(
                     !ln.trim_start().starts_with(starter),
                     "prefix-wrapped command: {l}"
@@ -650,12 +651,24 @@ mod tests {
             ("iptables-restore", "exit 0\n".to_string()),
             ("ip", "exit 0\n".to_string()),
             ("mount", "exit 0\n".to_string()),
+            // the unit's ExecStartPost calls these by absolute path
+            // inside $STUB/{usr,bin}: iptables-save replays the rules
+            // file the bootstrap wrote; grep delegates to the real one.
+            (
+                "usr/sbin/iptables-save",
+                format!("exec cat {root}/etc/iptables/rules.v4\n"),
+            ),
+            ("usr/bin/grep", "exec /usr/bin/grep \"$@\"\n".to_string()),
             (
                 "getent",
                 "echo \"$2:x:1000:1000::/nonexistent:/bin/sh\"\n".to_string(),
             ),
         ] {
-            let p = stub.join("bin").join(name);
+            let p = if name.contains('/') {
+                stub.join(name)
+            } else {
+                stub.join("bin").join(name)
+            };
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
             std::fs::write(&p, format!("#!/bin/sh\n{body}")).unwrap();
             #[cfg(unix)]
@@ -664,17 +677,25 @@ mod tests {
                 std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
             }
         }
-        // /tmp/ first: replacement paths contain the stub root and must
-        // not be re-rewritten by a later pass.
-        let rewritten = s
-            .replace("/tmp/", &format!("{root}/tmp/"))
-            .replace("/etc/", &format!("{root}/etc/"))
-            .replace("/var/", &format!("{root}/var/"))
-            .replace("/run/", &format!("{root}/run/"))
-            .replace("/usr/", &format!("{root}/usr/"))
-            .replace("/home/", &format!("{root}/home/"))
-            .replace("/bin/", &format!("{root}/bin/"))
-            .replace("/sbin/", &format!("{root}/sbin/"));
+        // Single left-to-right pass: replacement text itself contains
+        // `/usr/`, `/sbin/`, `/bin/` — sequential .replace() calls
+        // would rewrite inside the injected stub paths.
+        const DIRS: [&str; 8] = [
+            "/tmp/", "/etc/", "/var/", "/run/", "/usr/", "/home/", "/bin/", "/sbin/",
+        ];
+        let mut rewritten = String::with_capacity(s.len());
+        let mut rest = s.as_str();
+        while let Some((pos, dir)) = DIRS
+            .iter()
+            .filter_map(|d| rest.find(d).map(|p| (p, *d)))
+            .min_by_key(|(p, _)| *p)
+        {
+            rewritten.push_str(&rest[..pos]);
+            rewritten.push_str(&root);
+            rewritten.push_str(dir);
+            rest = &rest[pos + dir.len()..];
+        }
+        rewritten.push_str(rest);
         for d in [
             "etc/profile.d",
             "etc/sysctl.d",
@@ -736,6 +757,45 @@ mod tests {
                 "restart egress-lock.service"
             ],
             "systemctl calls: {calls}"
+        );
+        // The systemctl stub can't run systemd, so ExecStartPost never
+        // fired in the pass above — execute the unit's literal stamp
+        // line against the same stub root: iptables-save replays the
+        // written rules.v4, grep delegates to the real binary, and the
+        // stamp must materialize with exactly the OUTPUT rules the
+        // privileged probe reads back.
+        let unit =
+            std::fs::read_to_string(stub.join("etc/systemd/system/egress-lock.service")).unwrap();
+        let post = unit
+            .lines()
+            .find(|l| l.starts_with("ExecStartPost="))
+            .expect("unit has no ExecStartPost stamp line");
+        // The unit on disk already carries $STUB paths — the script-
+        // level rewrite hit the heredoc body too. Split on ` -c '`
+        // rather than a literal /bin/sh prefix.
+        let inner = post
+            .split_once(" -c '")
+            .and_then(|(_, c)| c.strip_suffix('\''))
+            .expect("ExecStartPost is not the `sh -c '…'` form");
+        let stamp = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(inner)
+            .output()
+            .unwrap();
+        assert!(
+            stamp.status.success(),
+            "ExecStartPost stamp line failed: {}",
+            String::from_utf8_lossy(&stamp.stderr)
+        );
+        let want: String = rules_v4_text(&["10.0.2.2", "10.0.2.3"])
+            .lines()
+            .filter(|l| l.starts_with(":OUTPUT") || l.starts_with("-A OUTPUT"))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        assert_eq!(
+            std::fs::read_to_string(stub.join("run/egress-armed"))
+                .expect("the stamp was never written"),
+            want,
         );
         let _ = std::fs::remove_dir_all(&stub);
     }

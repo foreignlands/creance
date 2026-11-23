@@ -186,7 +186,7 @@ dependencies = [
 
 [[package]]
 name = "creance"
-version = "0.6.24"
+version = "0.6.25"
 dependencies = [
  "clap",
  "creance-gate",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "creance-gate"
-version = "0.6.24"
+version = "0.6.25"
 dependencies = [
  "creance-net",
  "creance-proxy",
@@ -214,7 +214,7 @@ dependencies = [
 
 [[package]]
 name = "creance-net"
-version = "0.6.24"
+version = "0.6.25"
 dependencies = [
  "rustls",
  "rustls-pki-types",
@@ -224,7 +224,7 @@ dependencies = [
 
 [[package]]
 name = "creance-proxy"
-version = "0.6.24"
+version = "0.6.25"
 dependencies = [
  "creance-net",
  "creance-vm",
@@ -239,7 +239,7 @@ dependencies = [
 
 [[package]]
 name = "creance-vm"
-version = "0.6.24"
+version = "0.6.25"
 dependencies = [
  "creance-net",
  "fatfs",

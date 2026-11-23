@@ -2039,18 +2039,26 @@ mod tests {
             "the increment line is verbatim — arithmetic suffixes are refused"
         );
         // F-122: the fuse region (counter decl → the `>= 3` block's
-        // second reset) may hold no new mutable state, no boolean
-        // warmup flag, and no arithmetic helpers — the `warm` rename
-        // of a grace counter needs exactly those.
+        // second reset) may hold no new mutable state and no `bool` —
+        // but a `let mut warm = true;` declared just BEFORE the counter
+        // lands outside the region, so the writable-state helpers are
+        // pinned prod-wide instead: `let mut` == 18, `= true;` == 2,
+        // `= false;` == 2, and `mem::take`/`u32::from` do not exist in
+        // prod at all. Any warmup flag — wherever it's declared —
+        // bumps one of those counts.
         let fuse_start = prod.find("let mut core_down_ticks").unwrap();
         let fuse_end = prod.rfind("core_down_ticks = 0;").unwrap();
         let fuse = &prod[fuse_start..fuse_end];
         assert_eq!(fuse.matches("let mut").count(), 2, "{fuse}");
-        for needle in ["= true;", "= false;", "mem::take", "u32::from", "bool"] {
-            assert!(
-                !fuse.contains(needle),
-                "fuse softener in watchdog region: {needle}"
-            );
+        assert!(
+            !fuse.contains("bool"),
+            "fuse softener in watchdog region: bool"
+        );
+        assert_eq!(prod.matches("let mut").count(), 18, "{prod}");
+        assert_eq!(prod.matches("= true;").count(), 2, "{prod}");
+        assert_eq!(prod.matches("= false;").count(), 2, "{prod}");
+        for needle in ["mem::take", "u32::from"] {
+            assert!(!prod.contains(needle), "fuse softener in prod: {needle}");
         }
         assert_eq!(
             prod.matches("core_down_ticks = 0;").count(),
