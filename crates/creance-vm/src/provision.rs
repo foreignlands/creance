@@ -375,11 +375,16 @@ mod tests {
                     .take_while(|c| c.is_alphanumeric() || *c == '_')
                     .collect();
                 assert!(!tag.is_empty(), "unparseable heredoc at line {li}: {l}");
+                // F-120: POSIX `<<` accepts only a terminator line
+                // byte-equal to the tag (no leading whitespace — `<<-`
+                // strips tabs alone). A trimmed compare would close
+                // the span on ` SKIPRULES` while dash keeps reading
+                // to EOF, swallowing every pinned line after it.
                 let end = s
                     .lines()
                     .enumerate()
                     .skip(li + 1)
-                    .find(|(_, x)| x.trim() == tag)
+                    .find(|(_, x)| *x == tag)
                     .map(|(i, _)| i)
                     .unwrap_or_else(|| panic!("unterminated heredoc {tag} at line {li}"));
                 spans.push((li, end));
@@ -408,49 +413,95 @@ mod tests {
                 "{needle} is inside a heredoc — never executed"
             );
         }
-        assert_eq!(s.matches("cat >").count(), 3, "{s}");
+        // F-121: all textual pins run on a QUOTE-MERGED copy — sh
+        // concatenates adjacent quoted segments, so `system""d`,
+        // `egress-""lock` and `cat >"…"` only differ on the surface.
+        let norm: String = s.chars().filter(|c| *c != '\'' && *c != '"').collect();
+        assert_eq!(norm.matches("cat >").count(), 3, "{s}");
         // Navigation/side-write verbs are banned outright: a `cd` into
         // the unit dir plus a relative `cat > x` writes a second unit
         // without touching the counts; `tee`/`dd` spellings bypass
-        // `cat` counting the same way.
-        for l in s.lines().map(str::trim) {
-            for banned in [
-                "cd ", "cd\t", "pushd", "popd", "builtin", "eval ", "tee ", "dd ", "exit", "return",
-            ] {
+        // `cat` counting the same way. F-120/F-121: `exec` replaces the
+        // shell, `false` trips `set -e`, `&& exit`/`|| exit` terminate
+        // early, and env/command prefixes or absolute paths dodge
+        // line-start matching — all banned as tokens anywhere on a
+        // non-span line.
+        // The `sh -c '…'` toolchain block is an inner-shell span:
+        // `exit`/`false` inside it aborts only the inner sh (caught by
+        // `|| true`), and its lines legitimately use install/mv/apt.
+        // Everything between the opener and the closing `' || true`
+        // is exempt from the verb token ban below.
+        let inner_open = s
+            .lines()
+            .position(|l| l.trim_end().ends_with("sh -c '"))
+            .expect("toolchain inner block");
+        let inner_close = s
+            .lines()
+            .enumerate()
+            .skip(inner_open + 1)
+            .find(|(_, l)| l.trim_start().starts_with('\''))
+            .map(|(i, _)| i)
+            .expect("inner block close");
+        let banned_tokens = [
+            "cd", "pushd", "popd", "builtin", "eval", "tee", "dd", "exit", "return", "exec",
+            "false", "xargs", "install", "cp", "chroot", "setsid", "nohup", "sudo", "su", "source",
+            "wait", "trap", "kill",
+        ];
+        for (li, l) in s.lines().enumerate() {
+            if inside_span(li)
+                || (li > inner_open && li < inner_close)
+                || l.trim_start().starts_with('#')
+            {
+                continue;
+            }
+            let ln: String = l.chars().filter(|c| *c != '\'' && *c != '"').collect();
+            assert!(
+                !ln.trim_start().starts_with('/'),
+                "absolute-path command: {l}"
+            );
+            for starter in ["env ", "command ", "nice ", "sudo "] {
                 assert!(
-                    !l.starts_with(banned),
-                    "script line starts with a banned verb: {l}"
+                    !ln.trim_start().starts_with(starter),
+                    "prefix-wrapped command: {l}"
+                );
+            }
+            for tok in ln.split(|c: char| !(c.is_alphanumeric() || c == '_')) {
+                assert!(
+                    !banned_tokens.contains(&tok),
+                    "banned verb token in script line {li}: {l}"
                 );
             }
         }
-        // Every `systemctl`/`egress-lock` line is one of the literals —
-        // a disable/mask after enable, or a second egress unit, adds a
-        // line that can't match.
+        // Every line MENTIONING `systemctl` or `egress-lock` (not just
+        // line-start) must normalize to one of the literals — a
+        // `/bin/systemctl disable` or an `env systemctl …` prefix and a
+        // quote-split unit name all fail here.
         for l in s.lines().map(str::trim) {
-            if l.starts_with("systemctl") {
+            let ln: String = l.chars().filter(|c| *c != '\'' && *c != '"').collect();
+            if ln.contains("systemctl") {
                 assert!(
                     [
                         "systemctl daemon-reload",
                         "systemctl enable egress-lock.service >/dev/null",
                         "systemctl restart egress-lock.service"
                     ]
-                    .contains(&l),
+                    .contains(&ln.as_str()),
                     "unexpected systemctl line: {l}"
                 );
             }
-            if l.contains("egress-lock") {
+            if ln.contains("egress-lock") {
                 assert!(
                     [
-                        "cat > /etc/systemd/system/egress-lock.service <<'LOCKUNIT'",
+                        "cat > /etc/systemd/system/egress-lock.service <<LOCKUNIT",
                         "systemctl enable egress-lock.service >/dev/null",
                         "systemctl restart egress-lock.service"
                     ]
-                    .contains(&l),
+                    .contains(&ln.as_str()),
                     "unexpected egress-lock line: {l}"
                 );
             }
         }
-        assert_eq!(s.matches("systemd/").count(), 1, "{s}");
+        assert_eq!(norm.matches("systemd/").count(), 1, "{s}");
         // F-096/F-098: the rules.v4 heredoc is checked STRUCTURALLY AND
         // EXECUTED. Structure: the `cat >` line is exactly the literal
         // (no `if`/`&&` prefix can mask it), exactly two lines mention
@@ -563,6 +614,130 @@ mod tests {
             1,
             "{s}"
         );
+    }
+
+    #[test]
+    fn bootstrap_executes_the_lockdown_leg_for_real() {
+        // F-120/F-121: no text pin can prove a line RUNS — `exec true`,
+        // `exit`, a bare `false` under `set -e`, or a heredoc whose
+        // terminator is whitespace-indented (POSIX `<<` wants a
+        // byte-equal line) all kill the lockdown while every count
+        // stays green. Execute the rendered script under real `sh -e`
+        // in a stub root: absolute paths rewritten to a temp dir,
+        // systemctl and friends stubbed behind it. The lockdown
+        // artifacts and the systemctl call set are then asserted —
+        // an early exit of ANY spelling leaves them unwritten.
+        let s = script();
+        let stub = std::env::temp_dir().join(format!("creance-bootexec-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&stub);
+        let root = stub.to_str().unwrap().to_string();
+        // Stub commands live at $STUB/bin — the `/bin/` rewrite makes
+        // absolute-path calls (`/bin/systemctl disable`) hit them too.
+        for (name, body) in [
+            (
+                "systemctl",
+                format!("echo \"$@\" >> {root}/systemctl.log\nexit 0\n"),
+            ),
+            ("hostnamectl", "exit 0\n".to_string()),
+            ("locale-gen", "exit 0\n".to_string()),
+            ("update-locale", "exit 0\n".to_string()),
+            ("sysctl", "exit 0\n".to_string()),
+            ("apt-get", "exit 0\n".to_string()),
+            ("apt", "exit 0\n".to_string()),
+            ("dpkg", "exit 0\n".to_string()),
+            ("curl", "exit 22\n".to_string()),
+            ("passwd", "exit 0\n".to_string()),
+            ("iptables-restore", "exit 0\n".to_string()),
+            ("ip", "exit 0\n".to_string()),
+            ("mount", "exit 0\n".to_string()),
+            (
+                "getent",
+                "echo \"$2:x:1000:1000::/nonexistent:/bin/sh\"\n".to_string(),
+            ),
+        ] {
+            let p = stub.join("bin").join(name);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, format!("#!/bin/sh\n{body}")).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        }
+        // /tmp/ first: replacement paths contain the stub root and must
+        // not be re-rewritten by a later pass.
+        let rewritten = s
+            .replace("/tmp/", &format!("{root}/tmp/"))
+            .replace("/etc/", &format!("{root}/etc/"))
+            .replace("/var/", &format!("{root}/var/"))
+            .replace("/run/", &format!("{root}/run/"))
+            .replace("/usr/", &format!("{root}/usr/"))
+            .replace("/home/", &format!("{root}/home/"))
+            .replace("/bin/", &format!("{root}/bin/"))
+            .replace("/sbin/", &format!("{root}/sbin/"));
+        for d in [
+            "etc/profile.d",
+            "etc/sysctl.d",
+            "etc/systemd/system",
+            "var/log",
+            "tmp",
+            "usr/local/bin",
+            "run",
+            "home",
+        ] {
+            std::fs::create_dir_all(stub.join(d)).unwrap();
+        }
+        let script_path = stub.join("bootstrap.sh");
+        std::fs::write(&script_path, &rewritten).unwrap();
+        let out = std::process::Command::new("sh")
+            .arg("-e")
+            .arg(&script_path)
+            .env(
+                "PATH",
+                format!("{}/bin:{}", root, std::env::var("PATH").unwrap()),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "bootstrap aborted under sh -e (rc={:?}): {}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            std::fs::read_to_string(stub.join("etc/iptables/rules.v4"))
+                .expect("rules.v4 was never written — the script died before the cat"),
+            rules_v4_text(&["10.0.2.2", "10.0.2.3"]),
+        );
+        let units: Vec<String> = std::fs::read_dir(stub.join("etc/systemd/system"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            units,
+            ["egress-lock.service"],
+            "unexpected units: {units:?}"
+        );
+        assert!(
+            stub.join("etc/profile.d/session-env.sh").exists(),
+            "session-env never written"
+        );
+        assert!(
+            stub.join("etc/sysctl.d/99-creance-noipv6.conf").exists(),
+            "no-ipv6 drop-in never written"
+        );
+        let calls = std::fs::read_to_string(stub.join("systemctl.log"))
+            .expect("systemctl was never invoked");
+        assert_eq!(
+            calls.lines().collect::<Vec<_>>(),
+            [
+                "daemon-reload",
+                "enable egress-lock.service",
+                "restart egress-lock.service"
+            ],
+            "systemctl calls: {calls}"
+        );
+        let _ = std::fs::remove_dir_all(&stub);
     }
 
     #[test]

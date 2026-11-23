@@ -318,16 +318,20 @@ mod tests {
         let def = prod.find("pub fn verify_and_mark(").unwrap();
         let body_end = def + prod[def..].find("\n}").unwrap();
         let body = &prod[def..body_end];
-        assert!(
-            body.contains("verify_and_mark_with(profile, instance, vm::guest_script"),
+        // F-117: substring pins keep semantics-free — the WHOLE body is
+        // verbatim. `|i, p|` swapped closure params, a dead-closure
+        // `let _ = || vm::stop_vm(p, i);`, and a `guest_script_ok`
+        // prefix-satisfying canned runner all change these bytes.
+        assert_eq!(
+            body.trim(),
+            concat!(
+                "pub fn verify_and_mark(profile: &str, instance: &str) -> Result<bool, String> {\n",
+                "    verify_and_mark_with(profile, instance, vm::guest_script, |p, i| {\n",
+                "        let _ = vm::stop_vm(p, i);\n",
+                "    })"
+            ),
             "{body}"
         );
-        assert!(body.contains("vm::stop_vm(p, i)"), "{body}");
-        assert_eq!(body.matches("vm::").count(), 2, "{body}");
-        assert_eq!(body.matches("guest_script").count(), 1, "{body}");
-        assert_eq!(body.matches("stop_vm").count(), 1, "{body}");
-        assert_eq!(body.matches("Ok(").count(), 0, "{body}");
-        assert_eq!(body.matches("\"").count(), 0, "{body}");
     }
 
     #[test]
@@ -336,10 +340,13 @@ mod tests {
         // must see the REAL probe output, and every refusal must stop.
         let stopped = std::cell::RefCell::new(Vec::<(String, String)>::new());
         let run = |_p: &str, _i: &str, s: &str| -> Result<String, String> {
-            // F-111: a canned-pass wrapper feeds a dead literal script —
-            // the fake asserts the script it got is the real probe.
-            assert!(
-                s.contains("egress-armed"),
+            // F-111/F-117: a canned-pass wrapper feeds a dead literal
+            // script — a `contains("egress-armed")` check is satisfied
+            // by a comment, so the fake demands byte equality with the
+            // real probe render.
+            assert_eq!(
+                s,
+                egress_probe_script(vm::nat_allow_hosts()).as_str(),
                 "injected script is the real probe"
             );
             Ok("tcp-open\nicmp-blocked\nfw-armed\n".to_owned())
@@ -379,7 +386,7 @@ mod tests {
             "good-inst",
             |p, i, s| {
                 assert_eq!((p, i), (profile.as_str(), "good-inst"));
-                assert!(s.contains("egress-armed"));
+                assert_eq!(s, egress_probe_script(vm::nat_allow_hosts()).as_str());
                 Ok("tcp-blocked\nicmp-blocked\nfw-armed\n".to_owned())
             },
             |_p, _i| panic!("a pass must not stop"),

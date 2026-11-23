@@ -4,6 +4,99 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.6.24] — 2026-11-23
+
+### Fixed — night-28 (R31 audit round)
+
+Six findings (117–122), all severity S5 — the judge's fourth round of
+guard bypasses: every pinned literal was kept verbatim while its
+semantics changed underneath it. The fixes move the remaining
+counted-shape pins to verbatim line pins, span-aware rules, and
+execution-level verification.
+
+- **F-117** — the `verify_and_mark` shell pin covered the callee name
+  only: `|i, p|` swapped stop args, a dead `let f = || { stop }`
+  closure, a `vm::guest_script_ok`-prefixed canned runner, and a
+  substring-checking fake runner all stayed green. The wrapper body
+  is now pinned byte-verbatim (`body.trim()` equals the exact
+  three-line text) and the two injection tests assert the injected
+  script IS `egress_probe_script(vm::nat_allow_hosts())`, not merely
+  non-empty.
+- **F-118** — the mint-primitive ban covered only 4 of 18 creance-vm
+  prod files: `mem::zeroed()` in vm.rs and
+  `NonNull::dangling().read()` in qemu/image.rs minted the token, and
+  a SAFE `pub(crate) const VERDICT: fn(..) = egress_verdict;` fn
+  pointer exported the private verdict. Now the mint bans
+  (`transmute`, `MaybeUninit`, `assume_init`, `ptr::read`, `NonNull`,
+  `dangling()`, `_sealed` outside gateprobe.rs) and per-file
+  `unsafe`/`zeroed` count pins walk EVERY prod file recursively —
+  `unsafe` stays `deny` (legit libc calls exist), so counts are
+  pinned instead: host.rs 6/2, pidfile.rs 5/0, qemu/mod.rs 4/0,
+  runner.rs 3/0, running.rs 2/0, tunnel.rs 2/0, vm.rs 2/0, all others
+  0/0. `egress_verdict` occurrences are line-checked (doc comments,
+  the gateprobe.rs definition, the `egress_verdict(&out)` call —
+  nothing else).
+- **F-119** — the Err-arm pin read the first `Err(` line start only:
+  a `Result::Err(e) if …` guard arm swallowed the refusal while
+  containing a different first `Err(`, and lib.rs could write the
+  marker through `use creance_vm::qemu::instance_dir as idir;` plus
+  `concat!("provision","ed")`. Now `Result::`/`std::result::Result::`/
+  `core::result::Result::` prefixes are stripped before the arm
+  check, the arms are pinned as exactly two (`Ok(wrote) => {` and the
+  verbatim `Err(e) => return fail(e),`), and six creance-crate prod
+  files ban `"provision`/`"isioned"` string fragments, `concat!`,
+  `use`-imports and `::instance_dir` path references for
+  `instance_dir` (legit uses are all local variables).
+- **F-120** — the heredoc-terminator check compared
+  `x.trim() == tag`, so ` SKIPRULES` (leading space) terminated the
+  span for the test but not for dash, and `exec true`, `true && exit
+  0`, or a bare `false` (script's own `set -e`) aborted before the
+  lockdown while every count stayed green. The terminator is now
+  `*x == tag` byte-exact; top-level command lines are token-scanned
+  for banned verbs (`exec`, `exit`, `return`, `eval`, `false`, `cd`,
+  `tee`, `dd`, `sudo`, `su`, `kill`, `trap`, `wait`, `source`,
+  `cp`, `install`, `xargs`, `builtin`, `chroot`, `setsid`, `nohup`,
+  `pushd`, `popd`, `env`/`command`/`nice`/`sudo` line starters,
+  absolute-path commands) — heredoc bodies, comments, and the inner
+  `timeout … sh -c '…'` toolchain block (a nested `sh` with its own
+  quoting where `exit`/`false` are benign) are exempt.
+- **F-121** — the whitelist only gated line-STARTING `systemctl` /
+  `egress-lock`: `/bin/systemctl disable egress-""lock.service` and a
+  `printf … > /etc/system""d/system/net-tune.service` second unit
+  passed. Script lines are now normalized (single/double quotes
+  stripped) before whitelisting, ANY line containing `systemctl` or
+  `egress-lock` must equal a whitelisted literal after
+  normalization, and `systemd/system/` writes are count-pinned.
+- **F-122** — the watchdog pins counted literals, not lines: a
+  renamed `warm` flag (the `grace` word ban respelled) skipped the
+  first down tick per stretch, and
+  `sleep(Duration::from_millis(500) + Duration::from_millis(300))`
+  kept the `from_millis(500)` count while widening the period to
+  800ms. The tick and increment lines are now asserted verbatim
+  (`std::thread::sleep(Duration::from_millis(500));` ×2,
+  `core_down_ticks += 1;` ×1), and the fuse region (counter
+  declaration → second reset) may declare no new `let mut` binding
+  and contains no `= true;`/`= false;`/`mem::take`/`u32::from`/`bool`.
+- **F-120/F-121 execution gate** — `bootstrap_executes_the_lockdown_leg_for_real`
+  runs the rendered script under real `sh -e` in a stub root
+  (absolute paths rewritten to a temp dir, systemctl/apt/curl/getent
+  and friends stubbed) and asserts the artifacts: `rules.v4` bytes
+  equal `rules_v4_text`, the unit set is exactly
+  `["egress-lock.service"]`, session-env and the sysctl drop-in
+  exist, and the systemctl log reads exactly `daemon-reload`,
+  `enable egress-lock.service`, `restart egress-lock.service`. An
+  early exit of ANY spelling leaves the artifacts unwritten — the
+  tests no longer ask whether a line reads right, they ask whether
+  the machine state exists.
+- Fresh-machine verification on an Ubuntu 24.04 QEMU guest:
+  `rm -rf` → `init` → `setup` RC=0 → `up` RC=0 (egress verdict
+  proven, marker written, hint printed) → `stop` → `up` RC=0 with
+  `restrict=on` in the qemu args.
+- Honest residual: token construction carrying no literal (a byte
+  array + `from_utf8` spelling `instance_dir` or `"provisioned"`)
+  remains detectable only by the compile gate and review, not by
+  text scan — noted in the test comment.
+
 ## [0.6.23] — 2026-11-23
 
 ### Fixed — night-27 (R30 audit round)

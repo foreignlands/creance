@@ -863,19 +863,35 @@ mod up_gate_tests {
         );
         let call = src.find("verify_and_mark(&profile, &instance)").unwrap();
         let arm_region = &src[call..call + 600];
-        // F-113: the refusal arm must be a real match arm — a
-        // `// Err(e) => return fail(e)` comment or a guarded
-        // `Err(e) if … =>` arm placed before it both contain the
-        // substring but swallow the refusal. The FIRST trimmed line
-        // starting with `Err(` in the region must be the exact arm.
-        let first_err = arm_region
+        // F-113/F-119: the refusal arm must be a real match arm — a
+        // `// Err(e) => return fail(e)` comment, a guarded
+        // `Err(e) if … =>` arm, OR a path-qualified
+        // `Result::Err(e) if …` arm placed before it all swallow the
+        // refusal while containing no `Err(` line start. Strip the
+        // `Result::`/`std::result::Result::`/`core::result::Result::`
+        // spellings before the line check, and the region's arm lines
+        // must number exactly two (Ok + Err — a third arm is a guard).
+        fn strip_result(l: &str) -> &str {
+            l.trim()
+                .trim_start_matches("std::result::Result::")
+                .trim_start_matches("core::result::Result::")
+                .trim_start_matches("Result::")
+        }
+        let arms: Vec<&str> = arm_region
             .lines()
             .map(str::trim)
+            .filter(|l| strip_result(l).starts_with("Err(") || l.starts_with("Ok("))
+            .collect();
+        assert_eq!(arms.len(), 2, "the verdict match is exactly two arms");
+        assert_eq!(arms[0], "Ok(wrote) => {", "the pass arm opens the block");
+        let first_err = arms
+            .iter()
+            .map(|l| strip_result(l))
             .find(|l| l.starts_with("Err("))
             .expect("refusal arm");
         assert_eq!(
             first_err, "Err(e) => return fail(e),",
-            "verify_and_mark の拒否は fail(e) で伝播する（コメント・ガード腕では駄目）"
+            "verify_and_mark の拒否は fail(e) で伝播する（コメント・ガード腕・パス修飾では駄目）"
         );
         // F-113: writing the marker file directly — any literal
         // "provisioned" or a non-`gate_` instance_dir() call ANYWHERE
@@ -890,13 +906,29 @@ mod up_gate_tests {
         ];
         for csrc in crate_srcs {
             let prod = &csrc[..csrc.rfind("\n#[cfg(test)]").unwrap_or(csrc.len())];
+            // F-119: the marker name survives neither whole nor split —
+            // `concat!("provision","ed")`, a `format!("provision{}")`
+            // fragment, or a `"isioned"` tail all hit these bans. (A
+            // byte-array build carries no text at all — the honest
+            // residual of any source scan.)
             assert!(
-                !prod.contains("\"provisioned\""),
-                "a \"provisioned\" literal writes the marker without the token"
+                !prod.contains("\"provision"),
+                "a \"provision…\" literal or fragment writes the marker without the token"
+            );
+            assert!(
+                !prod.contains("\"isioned\""),
+                "a split marker-name fragment writes the marker without the token"
+            );
+            assert!(
+                !prod.contains("concat!"),
+                "concat! assembles a marker-name literal the scan cannot see"
             );
             // `gate_instance_dir(` is a different path (the gate's own
             // dir); a real instance_dir call carries 2 args. Ban any
-            // `instance_dir(` occurrence not preceded by `gate_`.
+            // `instance_dir(` occurrence not preceded by `gate_` — and
+            // F-119: ban the FUNCTION being smuggled in at all: an
+            // `instance_dir` import/alias in a `use` line, or a
+            // `::instance_dir` path reference taken as a value.
             let mut rest = prod;
             while let Some(i) = rest.find("instance_dir(") {
                 let head = &rest[..i];
@@ -905,6 +937,19 @@ mod up_gate_tests {
                     "an instance_dir() call outside gate_instance_dir writes the marker directly"
                 );
                 rest = &rest[i + "instance_dir(".len()..];
+            }
+            for l in prod.lines() {
+                if l.contains("instance_dir") {
+                    let t = l.trim();
+                    assert!(
+                        !t.starts_with("use "),
+                        "importing instance_dir aliases the marker path: {l}"
+                    );
+                    assert!(
+                        !l.contains("::instance_dir"),
+                        "a path-qualified instance_dir reference: {l}"
+                    );
+                }
             }
         }
     }

@@ -3,6 +3,12 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 122 | S5 | F-116 钉可绕：`grace` 改名 `warm` 绕过词禁（阈值实为 4）；`from_millis(500)+from_millis(300)` 复合表达式保留计数周期变 800ms | F-116 修复面 | 已修复（main-session，实机复验：tick/inc 行 verbatim+fuse 区 let mut 数钉+布尔旗/算术助手禁） |
+| 121 | S5 | F-115 白名单只数行首：`/bin/systemctl disable egress-""lock.service`、引号拆词第二 unit 全绿 | F-115 修复面 | 已修复（main-session：引号合并规范化+systemctl/egress-lock 任意位置白名单+systemd/ 精确计数） |
+| 120 | S5 | F-114 终止行 trim 比较：` SKIPRULES` 缩进终止对 dash 不成立；`exec`/`exit`/`false`(set -e) 早退全绿 | F-114 修复面 | 已修复（main-session：终止行 `*x==tag` 精确+行首动词 token 禁+inner sh -c 豁免+整脚本 sh -e stub 执行测试） |
+| 119 | S5 | F-113 钉可绕：`Result::Err(e) if …` 守卫臂吞拒绝；`use instance_dir as idir`+`concat!("provision","ed")` 直写 marker | F-113 修复面 | 已修复（main-session：Result:: 前缀剥除+两臂 verbatim 钉+use/path/concat!/字面碎片全域禁） |
+| 118 | S5 | F-112 扫描表仅 4/18 prod 文件：vm.rs `mem::zeroed`、image.rs `NonNull::dangling().read()` 铸令牌；`pub(crate) const VERDICT: fn` 导出 verdict | F-112 修复面 | 已修复（main-session：递归全域 mint 基元禁+逐文件 unsafe/zeroed 计数钉+verdict 名行规则） |
+| 117 | S5 | F-111 外壳钉可绕：`|i, p|` 参序对调、死闭包包 stop、前缀字面 canned runner、子串 fake runner 全绿 | F-111 修复面 | 已修复（main-session：verify_and_mark 外壳整身 verbatim 钉+探针串字面断言） |
 | 116 | S5 | F-110 钉可绕：保留全部 verbatim 行但用 `grace` 让每条 down 流的首 tick 不计（阈值实为 4/2.0s），或采样周期 500→800ms（熔断 2.4s）均落在 1.3s–3.0s 测试窗内全绿 | F-110 修复面 | 已修复（裸名计数==5+grace 禁+500ms 周期钉） |
 | 115 | S5 | F-109 钉仍可绕：变量拼路径 `SD=/etc/system""d/system; cat >"$SD/x.service"`、缩进 ` cd`+`cat >rel`、enable 行保留但下一行 `systemctl disable`、enable 行包进 `: <<'NOEN'` heredoc 全绿 | F-109 修复面 | 已修复（cat/enable/systemctl 行整行白名单+cd/tee/eval 动词禁） |
 | 114 | S5 | F-108 `sh -n` 校验仍可绕：外层 `: <<'SKIPRULES'` 无终止 heredoc 被 dash 接受（EOF 终止），`exit 0` 前置早退亦全绿——rules.v4/unit/锁闭全不执行 | F-108 修复面 | 已修复（heredoc 跨度映射：钉线必在跨度外+未终止/早退全红） |

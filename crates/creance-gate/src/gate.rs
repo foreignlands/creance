@@ -2018,8 +2018,40 @@ mod tests {
         assert!(!prod.contains("grace"), "a grace counter softens the fuse");
         // The 500ms sampling period: exactly two `from_millis(500)` in
         // prod — the watchdog tick and the record-replace loop. A third
-        // (a widened tick) bumps the count.
+        // (a widened tick) bumps the count. F-122: the sleep lines are
+        // verbatim — `from_millis(500) + from_millis(300)` keeps the
+        // literal but widens the period, so the WHOLE trimmed line is
+        // pinned; same for the increment (`+= 1 - u32::from(take(&w))`
+        // keeps the `+= 1` substring while softening the fuse).
         assert_eq!(prod.matches("from_millis(500)").count(), 2, "{prod}");
+        assert_eq!(
+            prod.lines()
+                .filter(|l| l.trim() == "std::thread::sleep(Duration::from_millis(500));")
+                .count(),
+            2,
+            "tick + record-replace sleep lines are verbatim"
+        );
+        assert_eq!(
+            prod.lines()
+                .filter(|l| l.trim() == "core_down_ticks += 1;")
+                .count(),
+            1,
+            "the increment line is verbatim — arithmetic suffixes are refused"
+        );
+        // F-122: the fuse region (counter decl → the `>= 3` block's
+        // second reset) may hold no new mutable state, no boolean
+        // warmup flag, and no arithmetic helpers — the `warm` rename
+        // of a grace counter needs exactly those.
+        let fuse_start = prod.find("let mut core_down_ticks").unwrap();
+        let fuse_end = prod.rfind("core_down_ticks = 0;").unwrap();
+        let fuse = &prod[fuse_start..fuse_end];
+        assert_eq!(fuse.matches("let mut").count(), 2, "{fuse}");
+        for needle in ["= true;", "= false;", "mem::take", "u32::from", "bool"] {
+            assert!(
+                !fuse.contains(needle),
+                "fuse softener in watchdog region: {needle}"
+            );
+        }
         assert_eq!(
             prod.matches("core_down_ticks = 0;").count(),
             2,

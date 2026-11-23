@@ -647,10 +647,8 @@ mod tests {
         let mut marks = 0usize;
         let mut calls = 0usize;
         let mut writes = 0usize;
-        let mut dirs = vec![std::path::PathBuf::from(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/src"
-        ))];
+        let root = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
+        let mut dirs = vec![root.clone()];
         while let Some(dir) = dirs.pop() {
             for entry in std::fs::read_dir(&dir).unwrap() {
                 let path = entry.unwrap().path();
@@ -683,6 +681,63 @@ mod tests {
                 marks += prod.matches(concat!("mark", "_provisioned")).count();
                 calls += prod.matches("mark_provisioned(").count();
                 writes += prod.matches("write_marker").count();
+                // F-118: the token mint bans and the verdict's
+                // name-space pin hold over EVERY prod file, not a
+                // hand-kept table — a new file is scanned the day it
+                // lands. `_sealed` is allowed only in gateprobe.rs
+                // (its decl + the one Ok-arm mint are pinned there).
+                let rel = path
+                    .strip_prefix(&root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let is_gateprobe = rel == "gateprobe.rs";
+                for needle in [
+                    "transmute",
+                    "MaybeUninit",
+                    "assume_init",
+                    "ptr::read",
+                    "NonNull",
+                    "dangling()",
+                ] {
+                    assert!(!prod.contains(needle), "{rel}: mint primitive {needle}");
+                }
+                if !is_gateprobe {
+                    assert!(!prod.contains("_sealed"), "{rel}: direct field mint");
+                }
+                // `unsafe`/`zeroed` exist legitimately (libc statfs/
+                // getuid — unsafe_code is `deny`, not `forbid`), so
+                // their counts are pinned PER FILE: a new block or a
+                // zeroed-mint added anywhere changes the count.
+                let (u, z) = match rel.as_str() {
+                    "host.rs" => (6, 2),
+                    "pidfile.rs" => (5, 0),
+                    "qemu/mod.rs" => (4, 0),
+                    "qemu/runner.rs" => (3, 0),
+                    "running.rs" => (2, 0),
+                    "tunnel.rs" => (2, 0),
+                    "vm.rs" => (2, 0),
+                    _ => (0, 0),
+                };
+                assert_eq!(prod.matches("unsafe").count(), u, "{rel}: new unsafe block");
+                assert_eq!(prod.matches("zeroed").count(), z, "{rel}: zeroed mint");
+                // The verdict is named only in comments/docs, its def,
+                // and the single `egress_verdict(&out)` call — a
+                // `const V: fn(..) = egress_verdict` fn-pointer export
+                // mints with zero unsafe and adds no `pub` to the fn
+                // line (NC-VISfnptr).
+                for l in prod.lines() {
+                    if l.contains("egress_verdict") {
+                        let t = l.trim();
+                        assert!(
+                            t.starts_with("//")
+                                || (is_gateprobe
+                                    && (t.contains("fn egress_verdict(")
+                                        || t.contains("egress_verdict(&out)"))),
+                            "{rel}: egress_verdict referenced as a value: {l}"
+                        );
+                    }
+                }
             }
         }
         assert_eq!(
@@ -724,20 +779,6 @@ mod tests {
         // verdict is judged. F-106: BOTH cfg arms pinned by name —
         // swapping "macos"→"linux" makes the Linux arm a silent noop.
         assert!(body.contains("_proof: &crate::gateprobe::EgressVerified"));
-        // F-112: the seal must hold crate-wide, not only inside
-        // gateprobe.rs — a `transmute`/`{ _sealed }` mint or an
-        // EgressVerified construction anywhere in creance-vm prod code
-        // arms the marker without a verdict.
-        for (name, src) in [
-            ("vm.rs", include_str!("../vm.rs")),
-            ("qemu/mod.rs", include_str!("mod.rs")),
-            ("qemu/provision.rs", include_str!("provision.rs")),
-            ("qemu/runner.rs", include_str!("runner.rs")),
-        ] {
-            let prod = &src[..src.rfind("\n#[cfg(test)]").unwrap_or(src.len())];
-            assert!(!prod.contains("transmute"), "{name}: unsafe mint");
-            assert!(!prod.contains("_sealed"), "{name}: direct field mint");
-        }
         assert!(
             body.contains("#[cfg(target_os = \"macos\")]")
                 && body.contains("#[cfg(not(target_os = \"macos\"))]"),
