@@ -324,45 +324,72 @@ impl Gate {
         // closes itself with a fixed reason. It holds only a Weak reference
         // so a dropped handle fully retires the gate.
         let watchdog = Arc::downgrade(&gate);
-        std::thread::spawn(move || loop {
-            std::thread::sleep(Duration::from_millis(500));
-            let Some(watchdog) = watchdog.upgrade() else {
-                return;
-            };
-            if watchdog.shutdown.load(Ordering::Relaxed) {
-                return;
-            }
-            let mut inner = lock_or_recover(&watchdog.inner);
-            if let (Some(opened), lease) = (inner.opened_at, inner.lease) {
-                if opened.elapsed() > lease {
-                    inner.close("检测租期到期，等待重新检查");
+        std::thread::spawn(move || {
+            // 0.6.x 常驻巡检/自动熔断：在闸开着的每个 tick 采样核心存活
+            // （loopback TCP connect 到托管核心监听）。连续 FUSE_TICKS 个
+            // tick（≈1.5s）不可达 → 熔断关闸；closed 分支下一个 tick 把
+            // wire 切断——端到端 ≤2s。零泄漏由 guest 侧 iptables 兜底
+            // （guest 本就只有 NAT 主机白名单 + 隧道一条路）。
+            let mut core_down_ticks = 0u32;
+            loop {
+                std::thread::sleep(Duration::from_millis(500));
+                let Some(watchdog) = watchdog.upgrade() else {
+                    return;
+                };
+                if watchdog.shutdown.load(Ordering::Relaxed) {
+                    return;
                 }
-            }
-            // 0.4: the VM's wire follows the gate. Closed gate → the ssh -R
-            // tunnel must be down; Open/Checking → it must be up. Healing is
-            // one-way (we cut, we do not silently re-raise). Reaping backs
-            // the stop with a signature sweep so the cut holds even when the
-            // pid file was lost (F-026). Only the canonical daemon moves the
-            // wire (F-028): a renamed-over loser must neither cut nor raise
-            // what the winner owns — its main loop retires it within a tick.
-            let closed = inner.state == GateState::Closed;
-            drop(inner);
-            if !watchdog.still_owner() {
-                continue;
-            }
-            if closed {
-                let _ = creance_vm::tunnel::stop(&watchdog.profile_dir);
-                creance_vm::tunnel::reap_orphans(
-                    &watchdog.profile_dir,
-                    &watchdog.instance,
-                    watchdog.proxy_port,
-                );
-            } else {
-                let _ = creance_vm::tunnel::ensure(
-                    &watchdog.profile_dir,
-                    &watchdog.instance,
-                    watchdog.proxy_port,
-                );
+                let mut inner = lock_or_recover(&watchdog.inner);
+                if let (Some(opened), lease) = (inner.opened_at, inner.lease) {
+                    if opened.elapsed() > lease {
+                        inner.close("检测租期到期，等待重新检查");
+                    }
+                }
+                // 0.4: the VM's wire follows the gate. Closed gate → the ssh -R
+                // tunnel must be down; Open/Checking → it must be up. Healing is
+                // one-way (we cut, we do not silently re-raise). Reaping backs
+                // the stop with a signature sweep so the cut holds even when the
+                // pid file was lost (F-026). Only the canonical daemon moves the
+                // wire (F-028): a renamed-over loser must neither cut nor raise
+                // what the winner owns — its main loop retires it within a tick.
+                let closed = inner.state == GateState::Closed;
+                let open = inner.state == GateState::Open;
+                drop(inner);
+                if !watchdog.still_owner() {
+                    continue;
+                }
+                if closed {
+                    let _ = creance_vm::tunnel::stop(&watchdog.profile_dir);
+                    creance_vm::tunnel::reap_orphans(
+                        &watchdog.profile_dir,
+                        &watchdog.instance,
+                        watchdog.proxy_port,
+                    );
+                } else {
+                    let _ = creance_vm::tunnel::ensure(
+                        &watchdog.profile_dir,
+                        &watchdog.instance,
+                        watchdog.proxy_port,
+                    );
+                    // 熔断采样：连接被拒瞬间返回（常见死核心形态）；一个
+                    // 存活监听则每 tick 清零计数。只在 Open 态计数——
+                    // Checking 有自己的租期，不在此误熔断启动竞态。
+                    let core_up = !open
+                        || std::net::TcpStream::connect_timeout(
+                            &std::net::SocketAddr::from(([127, 0, 0, 1], watchdog.proxy_port)),
+                            Duration::from_millis(250),
+                        )
+                        .is_ok();
+                    if core_up {
+                        core_down_ticks = 0;
+                    } else {
+                        core_down_ticks += 1;
+                        if core_down_ticks >= 3 {
+                            lock_or_recover(&watchdog.inner).close("代理核心不可达，自动熔断");
+                            core_down_ticks = 0;
+                        }
+                    }
+                }
             }
         });
 
@@ -1768,6 +1795,71 @@ mod tests {
             err.contains("需要重启环境") || err.contains("HTTP 409"),
             "{err}"
         );
+        fs::remove_dir_all(&profile).unwrap();
+    }
+
+    #[test]
+    fn watchdog_fuses_open_gate_when_core_unreachable() {
+        // 0.6.x 常驻巡检/自动熔断：Open 态闸连续 3 tick（≈1.5s）探不
+        // 到托管核心的 loopback 监听 → 熔断关闸；监听存活则不熔断。
+        let (profile, config_path) = prepare_profile();
+        let instance_dir = creance_vm::paths::join(&profile, "qemu/fuse-vm");
+        fs::create_dir_all(&instance_dir).unwrap();
+        // A port nothing listens on: bind :0 once, learn the port, drop.
+        let dead_port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let handle = Gate::start(
+            &instance_dir,
+            &config_path,
+            &profile,
+            "fuse-inst-dead",
+            dead_port,
+        )
+        .unwrap();
+        {
+            let mut inner = lock_or_recover(&handle.gate.inner);
+            inner.state = GateState::Open;
+            inner.opened_at = Some(Instant::now());
+            inner.lease = Duration::from_secs(600);
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let status = loop {
+            std::thread::sleep(Duration::from_millis(100));
+            let inner = lock_or_recover(&handle.gate.inner);
+            if inner.state == GateState::Closed || Instant::now() > deadline {
+                break inner.status(&handle.gate.run_id);
+            }
+        };
+        assert_eq!(status.state, GateState::Closed, "{status:?}");
+        assert!(status.reason.contains("熔断"), "{status:?}");
+        drop(handle);
+
+        // Live listener → no fuse.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let live_port = listener.local_addr().unwrap().port();
+        let handle = Gate::start(
+            &instance_dir,
+            &config_path,
+            &profile,
+            "fuse-inst-live",
+            live_port,
+        )
+        .unwrap();
+        {
+            let mut inner = lock_or_recover(&handle.gate.inner);
+            inner.state = GateState::Open;
+            inner.opened_at = Some(Instant::now());
+            inner.lease = Duration::from_secs(600);
+        }
+        std::thread::sleep(Duration::from_millis(2500));
+        let inner = lock_or_recover(&handle.gate.inner);
+        assert_eq!(inner.state, GateState::Open, "live core must not fuse");
+        drop(inner);
+        drop(handle);
+        drop(listener);
         fs::remove_dir_all(&profile).unwrap();
     }
 

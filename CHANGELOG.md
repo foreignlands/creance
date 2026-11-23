@@ -4,6 +4,20 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.6.19] — 2026-11-23
+
+### Added — night-24
+
+- 运行时常驻巡检/自动熔断 (first slice): while the gate is Open the
+  lease watchdog now samples the managed core's loopback listener
+  every tick (TCP connect, 250 ms timeout). Three consecutive
+  failures (≈1.5 s) close the gate with an "auto-fuse" reason and the
+  already-closed branch cuts the tunnel on the next tick — end-to-end
+  wire cut within ~2 s of core loss, covered by
+  `watchdog_fuses_open_gate_when_core_unreachable` (dead port fuses,
+  live listener stays open). Sampling is Open-only so the Checking
+  window's startup race can't false-fire.
+
 ## [0.6.18] — 2026-11-22
 
 ### Fixed — night-24 (R26 audit round)
