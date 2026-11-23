@@ -3,6 +3,8 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 096 | S4 | bootstrap rules.v4 heredoc 双重终止行：`EGRESSRULES: not found` RC=127 → set -e 中止 → fresh setup 100% 变砖（供给全断） | H1 / F-094 修复面 | 已修复（main-session，实机复验：fresh setup→up 全绿，egress-lock 实装） |
+| 097 | S5 | v0.6.18 守护加固 15 例绕过：rfind 截尾后追记/非递归扫目录/verdict 输入未钉/产品形家目录 gate/cfg! 门/带空 ExecStartPost/引号拆词 stamp/第二 unit/tcp 入允许集 | H1 / F-095 修复面 | 已修复（main-session，实机复验） |
 | 092 | S4 | rules.v4 半边只筛 `^-A OUTPUT` 行：`-I`/`--append`/`-R`/空白变体/`:OUTPUT ACCEPT` 重声明/第二 `*filter` 块被 restore 应用但探针不可见 | H1 / F-090 修复面 | 已修复（main-session，实机复验 up RC=0 + S01-S09 真值表全 fw-down） |
 | 093 | S5 | v0.6.16 守护加固 9 例变异全绿：use-as/括号调用/臂重排/vm.rs 位置/write_marker 直调/前缀 gate/stamp 拼写/nft | H1 / F-091 修复面 | 已修复（main-session，27 例 NC 复跑全红） |
 | 094 | S4 | rules.v4 整文件白名单对 NUL/顺序盲：grep 二进制模式放行 -I 注入；行数不钉顺序 → 下次启动失效 | H1 / F-092 修复面 | 已修复（main-session，改为 cmp 逐字节比对，实机复验） |

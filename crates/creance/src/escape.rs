@@ -1034,8 +1034,12 @@ mod tests {
         // encoding lane remains (NUL → cmp differs; reorder → differs).
         assert_eq!(p.matches("grep -vxF").count(), 1, "{p}");
         assert!(p.contains("cmp -s \"$WANT\" -"), "{p}");
-        // F-095/NC-SETMIX: a bare `-A OUTPUT -j ACCEPT` must never
-        // enter the live-side allowset.
+        // F-095+F-097/NC-SETMIX+SETtcp: the allowset is the canonical
+        // list and NOTHING else — counted exactly (5 fixed + 4 per NAT
+        // host), and a bare `-A OUTPUT -j ACCEPT` in particular never
+        // enters it. Any added entry (tcp, a foreign subnet, a
+        // jump target) bumps the count.
+        assert_eq!(p.matches("-e '").count(), 5 + 4 * 2, "{p}");
         assert!(!p.contains("-e '-A OUTPUT -j ACCEPT'"), "{p}");
         assert!(!p.contains("conntrack --ctstate .*"), "{p}");
         assert!(p.contains("/etc/iptables/rules.v4"), "{p}");

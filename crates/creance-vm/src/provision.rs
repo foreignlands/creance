@@ -91,7 +91,6 @@ mkdir -p /etc/iptables
 # runtime apply below replays the same file (no second copy to drift).
 cat > /etc/iptables/rules.v4 <<'EGRESSRULES'
 {rules_v4}EGRESSRULES
-EGRESSRULES
 # The boot replay: restore the ruleset before the network is up, so no
 # boot window exists with an open egress. Neutral name — the unit list
 # is guest-visible.
@@ -354,11 +353,32 @@ mod tests {
         // spelling of the SAME path (/run/./egress-armed, /run//…).
         assert_eq!(s.matches("/run/egress-armed").count(), 1, "{s}");
         assert_eq!(s.matches("egress-armed").count(), 1, "{s}");
-        // F-095/NC-UNIT1+2: exactly one ExecStartPost — a second one
-        // (policy flip to ACCEPT, nft flush, a forged stamp write)
-        // would run after the real stamp write while the byte-exact
-        // tail assert (apply leg onward) cannot see it.
-        assert_eq!(s.matches("ExecStartPost=").count(), 1, "{s}");
+        // F-095+F-097/NC-UNIT+ESPsp+STAMPq: exactly one ExecStartPost
+        // under ANY spelling — systemd accepts `=` flanked by blanks
+        // (`ExecStartPost = …` executes, verified on systemd 249) and
+        // a forged stamp write can hide behind quote-splitted words
+        // (`egress-"armed"`). The bare keyword count catches all of it:
+        // a second post line, spaced or quoted, is count 2.
+        assert_eq!(s.matches("ExecStartPost").count(), 1, "{s}");
+        // F-097/NC-UNITsep: exactly one unit FILE is written — a
+        // second .service (After=egress-lock, flipping the policy)
+        // slips past both the ExecStartPost and stamp counts.
+        assert_eq!(s.matches("cat > /etc/systemd/system/").count(), 1, "{s}");
+        // F-096: the rules.v4 heredoc is checked STRUCTURALLY — one
+        // bare terminator line and a body byte-exact equal to
+        // rules_v4_text. A stray terminator line (the v0.6.18 brick),
+        // a misspelled one (heredoc swallows the script), a comment or
+        // a dropped rule inside the body all fail here.
+        assert_eq!(s.lines().filter(|l| *l == "EGRESSRULES").count(), 1, "{s}");
+        let open = s.find("<<'EGRESSRULES'\n").expect("heredoc open") + "<<'EGRESSRULES'\n".len();
+        let term = s[open..]
+            .find("\nEGRESSRULES\n")
+            .expect("heredoc terminator");
+        assert_eq!(
+            &s[open..open + term + 1],
+            &rules_v4_text(&["10.0.2.2", "10.0.2.3"]),
+            "rules.v4 heredoc body must be the renderer's own bytes"
+        );
         // ...and the tail after the apply leg is byte-exact — any
         // injected netfilter touch (`iptables -P`, `nft flush`,
         // another stamp write) changes the bytes and fails this.

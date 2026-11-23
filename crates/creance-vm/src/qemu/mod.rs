@@ -261,7 +261,12 @@ pub fn up(profile: &str, instance: &str) -> i32 {
         profile,
         instance,
         &pid_file,
-        std::time::Duration::from_secs(600),
+        // The first boot downloads the toolchain (node tarball, mihomo
+        // core, agent installer) over the host's link — on a slow link
+        // that outlasts a tight budget and an otherwise-healthy first
+        // boot gets stopped mid-provision. 20 minutes keeps the probe
+        // out of the window without killing real downloads.
+        std::time::Duration::from_secs(1200),
     ) {
         Ok(()) => {}
         Err(e) => {
@@ -573,6 +578,15 @@ mod tests {
                 .into_owned(),
             outside,
             product_shaped,
+            // F-097/NC-MPhome: a dir under the product's own
+            // `~/.creance/` home shape — a `contains("/.creance/")`
+            // gate that declines to write is caught by read-back.
+            std::env::temp_dir()
+                .join(format!("x-{}", crate::token()[..8].to_owned()))
+                .join(".creance")
+                .join("prof")
+                .to_string_lossy()
+                .into_owned(),
         ] {
             std::fs::create_dir_all(&dir).unwrap();
             assert!(write_marker(&dir), "{dir}");
@@ -599,24 +613,66 @@ mod tests {
         // region is cut at the LAST line-start `#[cfg(test)]` so an
         // injected `// #[cfg(test)]` comment or an early test-attribute
         // cannot truncate the scan before a smuggled call.
-        for (name, src, mark, write) in [
-            ("qemu/mod.rs", include_str!("mod.rs"), 1usize, 2usize),
-            ("qemu/runner.rs", include_str!("runner.rs"), 0, 0),
-            ("qemu/provision.rs", include_str!("provision.rs"), 0, 0),
-            ("vm.rs", include_str!("../vm.rs"), 2, 0),
-        ] {
-            let prod = &src[..src.rfind("\n#[cfg(test)]").unwrap_or(src.len())];
-            assert_eq!(
-                prod.matches(concat!("mark", "_provisioned")).count(),
-                mark,
-                "{name}: mark_provisioned bare-name count"
-            );
-            assert_eq!(
-                prod.matches("write_marker").count(),
-                write,
-                "{name}: write_marker bare-name count"
-            );
+        // F-097: walk EVERY .rs under the crate's src/ RECURSIVELY —
+        // a new submodule file (qemu/arm.rs, a lima.rs relay) is in
+        // scope (NC-WMsub/NC-MKxcrate). Per file at most one
+        // `#[cfg(test)]` attribute; the prod region is the file minus
+        // ONLY the trailing test module — code appended after its
+        // column-0 `}` still counts (NC-WMtail/NC-VMtail). Global
+        // totals: mark_provisioned — mod.rs def 1 + vm.rs def+call 2
+        // = 3; write_marker — mod.rs def+call = 2.
+        let mut marks = 0usize;
+        let mut writes = 0usize;
+        let mut dirs = vec![std::path::PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src"
+        ))];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    dirs.push(path);
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).unwrap();
+                assert!(
+                    text.matches("\n#[cfg(test)]").count() <= 1,
+                    "{path:?}: at most one #[cfg(test)] attribute per file"
+                );
+                let prod = match text.rfind("\n#[cfg(test)]") {
+                    Some(pos) => {
+                        let end = pos
+                            + text[pos..]
+                                .find("\n}")
+                                .map(|e| e + 2)
+                                .unwrap_or(text.len() - pos);
+                        format!("{}{}", &text[..pos], &text[end.min(text.len())..])
+                    }
+                    None => text.clone(),
+                };
+                assert!(!prod.contains("tests::"), "{path:?}");
+                marks += prod.matches(concat!("mark", "_provisioned")).count();
+                writes += prod.matches("write_marker").count();
+            }
         }
+        assert_eq!(
+            (marks, writes),
+            (3, 2),
+            "mark_provisioned/write_marker bare-name totals across the whole creance-vm crate"
+        );
+        // F-097/NC-MPcfg: a compile-gate inside write_marker
+        // (`cfg!(test)`, `cfg!(debug_assertions)`) is invisible to
+        // every behavioural test — pin its body textually.
+        let mod_src = include_str!("mod.rs");
+        let def = mod_src.find("fn write_marker").unwrap();
+        let body_end = def + mod_src[def..].find("\n}").unwrap();
+        assert!(
+            !mod_src[def..def + body_end].contains("cfg!"),
+            "write_marker must not compile-gate its write"
+        );
         // Position: vm.rs's call must be inside the dispatch fn body —
         // between `pub fn mark_provisioned` and that function's closing
         // brace at column 0.

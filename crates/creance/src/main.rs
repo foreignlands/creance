@@ -808,19 +808,54 @@ mod up_gate_tests {
         // count, and each file is cut at its LAST line-start
         // `#[cfg(test)]` so an injected `// #[cfg(test)]` comment or an
         // early test-attribute cannot truncate the scan (NC-MKcfg).
+        // F-097: scan EVERY .rs under src/ RECURSIVELY (a new
+        // submodule file is in scope — NC-MKsub). Per file, at most
+        // one `#[cfg(test)]` attribute is allowed — a second one
+        // (an early truncator or a fake mod appended) is itself the
+        // mutation. The prod region is the whole file MINUS ONLY the
+        // trailing test module: code appended after its column-0 `}`
+        // still counts (NC-MKtail/NC-MKtailE).
         let mut total = 0usize;
-        for entry in std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/src")).unwrap() {
-            let path = entry.unwrap().path();
-            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
-                continue;
+        let mut dirs = vec![std::path::PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src"
+        ))];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    dirs.push(path);
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).unwrap();
+                assert!(
+                    text.matches("\n#[cfg(test)]").count() <= 1,
+                    "{path:?}: at most one #[cfg(test)] attribute per file"
+                );
+                let prod = match text.rfind("\n#[cfg(test)]") {
+                    Some(pos) => {
+                        let end = pos
+                            + text[pos..]
+                                .find("\n}")
+                                .map(|e| e + 2)
+                                .unwrap_or(text.len() - pos);
+                        format!("{}{}", &text[..pos], &text[end.min(text.len())..])
+                    }
+                    None => text.clone(),
+                };
+                // Prod code must never call INTO a test module —
+                // `up_gate_tests::helper` hides the call inside the
+                // excluded region while still arming the marker.
+                assert!(!prod.contains("tests::"), "{path:?}");
+                total += prod.matches("mark_provisioned").count();
             }
-            let text = std::fs::read_to_string(&path).unwrap();
-            let prod = &text[..text.rfind("\n#[cfg(test)]").unwrap_or(text.len())];
-            total += prod.matches("mark_provisioned").count();
         }
         assert_eq!(
             total, 1,
-            "mark_provisioned はクレート全体で 1 箇所（他モジュール中継・別名・括弧も不可）"
+            "mark_provisioned はクレート全体で 1 箇所（他モジュール中継・別名・括弧・テスト後追記も不可）"
         );
         let src =
             &include_str!("main.rs")[..include_str!("main.rs").rfind("\n#[cfg(test)]").unwrap()];
@@ -831,6 +866,19 @@ mod up_gate_tests {
             src.matches("match escape::egress_verdict(&out) {").count(),
             1,
             "egress_verdict の結果は素の match で消費される（Err 中和不可）"
+        );
+        // F-097/NC-VERDin: `out` must be the REAL probe's product —
+        // `egress_probe_script` and `guest_script` are each the single
+        // producer call; a `let out` shadow or a canned-output
+        // substitution removes one of them.
+        assert_eq!(
+            src.matches("egress_probe_script(").count(),
+            1,
+            "egress_probe_script 単一呼出（偽造入力不可）"
+        );
+        assert!(
+            !src.contains("let out "),
+            "verdict の入力は guest_script の Ok(out) のみ"
         );
         let verdict = src.find("escape::egress_verdict").expect("verdict call");
         let ok_body =

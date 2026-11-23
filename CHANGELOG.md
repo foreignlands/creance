@@ -4,6 +4,36 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.6.20] — 2026-11-23
+
+### Fixed — night-24 (R27 audit round)
+
+- F-096 (S4): the v0.6.18 F-094 edit left a stray second `EGRESSRULES`
+  line in the rules.v4 heredoc — the rendered bootstrap ran
+  `EGRESSRULES` as a command (RC=127), `set -e` aborted before
+  egress-lock.service was installed, and every fresh `setup` + `up`
+  bricked fail-closed. Removed the stray terminator; the heredoc is
+  now checked STRUCTURALLY in tests (exactly one bare terminator line,
+  body byte-exact vs `rules_v4_text`).
+- F-097 (S5): closed 15 guard-surface bypasses on the F-095
+  hardening — the marker-write source scan now walks `src/`
+  RECURSIVELY in both crates (new submodule files are in scope),
+  allows at most one `#[cfg(test)]` per file, and the "prod region"
+  excludes ONLY the trailing test module (code appended after its
+  closing brace still counts; prod may never call `tests::*`); the
+  up-gate verdict pins the `egress_probe_script` producer call and
+  forbids a `let out` shadow; write_marker is also exercised against
+  a `~/.creance`-shaped dir and its body may not contain `cfg!`
+  compile-gates; the bootstrap pins `ExecStartPost` under ANY
+  spelling (systemd accepts blanks around `=`), exactly one unit file
+  write, and the probe's allowset is counted exactly (any extra
+  entry, e.g. bare tcp, bumps it).
+- The QEMU first-boot cloud-init budget is raised 600s → 1200s: on a
+  slow link the toolchain download outlasted the old budget and an
+  otherwise-healthy first boot was stopped mid-provision (observed on
+  this lab: 678s needed). Fail-closed either way — the persistent
+  layer lands first — but a slow first `up` no longer fails spuriously.
+
 ## [0.6.19] — 2026-11-23
 
 ### Added — night-24
