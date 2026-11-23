@@ -360,22 +360,97 @@ mod tests {
         // (`egress-"armed"`). The bare keyword count catches all of it:
         // a second post line, spaced or quoted, is count 2.
         assert_eq!(s.matches("ExecStartPost").count(), 1, "{s}");
-        // F-097/F-101/F-109: exactly ONE unit-file path under systemd's
-        // dir — counted by the broad `systemd/` substring so
-        // `/etc/systemd/./system/` infixes and /etc-vs-/lib spellings
-        // all bump it; `cat >` count is exactly 3 (session-env +
-        // rules.v4 + the unit) so a `cd`-into-the-dir + relative write
-        // adds a fourth, and `cd` is banned outright anyway. The enable
-        // line must exist AS A LINE — a `#`-commented one doesn't
-        // satisfy line equality (NC-ENcomment).
-        assert_eq!(s.matches("systemd/").count(), 1, "{s}");
-        assert_eq!(s.matches("cat > ").count(), 3, "{s}");
-        assert!(!s.contains("\ncd "), "{s}");
-        assert!(
+        // F-114/F-115: heredoc spans — every `<<'TAG'` opener must
+        // close at a bare TAG line; lines inside a span are heredoc
+        // BODY, not executed shell. The cat/enable pins below must sit
+        // OUTSIDE every span: a `: <<'X'` wrapper or an unterminated
+        // heredoc swallows them while every count and `sh -n` stays
+        // green.
+        let mut spans: Vec<(usize, usize)> = Vec::new();
+        for (li, l) in s.lines().enumerate() {
+            if let Some(pos) = l.find("<<") {
+                let tag: String = l[pos + 2..]
+                    .trim_start_matches('\'')
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                assert!(!tag.is_empty(), "unparseable heredoc at line {li}: {l}");
+                let end = s
+                    .lines()
+                    .enumerate()
+                    .skip(li + 1)
+                    .find(|(_, x)| x.trim() == tag)
+                    .map(|(i, _)| i)
+                    .unwrap_or_else(|| panic!("unterminated heredoc {tag} at line {li}"));
+                spans.push((li, end));
+            }
+        }
+        let inside_span = |li: usize| spans.iter().any(|&(a, b)| li > a && li <= b);
+        let line_idx = |needle: &str| {
             s.lines()
-                .any(|l| l == "systemctl enable egress-lock.service >/dev/null"),
-            "{s}"
-        );
+                .position(|l| l.trim() == needle)
+                .unwrap_or_else(|| panic!("missing line: {needle}"))
+        };
+        // The three cat lines and the enable line are FULL-line literal
+        // pins — quote-split paths (`system""d`, `cat >"…"`), trailing
+        // args, comments or a `cd`-into-dir relative write all fail.
+        for needle in [
+            "cat > /etc/profile.d/session-env.sh <<'SESSENV'",
+            "cat > /etc/iptables/rules.v4 <<'EGRESSRULES'",
+            "cat > /etc/systemd/system/egress-lock.service <<'LOCKUNIT'",
+            "systemctl enable egress-lock.service >/dev/null",
+            "systemctl daemon-reload",
+            "systemctl restart egress-lock.service",
+        ] {
+            let li = line_idx(needle);
+            assert!(
+                !inside_span(li),
+                "{needle} is inside a heredoc — never executed"
+            );
+        }
+        assert_eq!(s.matches("cat >").count(), 3, "{s}");
+        // Navigation/side-write verbs are banned outright: a `cd` into
+        // the unit dir plus a relative `cat > x` writes a second unit
+        // without touching the counts; `tee`/`dd` spellings bypass
+        // `cat` counting the same way.
+        for l in s.lines().map(str::trim) {
+            for banned in [
+                "cd ", "cd\t", "pushd", "popd", "builtin", "eval ", "tee ", "dd ", "exit", "return",
+            ] {
+                assert!(
+                    !l.starts_with(banned),
+                    "script line starts with a banned verb: {l}"
+                );
+            }
+        }
+        // Every `systemctl`/`egress-lock` line is one of the literals —
+        // a disable/mask after enable, or a second egress unit, adds a
+        // line that can't match.
+        for l in s.lines().map(str::trim) {
+            if l.starts_with("systemctl") {
+                assert!(
+                    [
+                        "systemctl daemon-reload",
+                        "systemctl enable egress-lock.service >/dev/null",
+                        "systemctl restart egress-lock.service"
+                    ]
+                    .contains(&l),
+                    "unexpected systemctl line: {l}"
+                );
+            }
+            if l.contains("egress-lock") {
+                assert!(
+                    [
+                        "cat > /etc/systemd/system/egress-lock.service <<'LOCKUNIT'",
+                        "systemctl enable egress-lock.service >/dev/null",
+                        "systemctl restart egress-lock.service"
+                    ]
+                    .contains(&l),
+                    "unexpected egress-lock line: {l}"
+                );
+            }
+        }
+        assert_eq!(s.matches("systemd/").count(), 1, "{s}");
         // F-096/F-098: the rules.v4 heredoc is checked STRUCTURALLY AND
         // EXECUTED. Structure: the `cat >` line is exactly the literal
         // (no `if`/`&&` prefix can mask it), exactly two lines mention

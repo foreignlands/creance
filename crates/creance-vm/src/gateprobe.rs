@@ -252,11 +252,14 @@ mod tests {
             !prod.contains("unsafe") && !prod.contains("transmute"),
             "an unsafe mint defeats the seal"
         );
-        // The verdict fn stays private — `pub` lets ANY crate in the
-        // workspace feed it a literal and arm the marker (F-105/XGATE).
+        // The verdict fn stays private — ANY `pub`-qualified spelling
+        // (`pub(super)`/`pub(crate)`/`pub(in …)`) lets the rest of the
+        // crate feed it a literal and mint (F-105/F-112/XGATE).
         assert!(
-            !prod.contains("pub fn egress_verdict"),
-            "egress_verdict must stay private"
+            prod.lines()
+                .filter(|l| l.contains("fn egress_verdict"))
+                .all(|l| !l.contains("pub")),
+            "egress_verdict must carry no pub qualifier"
         );
         assert_eq!(prod.matches("fn egress_verdict(").count(), 1);
         assert_eq!(prod.matches("egress_verdict(").count(), 2, "{src}");
@@ -285,36 +288,85 @@ mod tests {
         assert!(!body.contains("tcp-blocked"), "{body}");
         assert!(!body.contains("fw-armed"), "{body}");
         assert!(!body.contains("icmp-blocked"), "{body}");
-        assert_eq!(body.matches("stop(").count(), 2, "{body}");
+        // F-111/F-112: arg ORDER and call ORDER are pinned — a swapped
+        // `stop(instance, profile)` or a mark placed before the verdict
+        // fails, and the Ok arm is one verbatim line with no condition.
+        assert_eq!(body.matches("stop(profile, instance)").count(), 2, "{body}");
+        let verdict_at = body.find("egress_verdict(&out)").unwrap();
+        let mark_at = body.find("mark_provisioned(").unwrap();
+        assert!(
+            verdict_at < mark_at,
+            "marker write must sit after the verdict"
+        );
+        assert!(
+            body.lines().any(|l| l.trim()
+                == "Ok(verified) => Ok(vm::mark_provisioned(profile, instance, &verified)),"),
+            "Ok arm must be the unconditional marker call"
+        );
         assert!(body.contains("return Err"), "{body}");
         assert_eq!(body.matches("mark_provisioned(").count(), 1, "{body}");
+    }
+
+    #[test]
+    fn verify_and_mark_shell_is_pinned() {
+        // F-111: the production entry is a literal shell — the runner is
+        // vm::guest_script, the stop is vm::stop_vm in (profile,
+        // instance) order, nothing else. A canned-pass runner or a
+        // no-op stop in the wrapper is a test red.
+        let src = include_str!("gateprobe.rs");
+        let prod = &src[..src.rfind("\n#[cfg(test)]").unwrap()];
+        let def = prod.find("pub fn verify_and_mark(").unwrap();
+        let body_end = def + prod[def..].find("\n}").unwrap();
+        let body = &prod[def..body_end];
+        assert!(
+            body.contains("verify_and_mark_with(profile, instance, vm::guest_script"),
+            "{body}"
+        );
+        assert!(body.contains("vm::stop_vm(p, i)"), "{body}");
+        assert_eq!(body.matches("vm::").count(), 2, "{body}");
+        assert_eq!(body.matches("guest_script").count(), 1, "{body}");
+        assert_eq!(body.matches("stop_vm").count(), 1, "{body}");
+        assert_eq!(body.matches("Ok(").count(), 0, "{body}");
+        assert_eq!(body.matches("\"").count(), 0, "{body}");
     }
 
     #[test]
     fn verify_and_mark_refuses_and_stops_on_every_bad_input() {
         // F-104: drive the seam with injected runners — the verdict
         // must see the REAL probe output, and every refusal must stop.
-        let stopped = std::cell::RefCell::new(0usize);
-        let run = |_p: &str, _i: &str, _s: &str| -> Result<String, String> {
+        let stopped = std::cell::RefCell::new(Vec::<(String, String)>::new());
+        let run = |_p: &str, _i: &str, s: &str| -> Result<String, String> {
+            // F-111: a canned-pass wrapper feeds a dead literal script —
+            // the fake asserts the script it got is the real probe.
+            assert!(
+                s.contains("egress-armed"),
+                "injected script is the real probe"
+            );
             Ok("tcp-open\nicmp-blocked\nfw-armed\n".to_owned())
         };
-        let res = verify_and_mark_with("/tmp/nope", "nope", run, |_p, _i| {
-            *stopped.borrow_mut() += 1;
+        let res = verify_and_mark_with("/tmp/nope", "nope", run, |p, i| {
+            stopped.borrow_mut().push((p.to_owned(), i.to_owned()));
         });
         let err = res.unwrap_err();
         assert!(err.contains("直连可达"), "{err}");
-        assert_eq!(*stopped.borrow(), 1, "refusal must stop the VM");
+        // F-111: the stop must carry (profile, instance) in that order —
+        // a swapped `stop(instance, profile)` stops nothing real.
+        assert_eq!(
+            stopped.borrow().as_slice(),
+            &[("/tmp/nope".to_owned(), "nope".to_owned())],
+            "refusal must stop the VM with (profile, instance)"
+        );
         // Runner error → refuse + stop (a canned-pass conversion would
         // have to swallow this — the Err arm pins it textually too).
         let res = verify_and_mark_with(
             "/tmp/nope",
             "nope",
             |_p, _i, _s| Err("ssh dead".to_owned()),
-            |_p, _i| *stopped.borrow_mut() += 1,
+            |p, i| stopped.borrow_mut().push((p.to_owned(), i.to_owned())),
         );
         let err = res.unwrap_err();
         assert!(err.contains("无法"), "{err}");
-        assert_eq!(*stopped.borrow(), 2);
+        assert_eq!(stopped.borrow().len(), 2);
         // Passing output arms the marker AT the instance's own dir.
         let profile = std::env::temp_dir()
             .join(format!("creance-vam-{}", std::process::id()))
@@ -325,7 +377,11 @@ mod tests {
         let res = verify_and_mark_with(
             &profile,
             "good-inst",
-            |_p, _i, _s| Ok("tcp-blocked\nicmp-blocked\nfw-armed\n".to_owned()),
+            |p, i, s| {
+                assert_eq!((p, i), (profile.as_str(), "good-inst"));
+                assert!(s.contains("egress-armed"));
+                Ok("tcp-blocked\nicmp-blocked\nfw-armed\n".to_owned())
+            },
             |_p, _i| panic!("a pass must not stop"),
         );
         assert_eq!(res, Ok(true), "{res:?}");

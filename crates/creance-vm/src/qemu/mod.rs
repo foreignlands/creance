@@ -724,6 +724,20 @@ mod tests {
         // verdict is judged. F-106: BOTH cfg arms pinned by name —
         // swapping "macos"→"linux" makes the Linux arm a silent noop.
         assert!(body.contains("_proof: &crate::gateprobe::EgressVerified"));
+        // F-112: the seal must hold crate-wide, not only inside
+        // gateprobe.rs — a `transmute`/`{ _sealed }` mint or an
+        // EgressVerified construction anywhere in creance-vm prod code
+        // arms the marker without a verdict.
+        for (name, src) in [
+            ("vm.rs", include_str!("../vm.rs")),
+            ("qemu/mod.rs", include_str!("mod.rs")),
+            ("qemu/provision.rs", include_str!("provision.rs")),
+            ("qemu/runner.rs", include_str!("runner.rs")),
+        ] {
+            let prod = &src[..src.rfind("\n#[cfg(test)]").unwrap_or(src.len())];
+            assert!(!prod.contains("transmute"), "{name}: unsafe mint");
+            assert!(!prod.contains("_sealed"), "{name}: direct field mint");
+        }
         assert!(
             body.contains("#[cfg(target_os = \"macos\")]")
                 && body.contains("#[cfg(not(target_os = \"macos\"))]"),

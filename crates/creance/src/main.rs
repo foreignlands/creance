@@ -863,16 +863,49 @@ mod up_gate_tests {
         );
         let call = src.find("verify_and_mark(&profile, &instance)").unwrap();
         let arm_region = &src[call..call + 600];
-        assert!(
-            arm_region.contains("Err(e) => return fail(e),"),
-            "verify_and_mark の拒否は fail(e) で伝播する"
+        // F-113: the refusal arm must be a real match arm — a
+        // `// Err(e) => return fail(e)` comment or a guarded
+        // `Err(e) if … =>` arm placed before it both contain the
+        // substring but swallow the refusal. The FIRST trimmed line
+        // starting with `Err(` in the region must be the exact arm.
+        let first_err = arm_region
+            .lines()
+            .map(str::trim)
+            .find(|l| l.starts_with("Err("))
+            .expect("refusal arm");
+        assert_eq!(
+            first_err, "Err(e) => return fail(e),",
+            "verify_and_mark の拒否は fail(e) で伝播する（コメント・ガード腕では駄目）"
         );
-        // NC-MAINfs: writing the marker file directly — any literal
-        // "provisioned" or instance_dir() call in this crate bypasses
-        // the sealed token entirely.
-        assert!(
-            !src.contains("\"provisioned\"") && !src.contains("instance_dir(&profile"),
-            "main.rs must not touch the provisioned marker directly"
-        );
+        // F-113: writing the marker file directly — any literal
+        // "provisioned" or a non-`gate_` instance_dir() call ANYWHERE
+        // in the creance crate (lib.rs included) bypasses the seal.
+        let crate_srcs = [
+            include_str!("main.rs"),
+            include_str!("lib.rs"),
+            include_str!("escape.rs"),
+            include_str!("serve.rs"),
+            include_str!("diagnose.rs"),
+            include_str!("evidence.rs"),
+        ];
+        for csrc in crate_srcs {
+            let prod = &csrc[..csrc.rfind("\n#[cfg(test)]").unwrap_or(csrc.len())];
+            assert!(
+                !prod.contains("\"provisioned\""),
+                "a \"provisioned\" literal writes the marker without the token"
+            );
+            // `gate_instance_dir(` is a different path (the gate's own
+            // dir); a real instance_dir call carries 2 args. Ban any
+            // `instance_dir(` occurrence not preceded by `gate_`.
+            let mut rest = prod;
+            while let Some(i) = rest.find("instance_dir(") {
+                let head = &rest[..i];
+                assert!(
+                    head.ends_with("gate_") || head.ends_with("gate_instance"),
+                    "an instance_dir() call outside gate_instance_dir writes the marker directly"
+                );
+                rest = &rest[i + "instance_dir(".len()..];
+            }
+        }
     }
 }

@@ -4,6 +4,59 @@ All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.
 
+## [0.6.23] — 2026-11-23
+
+### Fixed — night-27 (R30 audit round)
+
+Six findings (111–116), all severity S5 — another round of guard
+bypasses on the sealed-token chain, the provision script pins, and
+the watchdog.
+
+- **F-111** — the production `verify_and_mark` shell had no pins: a
+  canned-pass runner or a no-op stop inside it passed every test. The
+  wrapper body is now pinned literally (`vm::guest_script` /
+  `vm::stop_vm(p, i)`, zero string literals, zero `Ok(`), the
+  behavioural fakes assert the injected script is the real probe and
+  that stop receives `(profile, instance)` in order, and the body's
+  `stop(profile, instance)` arg order plus the verbatim
+  `Ok(verified) => Ok(vm::mark_provisioned(…))` arm are pinned.
+- **F-112** — the seal was only checked inside gateprobe.rs:
+  `pub(super)`/`pub(crate)` verdicts and a `transmute` mint in vm.rs
+  stayed green, and the marker could be written before the verdict.
+  Now: any `pub`-qualified `fn egress_verdict` line is banned,
+  `_sealed`/`transmute` are banned across every creance-vm prod file
+  (vm.rs, qemu/mod.rs, qemu/provision.rs, qemu/runner.rs), and the
+  verdict→mark positional order is pinned.
+- **F-113** — the Err arm pin accepted a comment containing the arm
+  text, or a guarded `Err(e) if …` arm placed first; and lib.rs could
+  write the marker directly since only main.rs was scanned. Now: the
+  first `Err(` line in the call region must be the verbatim
+  `Err(e) => return fail(e),`, and every file in the creance crate
+  bans a `"provisioned"` literal and any non-`gate_` `instance_dir(`
+  call.
+- **F-114** — `sh -n` can't prove the cat line executes: an outer
+  `: <<'X'` heredoc (dash accepts EOF-terminated) or an early
+  `exit 0` swallows it. Now a heredoc span map requires every `<<TAG`
+  opener to terminate at a bare TAG line, and the pinned cat/enable
+  lines must sit OUTSIDE every span; `exit`/`return` line-starts are
+  banned.
+- **F-115** — quote-split paths, a `cd`+relative write,
+  `systemctl disable` after enable, or an enable line inside a
+  heredoc all stayed green. Now all three `cat >` lines, the enable,
+  `daemon-reload` and `restart` lines are full-line literal pins that
+  must sit outside heredoc spans; `cd`/`pushd`/`popd`/`tee`/`dd`/
+  `eval`/`builtin`/`exit`/`return` line-starts are banned; and every
+  `systemctl`/`egress-lock` line must be one of the three literals.
+- **F-116** — a `grace` counter or an 800ms sampling period widened
+  the fuse past the test window. Now `core_down_ticks` bare-count is
+  pinned at 5 (decl+inc+threshold+2 resets), `grace` is banned, and
+  `from_millis(500)` is pinned at exactly 2 (watchdog tick +
+  record-replace loop).
+
+Real-machine re-verify (fresh, per 铁律 4): rm -rf → init → setup
+RC=0 → `up` RC=0 (供给完成, marker armed through the sealed chain) →
+stop → `up` RC=0 with `restrict=on` present in the qemu args.
+
 ## [0.6.22] — 2026-11-23
 
 ### Fixed — night-26 (R29 audit round)

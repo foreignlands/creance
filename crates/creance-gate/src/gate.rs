@@ -2010,6 +2010,16 @@ mod tests {
             1,
             "the counter is declared exactly once"
         );
+        // F-116: bare-name count — decl(1) + increment(1) + threshold(1)
+        // + two resets(2) = 5. A `grace` counter or a second increment
+        // site bumps it; a renamed counter breaks the decl/inc/threshold
+        // pins anyway.
+        assert_eq!(prod.matches("core_down_ticks").count(), 5, "{prod}");
+        assert!(!prod.contains("grace"), "a grace counter softens the fuse");
+        // The 500ms sampling period: exactly two `from_millis(500)` in
+        // prod — the watchdog tick and the record-replace loop. A third
+        // (a widened tick) bumps the count.
+        assert_eq!(prod.matches("from_millis(500)").count(), 2, "{prod}");
         assert_eq!(
             prod.matches("core_down_ticks = 0;").count(),
             2,

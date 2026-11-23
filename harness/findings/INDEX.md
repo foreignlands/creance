@@ -3,6 +3,12 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 116 | S5 | F-110 钉可绕：保留全部 verbatim 行但用 `grace` 让每条 down 流的首 tick 不计（阈值实为 4/2.0s），或采样周期 500→800ms（熔断 2.4s）均落在 1.3s–3.0s 测试窗内全绿 | F-110 修复面 | 已修复（裸名计数==5+grace 禁+500ms 周期钉） |
+| 115 | S5 | F-109 钉仍可绕：变量拼路径 `SD=/etc/system""d/system; cat >"$SD/x.service"`、缩进 ` cd`+`cat >rel`、enable 行保留但下一行 `systemctl disable`、enable 行包进 `: <<'NOEN'` heredoc 全绿 | F-109 修复面 | 已修复（cat/enable/systemctl 行整行白名单+cd/tee/eval 动词禁） |
+| 114 | S5 | F-108 `sh -n` 校验仍可绕：外层 `: <<'SKIPRULES'` 无终止 heredoc 被 dash 接受（EOF 终止），`exit 0` 前置早退亦全绿——rules.v4/unit/锁闭全不执行 | F-108 修复面 | 已修复（heredoc 跨度映射：钉线必在跨度外+未终止/早退全红） |
+| 113 | S5 | F-107 钉可绕：600 字节窗内把 `Err(e) => return fail(e),` 写进注释或放在守卫臂之后，真实 Err 臂吞拒绝；marker 可经 creance lib.rs 直接写（"provisioned" 字面禁只扫 main.rs） | F-107 修复面 | 已修复（首个 Err( 行 verbatim+全 crate 禁 marker 直写） |
+| 112 | S5 | F-105 封印在 creance-vm 内部仍可铸：`pub(super)`/`pub(crate) fn egress_verdict` 不被拦、vm.rs 内 `unsafe transmute` 铸令牌（unsafe 禁只扫 gateprobe.rs），且 marker 可在 verdict 之前武装 | F-105 修复面 | 已修复（pub 任意拼写禁+crate 全域 _sealed/transmute 禁+位置序钉） |
+| 111 | S5 | F-104 注入缝外壳未测：prod `verify_and_mark` 的 runner/stop 闭包与被钉函数体的实参全可换形——canned runner、stop 变 noop、stop/probe 实参对调、Ok 臂条件化全绿 | F-104 修复面 | 已修复（外壳整身钉+注入参序行为断言+Ok 臂 verbatim） |
 | 110 | S5 | F-102 watchdog 钉可绕：`let _core_down_ticks = 0;` 遮蔽两处复位、`from_millis(250).max(30s)`、阈值放宽到 4 tick 全绿 | F-102 修复面 | 已修复（形状钉：250,逗号+阈值行 verbatim+遮蔽声明禁+熔断下界断言） |
 | 109 | S5 | F-101 钉仍只数形状：enable 行注释、`cd`+相对路径/`./` 第二 unit、verbatim 允许集后追加条目（实为 contains）全绿 | F-101 修复面 | 已修复（enable 整行相等+cd 禁+systemd/ 宽计数+允许集整行相等） |
 | 108 | S5 | F-098 执行测试只切 cat 行起的段：段外 `if false; then`/外层 `: <<'SKIPRULES'` 包裹全绿，CHANGELOG "if false breaks the syntax" 证伪 | F-098 修复面 | 已修复（sh -n 校验前缀+整脚本） |
