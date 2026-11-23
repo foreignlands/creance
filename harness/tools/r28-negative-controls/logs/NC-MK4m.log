@@ -1,0 +1,24 @@
+
+running 18 tests
+..................
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+
+running 1 test
+up_gate_tests::provisioned_marker_only_after_verdict --- FAILED
+
+failures:
+
+---- up_gate_tests::provisioned_marker_only_after_verdict stdout ----
+
+thread 'up_gate_tests::provisioned_marker_only_after_verdict' (35628) panicked at crates/creance/src/main.rs:884:9:
+provisioned マーカーは verdict の Ok(()) 分岐の本体内のみ
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    up_gate_tests::provisioned_marker_only_after_verdict
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p creance --bin creance`

@@ -1,0 +1,23 @@
+POS: RC=0 probe inventory: bidirectional diff empty (guest 12 code ids, host 6)
+NC-A: grep-c=1 RC=1 FAIL-lines=1
+    FAIL: README enforces probe 'ghost-probe-r28' but the code never emits it
+NC-B: grep-c=0 RC=1 FAIL-lines=1
+    FAIL: README enforcement block is missing 'net-icmp-external' (code emits it)
+NC1: grep-c=0 RC=1 FAIL-lines=1
+    FAIL: guest probe 'proxy-path' emitted by escape.rs but absent from ROADMAP inventory
+NC2: grep-c=1 RC=1 FAIL-lines=1
+    FAIL: ROADMAP enforces guest probe 'ghost-probe-r28' but escape.rs never emits it
+NC3: grep-c=1 RC=1 FAIL-lines=2
+    FAIL: guest probe 'ghost-probe-r28' emitted by escape.rs but absent from ROADMAP inventory
+    FAIL: README enforcement block is missing 'ghost-probe-r28' (code emits it)
+NC5: grep-c=2 RC=1 FAIL-lines=11
+    FAIL: guest probe 'env-credentials' emitted by escape.rs but absent from ROADMAP inventory
+    FAIL: guest probe 'env-hex-tokens' emitted by escape.rs but absent from ROADMAP inventory
+    FAIL: guest probe 'fs-flag-readable' emitted by escape.rs but absent from ROADMAP inventory
+NC6v: grep-c=0 RC=1 FAIL-lines=1
+    FAIL: sock-$s family emission site missing from escape.rs (enforced socket probe silently removed?)
+README.md: OK
+ROADMAP.md: OK
+crates/creance/src/escape.rs: OK
+scripts/check-probe-inventory.sh: OK
+RUN-RC=0

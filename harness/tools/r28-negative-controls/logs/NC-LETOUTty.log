@@ -1,0 +1,27 @@
+error[E0004]: non-exhaustive patterns: `Ok(_)` not covered
+   --> crates/creance/src/main.rs:751:15
+    |
+751 |           match creance_vm::vm::guest_script(
+    |  _______________^
+752 | |             &profile,
+753 | |             &instance,
+754 | |             &escape::egress_probe_script(creance_vm::vm::nat_allow_hosts()),
+755 | |         ) {
+    | |_________^ pattern `Ok(_)` not covered
+    |
+note: `Result<std::string::String, std::string::String>` defined here
+   --> /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/result.rs:558:0
+   ::: /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/result.rs:562:4
+    |
+    = note: not covered
+    = note: the matched value is of type `Result<std::string::String, std::string::String>`
+    = note: match arms with guards don't count towards exhaustivity
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern or an explicit pattern as shown
+    |
+778 ~             },
+779 +             Ok(_) => todo!()
+    |
+
+For more information about this error, try `rustc --explain E0004`.
+error: could not compile `creance` (bin "creance") due to 1 previous error
+error: could not compile `creance` (bin "creance" test) due to 1 previous error

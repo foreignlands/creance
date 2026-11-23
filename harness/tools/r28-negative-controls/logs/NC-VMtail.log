@@ -1,0 +1,28 @@
+
+running 65 tests
+............................................................==> /dev/null <==
+ 60/65
+qemu::tests::mark_provisioned_is_called_only_from_the_cli_crate --- FAILEDtail: cannot open 'HostKeyAlias=creance-test-inst-064a52 -N -R 18765:127.0.0.1:18765' for reading
+: No such file or directory
+.==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-064a52 -N -R 18765:127.0.0.1:18765' for reading: No such file or directory
+==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-064a52' for reading: No such file or directory
+...
+failures:
+
+---- qemu::tests::mark_provisioned_is_called_only_from_the_cli_crate stdout ----
+
+thread 'qemu::tests::mark_provisioned_is_called_only_from_the_cli_crate' (72078) panicked at crates/creance-vm/src/qemu/mod.rs:661:9:
+assertion `left == right` failed: mark_provisioned/write_marker bare-name totals across the whole creance-vm crate
+  left: (4, 2)
+ right: (3, 2)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    qemu::tests::mark_provisioned_is_called_only_from_the_cli_crate
+
+test result: FAILED. 64 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+error: test failed, to rerun pass `-p creance-vm --lib`

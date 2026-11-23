@@ -1,0 +1,4 @@
+[none]: sh-n=0 RC=0 bare-count=1 | REACHED-AFTER-HEREDOC
+[  EGRESSRULES]: sh-n=0 RC=127 bare-count=1 | $T/p.sh: 16: EGRESSRULES: not found
+[	EGRESSRULES]: sh-n=0 RC=127 bare-count=1 | $T/p.sh: 16: EGRESSRULES: not found
+[EGRESSRULES ]: sh-n=0 RC=127 bare-count=1 | $T/p.sh: 16: EGRESSRULES: not found

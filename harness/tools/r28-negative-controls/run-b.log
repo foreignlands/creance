@@ -1,0 +1,12 @@
+NC-LETOUTpre: grep-c before=0 after=1 crates=creance test-RC=0 failed=0 compile-err=0
+NC-SHADOWmod: grep-c before=0 after=1 crates=creance test-RC=0 failed=0 compile-err=0
+NC-PROBEfnptr: grep-c before=0 after=1 crates=creance test-RC=101 failed=3 compile-err=1
+crates/creance/src/escape.rs: OK
+crates/creance/src/main.rs: OK
+crates/creance-vm/src/provision.rs: OK
+crates/creance-vm/src/qemu/mod.rs: OK
+crates/creance-vm/src/vm.rs: OK
+crates/creance-vm/src/lima.rs: OK
+crates/creance-gate/src/gate.rs: OK
+crates/creance/src/lib.rs: OK
+RUN-RC=0

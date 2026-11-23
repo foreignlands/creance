@@ -1,0 +1,22 @@
+
+running 13 tests
+............ 12/13
+gate::tests::watchdog_fuses_open_gate_when_core_unreachable --- FAILED
+
+failures:
+
+---- gate::tests::watchdog_fuses_open_gate_when_core_unreachable stdout ----
+
+thread 'gate::tests::watchdog_fuses_open_gate_when_core_unreachable' (104868) panicked at crates/creance-gate/src/gate.rs:1836:9:
+assertion `left == right` failed: GateStatus { state: Open, reason: "", run_id: "acc0476660bab2e958b7de8fbeb35e1e", policy: "session-safety/3", epoch: 0, check_id: "", counts: {} }
+  left: Open
+ right: Closed
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    gate::tests::watchdog_fuses_open_gate_when_core_unreachable
+
+test result: FAILED. 12 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.02s
+
+error: test failed, to rerun pass `-p creance-gate --lib`

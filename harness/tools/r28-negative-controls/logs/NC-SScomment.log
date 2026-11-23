@@ -1,0 +1,28 @@
+
+running 65 tests
+................................ 32/65
+provision::tests::armed_stamp_is_root_written_from_live_rules --- FAILED
+........................==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-f99d41 -N -R 18765:127.0.0.1:18765' for reading: No such file or directory
+.....==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-f99d41' for reading: No such file or directory
+==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-f99d41 -N -R 18765:127.0.0.1:18765' for reading: No such file or directory
+...
+failures:
+
+---- provision::tests::armed_stamp_is_root_written_from_live_rules stdout ----
+
+thread 'provision::tests::armed_stamp_is_root_written_from_live_rules' (83618) panicked at crates/creance-vm/src/provision.rs:378:9:
+assertion `left == right` failed: rules.v4 heredoc body must be the renderer's own bytes
+  left: "*filter\n:INPUT ACCEPT [0:0]\n:FORWARD ACCEPT [0:0]\n:OUTPUT DROP [0:0]\n-A OUTPUT -o lo -j ACCEPT\n-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n-A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT\n-A OUTPUT -p udp --dport 67 -d 10.0.2.2/32 -j ACCEPT\n-A OUTPUT -p icmp -d 10.0.2.2/32 -j ACCEPT\n-A OUTPUT -p udp --dport 67 -d 10.0.2.3/32 -j ACCEPT\n-A OUTPUT -p icmp -d 10.0.2.3/32 -j ACCEPT\nCOMMIT\n# EGRESSRULES end\n"
+ right: "*filter\n:INPUT ACCEPT [0:0]\n:FORWARD ACCEPT [0:0]\n:OUTPUT DROP [0:0]\n-A OUTPUT -o lo -j ACCEPT\n-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n-A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT\n-A OUTPUT -p udp --dport 67 -d 10.0.2.2/32 -j ACCEPT\n-A OUTPUT -p icmp -d 10.0.2.2/32 -j ACCEPT\n-A OUTPUT -p udp --dport 67 -d 10.0.2.3/32 -j ACCEPT\n-A OUTPUT -p icmp -d 10.0.2.3/32 -j ACCEPT\nCOMMIT\n"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    provision::tests::armed_stamp_is_root_written_from_live_rules
+
+test result: FAILED. 64 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+error: test failed, to rerun pass `-p creance-vm --lib`
