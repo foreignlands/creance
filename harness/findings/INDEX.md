@@ -3,6 +3,12 @@
 | # | 严重度 | 标题 | 攻击面 | 状态 |
 |---|---|---|---|---|
 <!-- NNN | S? | 一句话 | A? | 待修复/已修复(commit)/误报 -->
+| 122 | S5 | F-116 钉可绕：`grace` 词禁被改名 `warm` 绕过（每段 down 首 tick 不计，阈值实为 4）；`sleep(Duration::from_millis(500) + Duration::from_millis(300))` 保留 `from_millis(500)` 计数而周期变 800ms，全绿 | F-116 修复面 | 待修复 |
+| 121 | S5 | F-115 行白名单可绕：`/bin/systemctl disable egress-""lock.service`（非行首 `systemctl`、unit 名引号拆分）关掉锁闭单元；`printf … > /etc/system""d/system/net-tune.service` 写第二个 root unit 并 `/bin/systemctl enable` 全绿 | F-115 修复面 | 待修复 |
+| 120 | S5 | F-114 跨度/早退钉可绕：span 解析器 trim 后比较终止行，` SKIPRULES`（前导空格）对测试是终止、对 dash 不是；`exec true`、`true && exit 0`、`false`（脚本自身 set -e）均在 rules.v4 前终止脚本且全绿 | F-114 修复面 | 待修复 |
+| 119 | S5 | F-113 钉可绕：守卫臂拼成 `Result::Err(e) if …`（trim 行不以 `Err(` 开头，真实臂仍是“首个 Err(”）；lib.rs 经 `use creance_vm::qemu::instance_dir as idir;` 别名+`concat!("provision","ed")` 直写 marker 全绿 | F-113 修复面 | 待修复 |
+| 118 | S5 | F-112 封印仍可铸：扫描表仅 4/18 个 creance-vm prod 文件——vm.rs 内 `mem::zeroed()`、qemu/image.rs 内 `NonNull::dangling().read()` 铸令牌；SAFE 代码 `pub(crate) const VERDICT: fn(..) = egress_verdict;` 导出私有 verdict 全绿 | F-112 修复面 | 待修复 |
+| 117 | S5 | F-111 外壳钉/行为断言可绕：闭包形参对调 `|i, p|`（字面 `vm::stop_vm(p, i)` 不变）、stop 包进永不调用的闭包、`vm::guest_script_ok` 前缀字面 canned runner、fake runner 只做 `egress-armed` 子串检查 | F-111 修复面 | 待修复 |
 | 116 | S5 | F-110 钉可绕：保留全部 verbatim 行但用 `grace` 让每条 down 流的首 tick 不计（阈值实为 4/2.0s），或采样周期 500→800ms（熔断 2.4s）均落在 1.3s–3.0s 测试窗内全绿 | F-110 修复面 | 已修复（裸名计数==5+grace 禁+500ms 周期钉） |
 | 115 | S5 | F-109 钉仍可绕：变量拼路径 `SD=/etc/system""d/system; cat >"$SD/x.service"`、缩进 ` cd`+`cat >rel`、enable 行保留但下一行 `systemctl disable`、enable 行包进 `: <<'NOEN'` heredoc 全绿 | F-109 修复面 | 已修复（cat/enable/systemctl 行整行白名单+cd/tee/eval 动词禁） |
 | 114 | S5 | F-108 `sh -n` 校验仍可绕：外层 `: <<'SKIPRULES'` 无终止 heredoc 被 dash 接受（EOF 终止），`exit 0` 前置早退亦全绿——rules.v4/unit/锁闭全不执行 | F-108 修复面 | 已修复（heredoc 跨度映射：钉线必在跨度外+未终止/早退全红） |

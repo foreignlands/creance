@@ -1,0 +1,81 @@
+prod runner replaced by a canned passing echo (wrapper is outside the pinned body)
+
+$ cargo fmt --all
+
+$ cargo test --workspace --locked -q
+
+running 15 tests
+...............
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+
+running 16 tests
+................
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.06s
+
+
+running 30 tests
+..............................
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+
+running 11 tests
+ii.........
+test result: ok. 9 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 45 tests
+.............................................
+test result: ok. 45 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+
+running 71 tests
+................. 17/71
+gateprobe::tests::verify_and_mark_shell_is_pinned --- FAILED
+................................................==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-df9a80 -N -R 18765:127.0.0.1:18765' for reading: No such file or directory
+==> /dev/null <==
+.tail: cannot open 'HostKeyAlias=creance-test-inst-df9a80 -N -R 18765:127.0.0.1:18765' for reading: No such file or directory
+==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-df9a80' for reading: No such file or directory
+....
+failures:
+
+---- gateprobe::tests::verify_and_mark_shell_is_pinned stdout ----
+
+thread 'gateprobe::tests::verify_and_mark_shell_is_pinned' (34236) panicked at crates/creance-vm/src/gateprobe.rs:328:9:
+pub fn verify_and_mark(profile: &str, instance: &str) -> Result<bool, String> {
+    verify_and_mark_with(
+        profile,
+        instance,
+        |_p: &str, _i: &str, _s: &str| {
+            Ok(concat!("tcp-", "blocked\nicmp-", "blocked\nfw-", "armed\n").to_owned())
+        },
+        |p, i| {
+            let _ = vm::stop_vm(p, i);
+        },
+    )
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    gateprobe::tests::verify_and_mark_shell_is_pinned
+
+test result: FAILED. 70 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+error: test failed, to rerun pass `-p creance-vm --lib`

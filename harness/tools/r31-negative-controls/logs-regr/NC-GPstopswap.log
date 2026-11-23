@@ -1,0 +1,114 @@
+both refusal stops get swapped args; fake stop ignores args
+
+$ cargo fmt --all
+
+$ cargo test --workspace --locked -q
+
+running 15 tests
+...............
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+
+running 16 tests
+................
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.06s
+
+
+running 30 tests
+..............................
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+
+running 11 tests
+ii.........
+test result: ok. 9 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 45 tests
+.............................................
+test result: ok. 45 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+
+running 71 tests
+......... 9/71
+gateprobe::tests::verdict_seals_the_token --- FAILED
+gateprobe::tests::verify_and_mark_refuses_and_stops_on_every_bad_input --- FAILED
+....................................................==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-eeaa94 -N -R 18765:127.0.0.1:18765' for reading.: No such file or directory
+...==> /dev/null <==
+==> /dev/null <==
+tail: tail: cannot open 'HostKeyAlias=creance-test-inst-eeaa94' for readingcannot open 'HostKeyAlias=creance-test-inst-eeaa94 -N -R 18765:127.0.0.1:18765' for reading: No such file or directory
+: No such file or directory
+....
+failures:
+
+---- gateprobe::tests::verdict_seals_the_token stdout ----
+
+thread 'gateprobe::tests::verdict_seals_the_token' (38857) panicked at crates/creance-vm/src/gateprobe.rs:294:9:
+assertion `left == right` failed: fn verify_and_mark_with<F, S>(
+    profile: &str,
+    instance: &str,
+    run: F,
+    stop: S,
+) -> Result<bool, String>
+where
+    F: FnOnce(&str, &str, &str) -> Result<String, String>,
+    S: FnOnce(&str, &str),
+{
+    let out = match run(
+        profile,
+        instance,
+        &egress_probe_script(vm::nat_allow_hosts()),
+    ) {
+        Ok(out) => out,
+        Err(e) => {
+            stop(instance, profile);
+            return Err(format!("无法在 guest 内验证防火墙状态，VM 已停止：{e}"));
+        }
+    };
+    match egress_verdict(&out) {
+        Err(reason) => {
+            stop(instance, profile);
+            Err(format!(
+                "{reason}，VM 已停止；请 creance stop 后 creance setup 重建环境。探针原始输出：{out:?}"
+            ))
+        }
+        // F-081/F-087/F-099: the marker sits behind the sealed token —
+        // arming on ANY failure path is a compile error now, not a
+        // convention a mutation can quietly relax.
+        Ok(verified) => Ok(vm::mark_provisioned(profile, instance, &verified)),
+    }
+  left: 0
+ right: 2
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- gateprobe::tests::verify_and_mark_refuses_and_stops_on_every_bad_input stdout ----
+
+thread 'gateprobe::tests::verify_and_mark_refuses_and_stops_on_every_bad_input' (38858) panicked at crates/creance-vm/src/gateprobe.rs:354:9:
+assertion `left == right` failed: refusal must stop the VM with (profile, instance)
+  left: [("nope", "/tmp/nope")]
+ right: [("/tmp/nope", "nope")]
+
+
+failures:
+    gateprobe::tests::verdict_seals_the_token
+    gateprobe::tests::verify_and_mark_refuses_and_stops_on_every_bad_input
+
+test result: FAILED. 69 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+error: test failed, to rerun pass `-p creance-vm --lib`

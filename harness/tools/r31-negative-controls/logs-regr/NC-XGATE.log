@@ -1,0 +1,36 @@
+safe code in an unscanned crate mints a token from a forged string; main.rs arms on gate failure
+
+$ cargo fmt --all
+
+$ cargo test --workspace --locked -q
+error[E0603]: function `mark_provisioned` is private
+   --> crates/creance-gate/src/lib.rs:11:21
+    |
+ 11 |     creance_vm::vm::mark_provisioned(
+    |                     ^^^^^^^^^^^^^^^^ private function
+    |
+note: the function `mark_provisioned` is defined here
+   --> crates/creance-vm/src/vm.rs:347:1
+    |
+347 | / pub(crate) fn mark_provisioned(
+348 | |     profile: &str,
+349 | |     instance: &str,
+350 | |     _proof: &crate::gateprobe::EgressVerified,
+351 | | ) -> bool {
+    | |_________^
+
+error[E0603]: function `egress_verdict` is private
+   --> crates/creance-gate/src/lib.rs:14:33
+    |
+ 14 | ...   &creance_vm::gateprobe::egress_verdict("tcp-blocked\nicmp-blocked...
+    |                               ^^^^^^^^^^^^^^ private function
+    |
+note: the function `egress_verdict` is defined here
+   --> crates/creance-vm/src/gateprobe.rs:114:1
+    |
+114 | fn egress_verdict(out: &str) -> Result<EgressVerified, &'static str> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For more information about this error, try `rustc --explain E0603`.
+error: could not compile `creance-gate` (lib) due to 2 previous errors
+error: could not compile `creance-gate` (lib test) due to 2 previous errors

@@ -1,0 +1,18 @@
+NC-WRAPparam: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-WRAPdead: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-WRAPalias: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-GPscript3: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-ZMINT: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-ZMINT2: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-VISfnptr: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-UPguard2: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-MAINxfile2: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-HDindent: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-HDexec: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-HDandexit: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-HDfalse: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-ENdisable2: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-WDwarm: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-WDsleep2: needle before=0 after=1 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+NC-UNITprintf2: needle before=0 after=2 test-RC=0 panicked/FAILED=0 compile-err=0 clippy-RC=0 => GREEN
+md5-restore: OK (9 files)

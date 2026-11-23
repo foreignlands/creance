@@ -1,0 +1,238 @@
+CONTROL: stray indented terminator two lines down (expect red)
+
+$ cargo fmt --all
+
+$ cargo test --workspace --locked -q
+
+running 15 tests
+...............
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+
+running 16 tests
+................
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.06s
+
+
+running 30 tests
+..............................
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+
+running 11 tests
+ii.........
+test result: ok. 9 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 45 tests
+.............................................
+test result: ok. 45 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+
+running 71 tests
+.......................................... 42/71
+provision::tests::armed_stamp_is_root_written_from_live_rules --- FAILED
+..................==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-599b1c -N -R 18765:127.0.0.1:18765' for reading: No such file or directory
+......==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-599b1c -N -R 18765:127.0.0.1:18765' for reading: No such file or directory
+==> /dev/null <==
+tail: cannot open 'HostKeyAlias=creance-test-inst-599b1c' for reading: No such file or directory
+....
+failures:
+
+---- provision::tests::armed_stamp_is_root_written_from_live_rules stdout ----
+
+thread 'provision::tests::armed_stamp_is_root_written_from_live_rules' (150554) panicked at crates/creance-vm/src/provision.rs:466:9:
+assertion `left == right` failed: #!/bin/sh
+set -e
+export CREANCE_SESSION_TOKEN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+hostnamectl set-hostname nitro-012a 2>/dev/null || true
+# F-045: the guest-visible fingerprint fields get a real supply path —
+# the confined agent can perceive the promise (Go injected CAGE_* at
+# guest start; without this, browser_language was a vacuous promise that
+# still forced re-setups). The names carry no product brand: guest
+# processes see these, and a constant brand prefix is a fleet marker.
+cat > /etc/profile.d/session-env.sh <<'SESSENV'
+export SESSION_TZ=Asia/Shanghai
+export SESSION_LOCALE=en_US.UTF-8
+export SESSION_LANGUAGE=en-US
+SESSENV
+export DEBIAN_FRONTEND=noninteractive
+locale-gen en_US.UTF-8 >/dev/null 2>&1 || true
+update-locale LANG=en_US.UTF-8 >/dev/null 2>&1 || true
+# 0.3a LOCKDOWN PERSISTENCE — the durable layer lands BEFORE the
+# network-dependent toolchain leg. iptables state lives in kernel RAM
+# (F-059), and a script killed mid-provision leaves nothing behind to
+# replay: runcmd is per-instance on cloud-init, so an interrupted first
+# boot used to mean the lockdown section below never ran AND never
+# re-ran — the guest stayed wide open behind a "done" status while
+# every later `up` refused it. With the ruleset, the no-IPv6 drop-in and
+# the boot-replay unit already on disk+enabled at this point, any later
+# boot restores DROP before the network is up: an interrupted provision
+# degrades to a contained guest, never an open one. The RUNTIME
+# application still comes last, after the toolchain leg — provisioning
+# needs the open NAT (F-054 bounds that window).
+sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null
+printf 'net.ipv6.conf.all.disable_ipv6=1\n' > /etc/sysctl.d/99-creance-noipv6.conf
+mkdir -p /etc/iptables
+# F-060/F-073: the DHCP and ICMP allowances exist for the virtual NAT
+# gateway (lease renewal, path-MTU signals), scoped to the /32 hosts
+# this backend itself owns plus DHCP broadcast — a subnet-wide allow
+# is a live exfil channel on any backend whose NAT does not own that
+# range. This file is the single source of truth: the boot unit restores it verbatim and the
+# runtime apply below replays the same file (no second copy to drift).
+cat > /etc/iptables/rules.v4 <<'EGRESSRULES'
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT DROP [0:0]
+-A OUTPUT -o lo -j ACCEPT
+-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT
+-A OUTPUT -p udp --dport 67 -d 10.0.2.2/32 -j ACCEPT
+-A OUTPUT -p icmp -d 10.0.2.2/32 -j ACCEPT
+-A OUTPUT -p udp --dport 67 -d 10.0.2.3/32 -j ACCEPT
+-A OUTPUT -p icmp -d 10.0.2.3/32 -j ACCEPT
+COMMIT
+EGRESSRULES
+# The boot replay: restore the ruleset before the network is up, so no
+  EGRESSRULES
+# boot window exists with an open egress. Neutral name — the unit list
+# is guest-visible.
+cat > /etc/systemd/system/egress-lock.service <<'LOCKUNIT'
+[Unit]
+Description=Network egress policy
+DefaultDependencies=no
+After=systemd-modules-load.service
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/iptables-restore /etc/iptables/rules.v4
+# F-082: the up-gate runs unprivileged and cannot read netfilter — the
+# unit stamps the LIVE OUTPUT section into a root-owned file under /run
+# (tmpfs; the guest user cannot write /run, so it cannot be forged).
+ExecStartPost=/bin/sh -c '/usr/sbin/iptables-save -t filter | /usr/bin/grep -E "^:OUTPUT|^-A OUTPUT" > /run/egress-armed'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+LOCKUNIT
+systemctl daemon-reload
+systemctl enable egress-lock.service >/dev/null
+# Toolchain installs are best-effort (F-031) AND time-bounded (F-054):
+# `|| true` guards against failure, but a network BLACKHOLE neither
+# fails nor succeeds — the provisioner's own timeout then killed the
+# script mid-flight and the containment contract below never ran,
+# shipping a VM with raw egress and passwordless sudo behind a green
+# `up`. Every network step carries its own deadline, and the whole
+# toolchain leg is wrapped in one hard budget so the contract section
+# is always reached.
+TOOLCHAIN_BUDGET=300
+APT_OPTS="-o Acquire::http::Timeout=20 -o Acquire::Retries=1"
+# The toolchain leg is best-effort, but never invisible: every step's
+# outcome lands in /var/log/creance-toolchain.log so a missing binary is
+# diagnosable after the lockdown makes the guest unreachable.
+TLLOG=/var/log/creance-toolchain.log
+: >"$TLLOG" 2>/dev/null || true
+timeout "$TOOLCHAIN_BUDGET" sh -c '
+  echo "toolchain start $(date -u +%FT%TZ)" >> /var/log/creance-toolchain.log
+  ARCH=$(case "$(uname -m)" in aarch64) echo arm64;; *) echo x64;; esac)
+  echo "arch=$ARCH" >> /var/log/creance-toolchain.log
+  # node comes FIRST and with zero extra dependencies — curl and tar -z
+  # ship in the base cloud image — so a fast nodejs.org wins even when the
+  # apt mirror crawls (a crawling mirror used to eat the whole budget
+  # before the pinned download ever ran). nodejs.org/dist ships whole
+  # tarballs; bin/node is lifted out of the official one.
+  # F-034: land on a temp name and mv into place — a partial corpse in
+  # /usr/local/bin would shadow the apt fallback node.
+  # curl ships in the base cloud image and its TLS stack survives
+  # networks that fingerprint-filter python (live lesson: urllib died
+  # with UNEXPECTED_EOF where curl sailed through).
+  curl -fsSL -m 240 -o /tmp/creance-node.tar.gz https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-$ARCH.tar.gz >> /var/log/creance-toolchain.log 2>&1
+  echo "node download rc=$?" >> /var/log/creance-toolchain.log
+  # Supply chain: the pinned tarball must match the recorded sha256
+  # (nodejs.org/dist/v22.14.0/SHASUMS256.txt). A substituted tarball is
+  # refused, not unpacked — the apt fallback below stays the way out.
+  case "$ARCH" in
+    x64)   CREANCE_NODE_SHA256=9d942932535988091034dc94cc5f42b6dc8784d6366df3a36c4c9ccb3996f0c2 ;;
+    arm64) CREANCE_NODE_SHA256=8cf30ff7250f9463b53c18f89c6c606dfda70378215b2c905d0a9a8b08bd45e0 ;;
+    *)     CREANCE_NODE_SHA256= ;;
+  esac
+  if [ -n "$CREANCE_NODE_SHA256" ]; then
+    echo "$CREANCE_NODE_SHA256  /tmp/creance-node.tar.gz" | sha256sum -c - >> /var/log/creance-toolchain.log 2>&1 || rm -f /tmp/creance-node.tar.gz
+  fi
+  [ -f /tmp/creance-node.tar.gz ] && tar -xzf /tmp/creance-node.tar.gz -C /tmp >> /var/log/creance-toolchain.log 2>&1 \
+    && mv /tmp/node-v22.14.0-linux-$ARCH/bin/node /usr/local/bin/node.new 2>> /var/log/creance-toolchain.log \
+    && mv /usr/local/bin/node.new /usr/local/bin/node 2>> /var/log/creance-toolchain.log \
+    || rm -f /usr/local/bin/node.new /tmp/creance-node.tar.gz
+  echo "node install rc=$? path=$(command -v /usr/local/bin/node 2>/dev/null || echo none)" >> /var/log/creance-toolchain.log
+  chmod +x /usr/local/bin/node 2>/dev/null || true
+  # The pinned download dies fast on MITM-intercepting networks; the
+  # apt fallback must therefore run EARLY — the base extras (git, xz —
+  # curl and ca-certificates already ship in the image) sink to the end
+  # so they can never eat the budget the node fallback needs.
+  apt-get update -qq >> /var/log/creance-toolchain.log 2>&1 || true
+  echo "apt update rc=$?" >> /var/log/creance-toolchain.log
+  [ -x /usr/local/bin/node ] || apt-get install '"$APT_OPTS"' -y -qq nodejs npm >> /var/log/creance-toolchain.log 2>&1 || true
+  echo "node fallback rc=$? node=$(command -v node || echo missing)" >> /var/log/creance-toolchain.log
+  curl -fsSL -m 120 https://claude.ai/install.sh | bash >> /var/log/creance-toolchain.log 2>&1 || true
+  apt-get install '"$APT_OPTS"' -y -qq git xz-utils >> /var/log/creance-toolchain.log 2>&1 || true
+  echo "toolchain end node=$(/usr/local/bin/node -v 2>/dev/null || command -v node || echo missing) claude=$(command -v claude || echo missing)" >> /var/log/creance-toolchain.log
+' || true
+
+# 0.3b TOPOLOGY LOCKDOWN — runtime apply, LAST and unskippable: the
+# guest's only wire out is the ssh -R tunnel to the host-side core on
+# this machine's own loopback (managed from the host after boot).
+# Everything else, including DNS and IPv6, is dropped. The ruleset comes
+# from the file written above — the same bytes the boot unit replays —
+# so the applied set and the persisted set cannot drift. Lima replays
+# this script on every start and cloud-init runs it once; restore is
+# idempotent either way. (`up` additionally verifies behaviorally; see
+# main.rs.) The unit is started rather than replaying the ruleset by
+# hand so the armed stamp (F-082) is written by the same
+# code path that will run at every later boot — one apply, one stamp.
+# `restart`, not `start`: a RemainAfterExit oneshot already active is a
+# no-op under start, but Lima replays this script and must re-apply
+# + re-stamp.
+systemctl restart egress-lock.service
+
+# 020 PRIVILEGE RETIREMENT — cloud-init unconditionally grants the guest
+# user sudo (NOPASSWD, or a random password parked in ~/password when
+# passwordlessSudo is false). The enforcement plane is only as strong as
+# the weakest privilege path, so the grant dies here: without it the
+# firewall above cannot be lifted from inside the guest.
+SUDOERS=/etc/sudoers.d/90-cloud-init-users
+[ -f "$SUDOERS" ] && sed -i '\#^dev0123abcd #d' "$SUDOERS" || true
+passwd -l dev0123abcd 2>/dev/null || true
+GUEST_HOME=$(getent passwd dev0123abcd | cut -d: -f6)
+[ -n "$GUEST_HOME" ] && rm -f "$GUEST_HOME/password" || true
+
+  left: 3
+ right: 2
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    provision::tests::armed_stamp_is_root_written_from_live_rules
+
+test result: FAILED. 70 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+error: test failed, to rerun pass `-p creance-vm --lib`

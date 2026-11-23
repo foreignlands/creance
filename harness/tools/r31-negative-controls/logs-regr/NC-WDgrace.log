@@ -1,0 +1,45 @@
+first dead tick of a streak not counted: threshold 4 (2.0s), all pinned lines verbatim
+
+$ cargo fmt --all
+
+$ cargo test --workspace --locked -q
+
+running 15 tests
+...............
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+
+running 16 tests
+...... 6/16
+gate::tests::watchdog_fuse_source_pins --- FAILED
+.........
+failures:
+
+---- gate::tests::watchdog_fuse_source_pins stdout ----
+
+thread 'gate::tests::watchdog_fuse_source_pins' (99586) panicked at crates/creance-gate/src/gate.rs:2020:9:
+a grace counter softens the fuse
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    gate::tests::watchdog_fuse_source_pins
+
+test result: FAILED. 15 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.51s
+
+error: test failed, to rerun pass `-p creance-gate --lib`

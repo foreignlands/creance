@@ -1,0 +1,5 @@
+HDindent: /tmp/r31-sem.213959: line 7: warning: here-document at line 2 delimited by end-of-file (wanted `SKIPRULES') (rc=0)
+HDexec: NOT-REACHED (rc=0)
+HDandexit: NOT-REACHED (rc=0)
+HDfalse: NOT-REACHED (rc=1)
+control: REACHED (rc=0)
