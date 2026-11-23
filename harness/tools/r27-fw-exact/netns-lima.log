@@ -1,0 +1,305 @@
+backend=lima probe md5=68700be4 rules md5=a5d27fe6
+stamp cmd: /usr/sbin/iptables-save -t filter | /usr/bin/grep -E "^:OUTPUT|^-A OUTPUT" > /tmp/r27-fw.65hcH3/stamp
+== P00-product-shape
+   A restore-rc=0
+   A fw: fw-armed
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+== P01-product-file  (rules.v4 md5=a5d27fe6 bytes=426)
+   A restore-rc=0
+   A fw: fw-armed
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-armed
+   B stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   B egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+== R01-rules-only-comment-forged
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;-A OUTPUT -m comment --comment "-d 192.168.5.2/32 -p icmp" -j ACCEPT;
+   B egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== R02-rules-only-qualified
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;-A OUTPUT -o e+ -j ACCEPT;
+   B egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+== S01-rules-insert
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT DROP [0:0];-A OUTPUT -j ACCEPT;-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   B egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== S02-rules-insert-pos
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT DROP [0:0];-A OUTPUT -j ACCEPT;-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   B egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== S03-rules-long-append
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;-A OUTPUT -j ACCEPT;
+   B egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== S04-rules-double-space
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;-A OUTPUT -j ACCEPT;
+   B egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== S05-rules-leading-space
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;-A OUTPUT -j ACCEPT;
+   B egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== S06-rules-tab
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;-A OUTPUT -j ACCEPT;
+   B egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== S07-rules-replace
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-err: Segmentation fault (core dumped)
+   B restore-rc=139
+   B stamp: (unit failed -> ExecStartPost skipped, no stamp)
+   B fw: fw-down
+   B stamp: 
+   B egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== S08-rules-second-filter-table
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT ACCEPT [0:0];
+   B egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== S09-rules-policy-redeclared
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT ACCEPT [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   B egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== S10-rules-flush
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT DROP [0:0];
+   B egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+== S11-rules-nat-table
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   B egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+== N01-live-bare-accept
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;-A OUTPUT -j ACCEPT;
+   A egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== N03-live-state-new
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;-A OUTPUT -m conntrack --ctstate NEW -j ACCEPT;
+   A egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== B01-live-comment-forge
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;-A OUTPUT -m comment --comment "-d 192.168.5.2/32 -p icmp" -j ACCEPT;
+   A egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== C04-live-dup-canonical
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;-A OUTPUT -o lo -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+== K03-rules-save-form
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;
+   B egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+== K04-rules-comment-line
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   B egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+== K05-rules-blank-lines  (rules.v4 md5=b8d9e6f8 bytes=427)
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   B egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+== K06-rules-crlf  (rules.v4 md5=e0e54544 bytes=438)
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-err: iptables-restore v1.8.7 (nf_tables): iptables-restore: line 1 table name 'filter' invalid
+   B restore-err: 
+   B restore-rc=2
+   B stamp: (unit failed -> ExecStartPost skipped, no stamp)
+   B fw: fw-down
+   B stamp: 
+   B egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== O01-commit-before-output-decl  (rules.v4 md5=45e4e2bc bytes=426)
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-err: iptables-restore: line 5 failed
+   B restore-rc=1
+   B stamp: (unit failed -> ExecStartPost skipped, no stamp)
+   B fw: fw-down
+   B stamp: 
+   B egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== O02-commit-right-after-filter  (rules.v4 md5=d53b5369 bytes=426)
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-err: iptables-restore: line 3 failed
+   B restore-rc=1
+   B stamp: (unit failed -> ExecStartPost skipped, no stamp)
+   B fw: fw-down
+   B stamp: 
+   B egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== O03-filter-header-last  (rules.v4 md5=b61ff06d bytes=426)
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-err: iptables-restore: line 1 failed
+   B restore-rc=1
+   B stamp: (unit failed -> ExecStartPost skipped, no stamp)
+   B fw: fw-down
+   B stamp: 
+   B egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== O04-canonical-rules-after-commit  (rules.v4 md5=cb7ffdca bytes=426)
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-err: iptables-restore: line 6 failed
+   B restore-rc=1
+   B stamp: (unit failed -> ExecStartPost skipped, no stamp)
+   B fw: fw-down
+   B stamp: 
+   B egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+== Z01-nul-comment-plus-insert  (rules.v4 md5=3ec26df5 bytes=449)
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT DROP [0:0];-A OUTPUT -j ACCEPT;-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   B egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== Z02-nul-comment-plus-bare-accept  (rules.v4 md5=c2d97ec6 bytes=476)
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;-A OUTPUT -j ACCEPT;-A OUTPUT -p tcp -j ACCEPT;
+   B egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== Z03-invalid-utf8-comment-plus-insert  (rules.v4 md5=b4e94eb3 bytes=450)
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT DROP [0:0];-A OUTPUT -j ACCEPT;-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   B egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS
+== X01-trailing-blank-line  (rules.v4 md5=b8bfff51 bytes=427)
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   B egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+== X02-no-final-newline  (rules.v4 md5=a9acd2dc bytes=425)
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-rc=0
+   B fw: fw-down
+   B stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   B egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+== X03-trailing-nul  (rules.v4 md5=caad929e bytes=427)
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-err: iptables-restore: line 13 failed
+   B restore-rc=1
+   B stamp: (unit failed -> ExecStartPost skipped, no stamp)
+   B fw: fw-down
+   B stamp: 
+   B egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+== X04-utf8-bom  (rules.v4 md5=517aa79a bytes=429)
+   A restore-rc=0
+   A fw: fw-down
+   A stamp: :OUTPUT DROP [0:0];-A OUTPUT -o lo -j ACCEPT;-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT;-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.2/32 -p icmp -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p udp -m udp --dport 67 -j ACCEPT;-A OUTPUT -d 192.168.5.3/32 -p icmp -j ACCEPT;
+   A egress: udp/8.8.8.8:53=DROP udp/8.8.8.8:5353=DROP tcp/1.1.1.1:443=DROP tcp/192.168.5.2:22=DROP icmp/1.1.1.1=DROP
+   B restore-err: iptables-restore: line 1 failed
+   B restore-rc=1
+   B stamp: (unit failed -> ExecStartPost skipped, no stamp)
+   B fw: fw-down
+   B stamp: 
+   B egress: udp/8.8.8.8:53=PASS udp/8.8.8.8:5353=PASS tcp/1.1.1.1:443=PASS tcp/192.168.5.2:22=PASS icmp/1.1.1.1=PASS

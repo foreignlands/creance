@@ -1,0 +1,2 @@
+cloud-init 供给失败（status: error）；请查看实例目录 serial.log
+up1 RC=1 (78s)

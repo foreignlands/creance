@@ -1,0 +1,15 @@
+[package]
+name = "r27-render"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# R27: dumps the REAL v0.6.18 renderers — guest_bootstrap (full script), the
+# rules.v4 renderer (provision::rules_v4_text) and the up-gate probe
+# (escape::egress_probe_script) — for the QEMU or Lima NAT table.
+
+[dependencies]
+creance = { path = "../../../crates/creance" }
+creance-vm = { path = "../../../crates/creance-vm" }
+
+[workspace]

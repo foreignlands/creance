@@ -1,0 +1,11 @@
+binary: creance 0.6.18 md5=e2699a02
+init RC=0 (0s)
+setup RC=0 (25s)
+up1 RC=1 (78s)
+stop1 RC=0 (0s)
+up2 RC=1 (77s)
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'prof/state/qemu/prof-downloads-9a2be518/qemu.pid'
+escape2 RC=0 (0s)
+marker: cat: prof/state/qemu/prof-downloads-9a2be518/provisioned: No such file or directory

@@ -1,0 +1,10 @@
+NC-MP3: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+NC-MP2: grep-c before=0 after=1 crates=creance-vm test-RC=101 failed=3 compile-err=1
+NC-MPhome: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+NC-MPcfg: grep-c before=0 after=1 crates=creance-vm test-RC=0 failed=0 compile-err=0
+crates/creance/src/escape.rs: OK
+crates/creance/src/main.rs: OK
+crates/creance-vm/src/provision.rs: OK
+crates/creance-vm/src/qemu/mod.rs: OK
+crates/creance-vm/src/vm.rs: OK
+crates/creance-vm/src/lima.rs: OK

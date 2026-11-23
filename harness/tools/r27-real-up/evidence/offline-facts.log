@@ -1,0 +1,13 @@
+--- cloud-init-output.log (EGRESSRULES / errors):
+84:sh: 53: EGRESSRULES: not found
+85:2026-11-22 16:02:40,170 - cc_scripts_user.py[WARNING]: Failed to run module scripts_user (scripts in /var/lib/cloud/instance/scripts)
+86:2026-11-22 16:02:40,170 - log_util.py[WARNING]: Running module scripts_user (<module 'cloudinit.config.cc_scripts_user' from '/usr/lib/python3/dist-packages/cloudinit/config/cc_scripts_user.py'>) failed
+87:Cloud-init v. 26.1-0ubuntu1~24.04.1 finished at Sun, 22 Nov 2026 16:02:40 +0000. Datasource DataSourceNoCloud [seed=/dev/vdb].  Up 13.29 seconds
+118:Cloud-init v. 26.1-0ubuntu1~24.04.1 finished at Sun, 22 Nov 2026 16:03:53 +0000. Datasource DataSourceNoCloud [seed=/dev/vdb].  Up 8.93 seconds
+--- rules.v4: e13fe10a370d6d0dd93dc411a9032d3f  /mnt/r27-off/etc/iptables/rules.v4
+--- egress-lock.service: ls: cannot access '/mnt/r27-off/etc/systemd/system/egress-lock.service': No such file or directory
+--- enabled link: ModemManager.service apport.service console-setup.service cron.service dmesg.service e2scrub_reap.service grub-common.service grub-initrd-fallback.service lxd-installer.socket networkd-dispatcher.service open-vm-tools.service pollinate.service remote-fs.target rsyslog.service secureboot-db.service snapd.apparmor.service snapd.autoimport.service snapd.core-fixup.service snapd.recovery-chooser-trigger.service snapd.seeded.service snapd.service sysstat.service systemd-networkd.service ua-reboot-cmds.service ubuntu-advantage.service ufw.service unattended-upgrades.service 
+--- noipv6 drop-in: net.ipv6.conf.all.disable_ipv6=1
+--- toolchain log: head: cannot open '/mnt/r27-off/var/log/creance-toolchain.log' for reading: No such file or directory 
+--- sudoers 90-cloud-init-users: cat: /mnt/r27-off/etc/sudoers.d/90-cloud-init-users: No such file or directory 
+--- cloud-init result: { "v1": {  "datasource": "DataSourceNoCloud [seed=/dev/vdb]",  "errors": [] }}

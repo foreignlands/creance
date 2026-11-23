@@ -1,0 +1,10 @@
+✅ config-valid  [profile]
+✅ env-no-host-credentials  [host-env]
+✅ mounts-workspace-only  [filesystem]
+✅ gate-record-private  [gate]
+✅ credentials-are-session-only  [credentials]
+✅ fingerprint-consistent  [profile]
+
+contained (0 probe(s) awaiting their enforcement layer)
+cannot run in-guest probes: instance prof-downloads-9a2be518 is not running
+escape2 RC=0 (0s)
