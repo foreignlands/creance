@@ -102,7 +102,12 @@ pub fn build_args(inst: &Instance, dir: &str, state: &str) -> Result<Vec<String>
         return Err("QEMU 后端当前仅支持 x86_64 Linux 主机".to_owned());
     }
     let machine = "q35,accel=kvm";
-    let cpu = "host";
+    // Anti-fingerprint (qemu/hwid.rs): the CPUID hypervisor bit and KVM
+    // signature leaf are hidden, and DMI/NIC get a seeded OEM identity.
+    // virtio-blk/rng/9p stay — functional pieces the guest cannot boot
+    // without; their visibility is the documented edge of the layer.
+    let cpu = super::hwid::cpu_model();
+    let hw = super::hwid::signature(&inst.instance_id);
     let base = super::image::base_image_path(state, &inst.arch);
     let disk = super::image::overlay_path(dir);
     let seed = paths::join(dir, "seed.img");
@@ -151,7 +156,11 @@ pub fn build_args(inst: &Instance, dir: &str, state: &str) -> Result<Vec<String>
             inst.ssh_local_port
         ),
         "-device".into(),
-        "virtio-net-pci,netdev=net0".into(),
+        // virtio-net stays (model swap would strand the guest's rendered
+        // netplan — verified live). inst.hw_mac is pinned at setup: legacy
+        // records keep QEMU's default because their netplan was rendered
+        // for it; new instances carry the seeded real-vendor OUI.
+        format!("virtio-net-pci,netdev=net0,mac={}", inst.hw_mac),
         "-device".into(),
         "virtio-rng-pci".into(),
         // The single writable share: this workspace, 9p over virtio.
@@ -173,6 +182,14 @@ pub fn build_args(inst: &Instance, dir: &str, state: &str) -> Result<Vec<String>
         format!("unix:{qmp},server,nowait"),
         "-name".into(),
         format!("creance-{}", inst.name),
+        "-smbios".into(),
+        hw.smbios_type0,
+        "-smbios".into(),
+        hw.smbios_type1,
+        "-smbios".into(),
+        hw.smbios_type2,
+        "-smbios".into(),
+        hw.smbios_type3,
     ];
     Ok(args)
 }
@@ -336,6 +353,7 @@ mod tests {
             version: 1,
             name: "ws-0123abcd".to_owned(),
             instance_id: "creance-ws-0123abcd-0123456789ab".to_owned(),
+            hw_mac: "00:14:22:11:22:33".to_owned(),
             ssh_local_port: 40022,
             memory_gib: 8,
             cpus: 4,

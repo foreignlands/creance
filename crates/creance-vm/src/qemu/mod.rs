@@ -9,6 +9,7 @@
 //! share. All instance facts live in `instance.json`; the host-side ssh
 //! keypair is ours, generated per instance at setup.
 
+pub mod hwid;
 pub mod image;
 pub mod provision;
 pub mod runner;
@@ -38,6 +39,13 @@ pub struct Instance {
     pub name: String,
     /// cloud-init instance-id; rotates per setup.
     pub instance_id: String,
+    /// The NIC's MAC. cloud-init renders the guest's netplan with a
+    /// macaddress match at first boot, so this must equal whatever the
+    /// first boot saw — changing it for an already-provisioned disk
+    /// strands the guest (verified live). Legacy records (pre-scrub)
+    /// deserialize to QEMU's default and keep it.
+    #[serde(default = "hw_mac_legacy")]
+    pub hw_mac: String,
     /// Host-side port forwarded to the guest's sshd.
     pub ssh_local_port: u16,
     pub memory_gib: u32,
@@ -52,10 +60,12 @@ pub struct Instance {
 
 impl Instance {
     fn new(name: &str, options: &SetupOptions, port: u16) -> Self {
+        let instance_id = format!("creance-{}-{}", name, crate::token()[..12].to_owned());
         Instance {
             version: 1,
             name: name.to_owned(),
-            instance_id: format!("creance-{}-{}", name, crate::token()[..12].to_owned()),
+            hw_mac: hwid::signature(&instance_id).mac,
+            instance_id,
             ssh_local_port: port,
             memory_gib: options.memory_gib,
             cpus: options.cpus,
@@ -65,6 +75,13 @@ impl Instance {
             created: crate::iso8601_now(),
         }
     }
+}
+
+/// QEMU's default first-NIC MAC — what every pre-scrub instance was
+/// provisioned with (netplan's macaddress match pins it). Keep it for
+/// records that predate hw_mac.
+fn hw_mac_legacy() -> String {
+    "52:54:00:12:34:56".to_owned()
 }
 
 /// The directory of one instance under the profile's qemu root.
