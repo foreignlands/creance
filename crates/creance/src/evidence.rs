@@ -26,8 +26,9 @@ use creance_vm::exit_policy::Location;
 use std::time::Duration;
 use std::time::Instant;
 
-/// The exit-observation endpoint: reports the connecting IP and country.
-pub const TRACE_URL: &str = "https://1.1.1.1/cdn-cgi/trace";
+/// The exit-observation endpoint (shared with the gate watchdog's
+/// periodic sampling — both fetch through `creance_net::trace`).
+pub use creance_net::trace::TRACE_URL;
 /// The observation budget: a check window (180s) must survive it easily.
 const TRACE_BUDGET: Duration = Duration::from_secs(25);
 
@@ -35,50 +36,27 @@ const TRACE_BUDGET: Duration = Duration::from_secs(25);
 /// no evidence at all — the caller must not grant on that.
 pub fn observe(cfg: &Config) -> Result<Location, String> {
     let egress = creance_net::egress::Egress::new(&cfg.proxy_url, &cfg.dns_url)?;
-    let response = creance_net::egress::request(
-        &egress,
-        "GET",
-        TRACE_URL,
-        None,
-        &[],
-        Instant::now() + TRACE_BUDGET,
-    )?;
-    if response.status != 200 {
-        return Err(format!("出口观测返回 HTTP {}", response.status));
-    }
-    parse_trace(&String::from_utf8_lossy(&response.body))
+    let sample = creance_net::trace::sample(&egress, Instant::now() + TRACE_BUDGET)?;
+    Ok(sample_to_location(sample))
 }
 
 /// Parses a `key=value` line format trace into a Location. Strict: an
 /// IPv4 `ip` and a two-letter `loc` are required; unknown lines are
 /// ignored, missing keys are errors (no evidence beats half evidence).
 pub fn parse_trace(body: &str) -> Result<Location, String> {
-    let mut ip = String::new();
-    let mut loc = String::new();
-    for line in body.lines() {
-        if let Some((key, value)) = line.split_once('=') {
-            match key {
-                "ip" => ip = value.trim().to_owned(),
-                "loc" => loc = value.trim().to_ascii_uppercase(),
-                _ => {}
-            }
-        }
-    }
-    if ip.parse::<std::net::Ipv4Addr>().is_err() {
-        return Err(format!("出口观测缺少有效 IPv4（ip={ip:?}）"));
-    }
-    if loc.len() != 2 || !loc.bytes().all(|c| c.is_ascii_uppercase()) {
-        return Err(format!("出口观测缺少国家或地区代码（loc={loc:?}）"));
-    }
-    Ok(Location {
-        ip,
-        country_code: loc,
+    creance_net::trace::parse(body).map(sample_to_location)
+}
+
+fn sample_to_location(sample: creance_net::trace::ExitSample) -> Location {
+    Location {
+        ip: sample.ip,
+        country_code: sample.country,
         region: String::new(),
         city: String::new(),
         country: String::new(),
         region_code: String::new(),
         timezone: String::new(),
-    })
+    }
 }
 
 /// The checks a grant carries: the four structural self-checks (they

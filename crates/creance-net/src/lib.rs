@@ -10,6 +10,7 @@ pub mod egress;
 /// out-of-crate tests can share the exact wire semantics; not public API.
 #[doc(hidden)]
 pub mod testsupport;
+pub mod trace;
 pub mod wire;
 
 pub use egress::{validate_dns_url, validate_proxy_url, Egress};

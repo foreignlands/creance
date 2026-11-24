@@ -899,14 +899,14 @@ fn watchdog_fuse_source_pins() {
     let fuse_start = prod.find("let mut core_down_ticks").unwrap();
     let fuse_end = prod.rfind("core_down_ticks = 0;").unwrap();
     let fuse = &prod[fuse_start..fuse_end];
-    assert_eq!(fuse.matches("let mut").count(), 2, "{fuse}");
+    assert_eq!(fuse.matches("let mut").count(), 3, "{fuse}");
     assert!(
         !fuse.contains("bool"),
         "fuse softener in watchdog region: bool"
     );
-    assert_eq!(prod.matches("let mut").count(), 18, "{prod}");
-    assert_eq!(prod.matches("= true;").count(), 2, "{prod}");
-    assert_eq!(prod.matches("= false;").count(), 2, "{prod}");
+    assert_eq!(prod.matches("let mut").count(), 21, "{prod}");
+    assert_eq!(prod.matches("= true;").count(), 3, "{prod}");
+    assert_eq!(prod.matches("= false;").count(), 3, "{prod}");
     for needle in ["mem::take", "u32::from"] {
         assert!(!prod.contains(needle), "fuse softener in prod: {needle}");
     }
@@ -932,6 +932,40 @@ fn watchdog_fuse_source_pins() {
         "the open-path ensure leg must exist"
     );
     assert!(prod.contains("代理核心不可达，自动熔断"));
+    // Exit-evidence sampling (0.6.6 second half): the sampler must stay
+    // out of the fuse path — a detached thread writes the result slot,
+    // the tick only reads it, and conviction rides `evidence_verdict`
+    // (country drift) alone.
+    assert!(
+        prod.contains("evidence_ticks += 1"),
+        "evidence tick counter"
+    );
+    assert!(
+        prod.contains("evidence_ticks >= 60"),
+        "30s sampling interval"
+    );
+    assert!(
+        prod.contains("ev.in_flight = true"),
+        "sampler de-dup flag set"
+    );
+    assert!(
+        prod.contains("creance_net::trace::sample("),
+        "samples through the shared trace path"
+    );
+    assert!(prod.contains("exit_ip_drift"), "IP-only drift is counted");
+    assert!(
+        prod.contains("exit_sample_failed"),
+        "failed samples are counted, not convicted"
+    );
+    assert!(
+        prod.contains("has_baseline"),
+        "baseline gate before sampling"
+    );
+    // The verdict lives in mod.rs: country comparison against the
+    // grant-time `exit_country` check — an IP-only rule would fuse on
+    // legitimate relay rotation, a missing baseline must not guess.
+    assert!(prod.contains("fn evidence_verdict("));
+    assert!(prod.contains("checks.get(\"exit_country\")"));
 }
 
 fn call_raw(record: &GateRecord, body: &str) -> Result<(String, serde_json::Value), String> {
@@ -1029,4 +1063,43 @@ fn plugin_call_rejects_bad_registry() {
     )
     .unwrap();
     assert!(super::plugin::call(&profile, false, "bad", &[]).is_err());
+}
+
+#[test]
+fn evidence_verdict_convicts_country_drift_only() {
+    let report = |country: &str, ip: &str| SafetyReport {
+        report_id: "r".to_owned(),
+        run_id: "g".to_owned(),
+        created_at: 1,
+        checks: [
+            ("exit_country".to_owned(), country.to_owned()),
+            ("exit_ip".to_owned(), ip.to_owned()),
+        ]
+        .into_iter()
+        .collect(),
+    };
+    let sample = |country: &str, ip: &str| creance_net::trace::ExitSample {
+        ip: ip.to_owned(),
+        country: country.to_owned(),
+    };
+    // Country change convicts.
+    let v = super::evidence_verdict(Some(&report("US", "1.2.3.4")), &sample("DE", "5.6.7.8"));
+    assert!(v.unwrap().contains("US → DE"));
+    // Same country, same IP: clean.
+    assert!(
+        super::evidence_verdict(Some(&report("US", "1.2.3.4")), &sample("US", "1.2.3.4")).is_none()
+    );
+    // Same country, different IP: no conviction (relay pools rotate).
+    assert!(
+        super::evidence_verdict(Some(&report("US", "1.2.3.4")), &sample("US", "9.9.9.9")).is_none()
+    );
+    // No baseline → no verdict (old reports skip sampling).
+    let bare = SafetyReport {
+        report_id: "r".to_owned(),
+        run_id: "g".to_owned(),
+        created_at: 1,
+        checks: Default::default(),
+    };
+    assert!(super::evidence_verdict(Some(&bare), &sample("CN", "1.1.1.1")).is_none());
+    assert!(super::evidence_verdict(None, &sample("CN", "1.1.1.1")).is_none());
 }

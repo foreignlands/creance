@@ -75,6 +75,7 @@ impl Gate {
             listener: Mutex::new(Some(listener)),
             tcp_listener: Mutex::new(Some(tcp)),
             tcp_port,
+            evidence: Mutex::new(EvidenceState::default()),
         });
 
         // The lease watchdog: a gate left open (or checking) without renewal
@@ -88,6 +89,9 @@ impl Gate {
             // wire 切断——端到端 ≤2s。零泄漏由 guest 侧 iptables 兜底
             // （guest 本就只有 NAT 主机白名单 + 隧道一条路）。
             let mut core_down_ticks = 0u32;
+            // ~30s at the 500ms tick: interval between exit-evidence
+            // samples while the gate is Open.
+            let mut evidence_ticks = 0u32;
             loop {
                 std::thread::sleep(Duration::from_millis(500));
                 let Some(watchdog) = watchdog.upgrade() else {
@@ -155,6 +159,73 @@ impl Gate {
                             lock_or_recover(&watchdog.inner).close("代理核心不可达，自动熔断");
                             core_down_ticks = 0;
                         }
+                    }
+                }
+                // 出口证据采样（0.6.6 后半）：Open 态下周期性经托管核心
+                // 抓 trace——国别与授权时观测漂移（节点被换/订阅重路由）
+                // → 熔断关闸。采样在独立线程，10s 预算，不阻塞熔断与租期
+                // 判定；失败只计数，上游抖动不定罪。授权时无国别基线
+                // （旧报告/无观测）则跳过。
+                if open {
+                    evidence_ticks += 1;
+                    let mut ev = lock_or_recover(&watchdog.evidence);
+                    if let Some(result) = ev.result.take() {
+                        ev.in_flight = false;
+                        let mut inner = lock_or_recover(&watchdog.inner);
+                        match result {
+                            Ok(sample) => {
+                                if let Some(reason) =
+                                    evidence_verdict(inner.report.as_ref(), &sample)
+                                {
+                                    inner.close(&reason);
+                                } else {
+                                    let base_ip = inner
+                                        .report
+                                        .as_ref()
+                                        .and_then(|r| r.checks.get("exit_ip"))
+                                        .cloned()
+                                        .unwrap_or_default();
+                                    if !base_ip.is_empty() && sample.ip != base_ip {
+                                        *inner
+                                            .counts
+                                            .entry("exit_ip_drift".to_owned())
+                                            .or_default() += 1;
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                *inner
+                                    .counts
+                                    .entry("exit_sample_failed".to_owned())
+                                    .or_default() += 1;
+                            }
+                        }
+                    }
+                    let has_baseline = lock_or_recover(&watchdog.inner)
+                        .report
+                        .as_ref()
+                        .and_then(|r| r.checks.get("exit_country"))
+                        .map(|c| !c.is_empty())
+                        .unwrap_or(false);
+                    if evidence_ticks >= 60 && !ev.in_flight && has_baseline {
+                        evidence_ticks = 0;
+                        ev.in_flight = true;
+                        drop(ev);
+                        let weak = Arc::downgrade(&watchdog);
+                        std::thread::spawn(move || {
+                            if let Some(g) = weak.upgrade() {
+                                let result = config::load(&g.config_path).and_then(|cfg| {
+                                    creance_net::egress::Egress::new(&cfg.proxy_url, &cfg.dns_url)
+                                        .and_then(|e| {
+                                            creance_net::trace::sample(
+                                                &e,
+                                                Instant::now() + Duration::from_secs(10),
+                                            )
+                                        })
+                                });
+                                lock_or_recover(&g.evidence).result = Some(result);
+                            }
+                        });
                     }
                 }
             }

@@ -222,6 +222,34 @@ pub struct Gate {
     /// Its bound port — the watchdog forwards this into the guest while
     /// the gate is up and reaps the forward when it closes.
     tcp_port: u16,
+    /// Periodic exit-evidence sampling (0.6.6): the watchdog launches a
+    /// trace fetch through the managed core every ~30s while Open and
+    /// drops the result here; a country that diverges from the
+    /// grant-time observation convicts (node flip / subscription
+    /// reroute), a failed sample only counts — upstream may flap.
+    evidence: Mutex<EvidenceState>,
+}
+
+#[derive(Default)]
+struct EvidenceState {
+    in_flight: bool,
+    result: Option<Result<creance_net::trace::ExitSample, String>>,
+}
+
+/// Conviction rule for a sampled exit against the grant-time baseline:
+/// only a country change proves divergence. An IP-only drift is counted
+/// (relay pools can rotate same-country exits legitimately) and a
+/// missing baseline skips the verdict entirely.
+fn evidence_verdict(
+    report: Option<&SafetyReport>,
+    sample: &creance_net::trace::ExitSample,
+) -> Option<String> {
+    let baseline = report.and_then(|r| r.checks.get("exit_country"))?;
+    if !baseline.is_empty() && sample.country != *baseline {
+        Some(format!("出口证据漂移：{baseline} → {}", sample.country))
+    } else {
+        None
+    }
 }
 
 /// The owner of one running gate: keeps the server alive while held, stops
