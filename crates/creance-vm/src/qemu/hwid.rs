@@ -137,7 +137,16 @@ pub fn signature(instance_id: &str) -> Signature {
         u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7], u[8], u[9], u[10], u[11], u[12], u[13],
         u[14], u[15]
     );
-    let mac = format!("{}:{:02X}:{:02X}:{:02X}", oem.mac_oui, u[13], u[14], u[15]);
+    // The MAC tail uses different hash bits than the uuid tail — a MAC
+    // that literally shares bytes with the product UUID advertises the
+    // derivation scheme.
+    let mac = format!(
+        "{}:{:02X}:{:02X}:{:02X}",
+        oem.mac_oui,
+        (h >> 24) & 0xff,
+        (h >> 32) & 0xff,
+        (h >> 40) & 0xff
+    );
     Signature {
         smbios_type0: format!(
             "type=0,vendor={},version={},date=06/15/2024,release=2.7",

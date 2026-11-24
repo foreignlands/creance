@@ -15,12 +15,25 @@ pub fn spawn_daemon(
     // socket (F-019: after SIGKILL or a reboot the record outlives the
     // process, and dedup-on-existence silently disabled every later `up`
     // while an orphan tunnel kept the wire open).
+    // Read the stale record's bridge port BEFORE retirement drops it —
+    // the dead watchdog's gatebridge ssh -R outlives it too, and only
+    // the record still knows the port to sweep (self-review: proxy_port
+    // alone used to be reaped here).
+    let stale_bridge = std::fs::read(creance_vm::paths::join(instance_dir, "cage-gate.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<GateRecord>(&b).ok())
+        .map(|r| r.tcp_port)
+        .unwrap_or(0);
     if retire_stale_record(instance_dir) {
         // Stale: retire the leftovers — pid file and any orphan ssh -R the
         // dead watchdog can no longer cut — and raise a fresh daemon below.
         let _ = std::fs::remove_file(&pid_file);
         let _ = creance_vm::tunnel::stop(profile_dir);
+        let _ = creance_vm::tunnel::stop_named(profile_dir, "gatebridge");
         creance_vm::tunnel::reap_orphans(profile_dir, instance, proxy_port);
+        if stale_bridge != 0 {
+            creance_vm::tunnel::reap_orphans(profile_dir, instance, stale_bridge);
+        }
     } else if Path::new(&creance_vm::paths::join(instance_dir, "cage-gate.json")).exists() {
         // A record that survived the retire check has a serving daemon.
         return Ok(());
