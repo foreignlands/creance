@@ -6,6 +6,7 @@
 //! fingerprint policy (exit anchoring) lives here too: it is profile data
 //! the whole stack reads.
 
+pub mod bundle;
 pub mod config;
 pub mod exit_policy;
 pub mod gateprobe;

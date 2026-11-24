@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.4] — 2026-11-24
+
+### 新增
+
+- **Identity Bundle 双层加密容器**（`bundle-export` / `bundle-import`）：
+  内层明文打包 persona（`guest-profile.json` + `config.json` +
+  `sources.json`，跨设备一致）；外层主密码 argon2id →
+  XChaCha20-Poly1305 密封——"换电脑不换虚拟指纹，没授权打不开包"。
+  主密码经 `CREANCE_BUNDLE_PASSWORD` 提供；导入拒绝覆盖既有文件、
+  拒绝集外文件名、错误密码一个文件都不落地。
+
 ## [0.7.3] — 2026-11-24
 
 ### 新增

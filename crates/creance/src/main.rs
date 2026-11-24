@@ -54,6 +54,8 @@ fn main() {
         Commands::Claude => cmd_shell(vec!["claude".to_owned()]),
         Commands::Oauth => cmd_oauth(),
         Commands::IdentityReset { memory, cpus } => cmd_identity_reset(memory, cpus),
+        Commands::BundleExport { file } => cmd_bundle_export(&file),
+        Commands::BundleImport { file } => cmd_bundle_import(&file),
         Commands::EscapeTest => cmd_escape_test(),
         Commands::GateOpen => cmd_gate(true),
         Commands::GateClose => cmd_gate(false),
@@ -167,6 +169,20 @@ enum Commands {
         memory: u32,
         #[arg(long, default_value_t = 4)]
         cpus: u32,
+    },
+    /// Export the profile persona as a password-sealed Identity Bundle.
+    /// The master password comes from CREANCE_BUNDLE_PASSWORD.
+    BundleExport {
+        /// Output .crb path.
+        #[arg(long)]
+        file: String,
+    },
+    /// Unseal an Identity Bundle into this profile's directory. Refuses
+    /// to overwrite existing files.
+    BundleImport {
+        /// Input .crb path.
+        #[arg(long)]
+        file: String,
     },
     /// Run the containment probe suite (host checks + in-guest probes).
     EscapeTest,
@@ -406,6 +422,48 @@ fn cmd_identity_reset(memory: u32, cpus: u32) -> i32 {
         }
     }
     cmd_setup(memory, cpus)
+}
+
+fn bundle_password() -> Result<String, String> {
+    match std::env::var("CREANCE_BUNDLE_PASSWORD") {
+        Ok(p) if !p.is_empty() => Ok(p),
+        _ => Err("主密码从环境变量 CREANCE_BUNDLE_PASSWORD 读取（未设置或为空）".to_owned()),
+    }
+}
+
+fn cmd_bundle_export(file: &str) -> i32 {
+    let password = match bundle_password() {
+        Ok(p) => p,
+        Err(e) => return fail(e),
+    };
+    match creance_vm::bundle::export(&profile(), &password) {
+        Ok(bytes) => match std::fs::write(file, &bytes) {
+            Ok(()) => {
+                println!("bundle 已导出（{} 字节，双层密封）→ {file}", bytes.len());
+                0
+            }
+            Err(e) => fail(format!("写入 {file} 失败：{e}")),
+        },
+        Err(e) => fail(e),
+    }
+}
+
+fn cmd_bundle_import(file: &str) -> i32 {
+    let password = match bundle_password() {
+        Ok(p) => p,
+        Err(e) => return fail(e),
+    };
+    let bytes = match std::fs::read(file) {
+        Ok(b) => b,
+        Err(e) => return fail(format!("读取 {file} 失败：{e}")),
+    };
+    match creance_vm::bundle::import(&profile(), &password, &bytes) {
+        Ok(n) => {
+            println!("bundle 已解封落地（{n} 个身份文件）；`creance setup` 重建环境即可用");
+            0
+        }
+        Err(e) => fail(e),
+    }
 }
 
 fn cmd_escape_test() -> i32 {
