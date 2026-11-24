@@ -445,6 +445,62 @@ fn lang_subtag(tag: &str) -> Option<String> {
     }
 }
 
+/// The concrete canonical IANA zone a timezone-following persona lands on
+/// for each tabulated country (the profile's zone entries are match
+/// prefixes like `America/`, not names a guest can boot with).
+const CANONICAL_TZ: &[(&str, &str)] = &[
+    ("US", "America/New_York"),
+    ("CA", "America/Toronto"),
+    ("MX", "America/Mexico_City"),
+    ("BR", "America/Sao_Paulo"),
+    ("GB", "Europe/London"),
+    ("IE", "Europe/Dublin"),
+    ("DE", "Europe/Berlin"),
+    ("FR", "Europe/Paris"),
+    ("NL", "Europe/Amsterdam"),
+    ("BE", "Europe/Brussels"),
+    ("CH", "Europe/Zurich"),
+    ("AT", "Europe/Vienna"),
+    ("IT", "Europe/Rome"),
+    ("ES", "Europe/Madrid"),
+    ("PT", "Europe/Lisbon"),
+    ("SE", "Europe/Stockholm"),
+    ("NO", "Europe/Oslo"),
+    ("DK", "Europe/Copenhagen"),
+    ("FI", "Europe/Helsinki"),
+    ("PL", "Europe/Warsaw"),
+    ("CZ", "Europe/Prague"),
+    ("RU", "Europe/Moscow"),
+    ("TR", "Europe/Istanbul"),
+    ("CN", "Asia/Shanghai"),
+    ("JP", "Asia/Tokyo"),
+    ("KR", "Asia/Seoul"),
+    ("HK", "Asia/Hong_Kong"),
+    ("TW", "Asia/Taipei"),
+    ("SG", "Asia/Singapore"),
+    ("IN", "Asia/Kolkata"),
+    ("TH", "Asia/Bangkok"),
+    ("VN", "Asia/Ho_Chi_Minh"),
+    ("ID", "Asia/Jakarta"),
+    ("MY", "Asia/Kuala_Lumpur"),
+    ("PH", "Asia/Manila"),
+    ("AU", "Australia/Sydney"),
+    ("NZ", "Pacific/Auckland"),
+    ("AE", "Asia/Dubai"),
+    ("IL", "Asia/Jerusalem"),
+    ("ZA", "Africa/Johannesburg"),
+    ("AR", "America/Argentina/Buenos_Aires"),
+    ("CL", "America/Santiago"),
+    ("CO", "America/Bogota"),
+];
+
+/// The canonical IANA zone for a tabulated country — what `timezone:
+/// "auto"` writes into the guest. `None` for countries outside the table.
+pub fn canonical_timezone(country_code: &str) -> Option<&'static str> {
+    let cc = country_code.to_ascii_uppercase();
+    CANONICAL_TZ.iter().find(|(c, _)| *c == cc).map(|(_, z)| *z)
+}
+
 /// Judges one fingerprint triple against an observed exit country.
 ///
 /// `None` — the country has no table row (unknown exits never convict).
@@ -463,7 +519,8 @@ pub fn fingerprint_verdict(
     let cc = country_code.to_ascii_uppercase();
     let (_, zones, langs) = COUNTRY_PROFILE.iter().find(|(c, _, _)| *c == cc)?;
     let tz = timezone.trim();
-    if tz != "Etc/UTC" && tz != "UTC" && !zones.iter().any(|z| tz.starts_with(z)) {
+    // "auto" follows the observed exit — consistent by construction.
+    if tz != "auto" && tz != "Etc/UTC" && tz != "UTC" && !zones.iter().any(|z| tz.starts_with(z)) {
         return Some(Err(format!(
             "时区 {tz} 与出口国别 {cc} 不一致（该地区的时区候选：{}）",
             zones.join("、")
@@ -682,5 +739,27 @@ mod tests {
             fingerprint_verdict("us", "Asia/Shanghai", "en_US.UTF-8", "en-US"),
             Some(Err(_))
         ));
+        // 时区跟随："auto" lands wherever the exit is — consistent on
+        // every tabulated country.
+        assert_eq!(
+            fingerprint_verdict("US", "auto", "en_US.UTF-8", "en-US"),
+            Some(Ok(()))
+        );
+        assert_eq!(
+            fingerprint_verdict("JP", "auto", "en_US.UTF-8", "en-US"),
+            Some(Ok(()))
+        );
+        // Canonical zone lookup feeds the ~/.creance-tz write.
+        assert_eq!(canonical_timezone("US"), Some("America/New_York"));
+        assert_eq!(canonical_timezone("jp"), Some("Asia/Tokyo"));
+        assert_eq!(canonical_timezone("XX"), None);
+        // Every tabulated country must have a canonical zone — a row
+        // added without one would silently skip the follow-write.
+        for (cc, _, _) in COUNTRY_PROFILE {
+            assert!(
+                canonical_timezone(cc).is_some(),
+                "{cc} lacks canonical zone"
+            );
+        }
     }
 }

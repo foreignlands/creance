@@ -341,6 +341,19 @@ fn cmd_gate(open: bool) -> i32 {
                 location.ip, location.country_code
             ));
         }
+        // 时区跟随（0.7.x）：实测出口落地后，把该国的规范时区写进 guest
+        // ~/.creance-tz——OAuth 通道启动浏览器时优先采用。best-effort：
+        // 写不进去不否定这次观测本身。
+        if cfg.timezone == "auto" {
+            if let Some(zone) = creance_vm::exit_policy::canonical_timezone(&location.country_code)
+            {
+                let _ = creance_vm::vm::guest_script(
+                    &profile,
+                    &instance,
+                    &format!("printf '%s\\n' '{zone}' > \"${{HOME:-/tmp}}/.creance-tz"),
+                );
+            }
+        }
         gate::open(&instance_dir, &creance::evidence::grant_checks(&location)).map(|s| {
             format!(
                 "open (epoch {}，出口 {} {})",
@@ -622,7 +635,14 @@ fn cmd_setup(memory: u32, cpus: u32) -> i32 {
         cpus,
         disk_gib: 24,
         workspace: creance_vm::vm::environment_dir(&profile),
-        timezone: cfg.timezone.clone(),
+        // "auto" follows the observed exit at gate-open time; the
+        // provision-time guest env still needs a concrete IANA name, so
+        // the neutral baseline stands in until the first observation.
+        timezone: if cfg.timezone == "auto" {
+            "Etc/UTC".to_owned()
+        } else {
+            cfg.timezone.clone()
+        },
         locale: cfg.locale.clone(),
         browser_language: cfg.browser_language.clone(),
         guest,

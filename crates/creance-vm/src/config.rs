@@ -147,6 +147,11 @@ pub fn write_private_config(path: &str, config: &Config) -> Result<(), String> {
 /// Rejects "Local" and unknown zones; the system zoneinfo database is the
 /// authority when present, a structural `Area/Location` check otherwise.
 fn validate_timezone(tz: &str) -> Result<(), String> {
+    // "auto" = timezone follows the observed exit (0.7.x): the gate-open
+    // path writes the exit country's canonical zone into the guest.
+    if tz == "auto" {
+        return Ok(());
+    }
     if tz.is_empty() || tz == "Local" {
         return Err("timezone must be an explicit IANA name, e.g. Etc/UTC".to_owned());
     }

@@ -84,7 +84,11 @@ case "${{1:-start}}" in
     setsid Xvnc :99 -geometry 1280x800 -depth 24 -rfbport 5900 -localhost -SecurityTypes None >>"$TL" 2>&1 &
     sleep 1
     setsid env DISPLAY=:99 openbox-session >>"$TL" 2>&1 &
-    setsid env TZ="$SESSION_TZ" DISPLAY=:99 LANG="$SESSION_LOCALE" \
+    # Timezone-follow: a gate-open observation may have parked the exit
+    # canonical zone in ~/.creance-tz — it wins over the provision-time
+    # SESSION_TZ.
+    CREANCE_TZ="$(cat "${{HOME:-/tmp}}/.creance-tz" 2>/dev/null || echo "$SESSION_TZ")"
+    setsid env TZ="$CREANCE_TZ" DISPLAY=:99 LANG="$SESSION_LOCALE" \
       /usr/local/bin/creance-browser --no-sandbox --lang="$SESSION_LANGUAGE" \
       --start-maximized about:blank >>"$TL" 2>&1 &
     setsid websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5900 >>"$TL" 2>&1 &

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.2] — 2026-11-24
+
+### 新增
+
+- **时区跟随实测出口**（`timezone: "auto"`）：配置接受 `"auto"`；
+  `gate-open` 观测到出口国别后，把该国的规范时区（42 国
+  `CANONICAL_TZ` 表，最大城市时区）写进 guest `~/.creance-tz`
+  （best-effort，写不进不否定观测）。OAuth 通道启动浏览器时
+  `~/.creance-tz` 优先于 provision 期 `SESSION_TZ`——persona 时区
+  自动对齐出口，不再需要手填。指纹判词把 `"auto"` 视为必然一致。
+  provision 期 `"auto"` 落 `Etc/UTC` 中性基线，等待首次观测。
+
 ## [0.7.1] — 2026-11-24
 
 ### 新增
