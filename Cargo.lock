@@ -308,9 +308,11 @@ dependencies = [
  "creance-net",
  "creance-proxy",
  "creance-vm",
+ "hex",
  "libc",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

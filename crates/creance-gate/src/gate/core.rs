@@ -305,6 +305,24 @@ impl Gate {
                 return (409, error_json("配置读取失败，外网保持关闭"));
             }
         };
+        // 插件调用=微型 gate-open：白名单+批条纪律（plugin.rs），属宿主侧
+        // 操作，不做出口动作——放在 applied-proxy 复检之前，也不触碰闸态。
+        if command.action == "plugin" {
+            let configured =
+                !(config.approval_bot_token.is_empty() && config.approval_chat_id.is_empty());
+            return match crate::gate::plugin::call(
+                &self.profile_dir,
+                configured,
+                &command.plugin,
+                &command.args,
+            ) {
+                Ok(v) => (
+                    200,
+                    serde_json::to_vec(&v).unwrap_or_else(|_| b"{}".to_vec()),
+                ),
+                Err(e) => (403, error_json(&e)),
+            };
+        }
         if let Err(e) = creance_proxy::applied(
             Path::new(&self.config_path)
                 .parent()

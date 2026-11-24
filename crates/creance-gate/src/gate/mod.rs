@@ -38,6 +38,7 @@ const CHECK_LEASE: Duration = Duration::from_secs(180);
 mod client;
 mod core;
 mod daemon;
+pub mod plugin;
 #[cfg(test)]
 mod tests;
 pub use client::*;
@@ -83,6 +84,10 @@ pub struct GateCommand {
     pub report_id: String,
     #[serde(default)]
     pub report: Option<SafetyReport>,
+    #[serde(default)]
+    pub plugin: String,
+    #[serde(default)]
+    pub args: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

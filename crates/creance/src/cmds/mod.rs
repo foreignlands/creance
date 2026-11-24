@@ -6,9 +6,11 @@ pub(crate) const CHECK_URL: &str = "https://1.1.1.1/cdn-cgi/trace";
 pub(crate) const CHECK_BUDGET: std::time::Duration = std::time::Duration::from_secs(25);
 
 mod identity;
+mod plugin;
 mod proxy;
 mod vm;
 pub(crate) use identity::*;
+pub(crate) use plugin::*;
 pub(crate) use proxy::*;
 pub(crate) use vm::*;
 

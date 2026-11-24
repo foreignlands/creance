@@ -55,6 +55,8 @@ fn main() {
         Commands::PersonaList => cmd_persona_list(),
         Commands::MigrateExport { file } => cmd_migrate_export(&file),
         Commands::Approve { action } => cmd_approve(&action),
+        Commands::PluginList => cmd_plugin_list(cmds::profile()),
+        Commands::PluginCall { name, args } => cmd_plugin_call(cmds::profile(), name, args),
         Commands::EscapeTest => cmd_escape_test(),
         Commands::GateOpen => cmd_gate(true),
         Commands::GateClose => cmd_gate(false),
@@ -203,6 +205,16 @@ enum Commands {
     Approve { action: String },
     /// Run the containment probe suite (host checks + in-guest probes).
     EscapeTest,
+    /// List registered plugins (profile's plugins.json).
+    PluginList,
+    /// Call an allowlisted plugin through the gate channel (micro
+    /// gate-open: allowlist + optional phone grant).
+    PluginCall {
+        /// Plugin name from plugins.json.
+        name: String,
+        /// Arguments passed when the entry allows them.
+        args: Vec<String>,
+    },
     /// Open the environment gate (check window + grant). The wire follows.
     GateOpen,
     /// Close the environment gate: the guest loses its only route out.
@@ -349,6 +361,7 @@ mod up_gate_tests {
             include_str!("cmds/vm.rs"),
             include_str!("cmds/identity.rs"),
             include_str!("cmds/proxy.rs"),
+            include_str!("cmds/plugin.rs"),
             include_str!("cmds/mod.rs"),
             include_str!("lib.rs"),
             include_str!("escape.rs"),

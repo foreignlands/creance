@@ -1,6 +1,7 @@
 use super::client::*;
 use super::daemon::*;
 use super::*;
+use sha2::Digest;
 use std::fs;
 
 fn prepare_profile() -> (String, String) {
@@ -832,6 +833,7 @@ fn watchdog_fuse_source_pins() {
     // module lives in any of them).
     let prod = concat!(
         include_str!("mod.rs"),
+        include_str!("plugin.rs"),
         include_str!("core.rs"),
         include_str!("daemon.rs"),
         include_str!("client.rs")
@@ -962,4 +964,69 @@ fn call_raw(record: &GateRecord, body: &str) -> Result<(String, serde_json::Valu
     let value: serde_json::Value =
         serde_json::from_slice(&raw[split + 4..]).map_err(|e| e.to_string())?;
     Ok((status, value))
+}
+
+// ---- plugin protocol (micro gate-open) ----
+
+fn plugin_profile(tag: &str) -> String {
+    let dir = std::env::temp_dir().join(format!(
+        "creance-plugin-test-{}-{}",
+        std::process::id(),
+        tag
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir.to_string_lossy().into_owned()
+}
+
+#[test]
+fn plugin_call_allowlist_and_args() {
+    let profile = plugin_profile("allow");
+    std::fs::write(
+        creance_vm::paths::join(&profile, "plugins.json"),
+        r#"[{"name":"say-hi","argv":["/bin/echo","hello"],"approval":false,"allow_args":true},
+            {"name":"no-args","argv":["/bin/echo","fixed"],"approval":false,"allow_args":false},
+            {"name":"needs-ok","argv":["/bin/echo","ok"],"approval":true}]"#,
+    )
+    .unwrap();
+    // Registered + allowed args → runs.
+    let v = super::plugin::call(&profile, false, "say-hi", &["world".to_owned()]).unwrap();
+    assert_eq!(v["exit"], 0);
+    assert_eq!(v["stdout"], "hello world\n");
+    // Unlisted name refused.
+    assert!(super::plugin::call(&profile, false, "rm-rf", &[]).is_err());
+    // Args on a non-arg plugin refused.
+    assert!(super::plugin::call(&profile, false, "no-args", &["x".to_owned()]).is_err());
+    // Approval-flagged plugin refuses when the channel is off.
+    assert!(super::plugin::call(&profile, false, "needs-ok", &[]).is_err());
+    // With channel on but no grant → refused; with a valid grant → runs.
+    assert!(super::plugin::call(&profile, true, "needs-ok", &[]).is_err());
+    let key = hex::encode(sha2::Sha256::digest(b"plugin-needs-ok"));
+    let grants = format!("{profile}/.approvals");
+    std::fs::create_dir_all(&grants).unwrap();
+    let expiry = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 600;
+    std::fs::write(
+        creance_vm::paths::join(&grants, &key[..16]),
+        expiry.to_string(),
+    )
+    .unwrap();
+    let v = super::plugin::call(&profile, true, "needs-ok", &[]).unwrap();
+    assert_eq!(v["exit"], 0);
+}
+
+#[test]
+fn plugin_call_rejects_bad_registry() {
+    let profile = plugin_profile("bad");
+    // Missing registry file.
+    assert!(super::plugin::call(&profile, false, "x", &[]).is_err());
+    // Relative argv[0] refused.
+    std::fs::write(
+        creance_vm::paths::join(&profile, "plugins.json"),
+        r#"[{"name":"bad","argv":["echo","hi"]}]"#,
+    )
+    .unwrap();
+    assert!(super::plugin::call(&profile, false, "bad", &[]).is_err());
 }

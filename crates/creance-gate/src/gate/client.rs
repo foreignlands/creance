@@ -73,7 +73,7 @@ impl GateClient {
         Ok(GateClient { record })
     }
 
-    fn call(&self, method: &str, path: &str, body: Option<&str>) -> Result<GateStatus, String> {
+    fn call_raw(&self, method: &str, path: &str, body: Option<&str>) -> Result<Vec<u8>, String> {
         use std::os::unix::net::UnixStream;
         let mut stream = UnixStream::connect(&self.record.socket)
             .map_err(|_| "gate control socket unreachable".to_owned())?;
@@ -103,10 +103,16 @@ impl GateClient {
             .and_then(|l| l.split_whitespace().nth(1))
             .and_then(|s| s.parse().ok())
             .ok_or("invalid gate response")?;
+        let body_bytes = raw[split + 4..].to_vec();
         if !(200..300).contains(&status) {
-            return Err(format!("gate returned HTTP {status}"));
+            let detail = String::from_utf8_lossy(&body_bytes).into_owned();
+            return Err(format!("gate returned HTTP {status}: {detail}"));
         }
-        serde_json::from_slice(&raw[split + 4..]).map_err(|e| e.to_string())
+        Ok(body_bytes)
+    }
+
+    fn call(&self, method: &str, path: &str, body: Option<&str>) -> Result<GateStatus, String> {
+        serde_json::from_slice(&self.call_raw(method, path, body)?).map_err(|e| e.to_string())
     }
 
     pub fn status(&self) -> Result<GateStatus, String> {
@@ -128,6 +134,15 @@ impl GateClient {
 
     fn raw_control(&self, body: &str) -> Result<GateStatus, String> {
         self.call("POST", "/control", Some(body))
+    }
+
+    /// 插件调用（action=plugin）：返回插件 JSON 结果体，非 2xx 时把
+    /// gate 的拒绝原因带进 Err。
+    pub fn plugin_call(&self, name: &str, args: &[String]) -> Result<serde_json::Value, String> {
+        let body =
+            serde_json::json!({ "action": "plugin", "plugin": name, "args": args }).to_string();
+        let raw = self.call_raw("POST", "/control", Some(&body))?;
+        serde_json::from_slice(&raw).map_err(|e| e.to_string())
     }
 }
 
