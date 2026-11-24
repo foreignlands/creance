@@ -329,6 +329,30 @@ pub(crate) fn cmd_stop(keep_proxy: bool) -> i32 {
     code
 }
 
+/// Guest 认证桥材料下发：cage-gate.json 由 daemon 异步写出——轮询到
+/// 出现再经 ssh 落 `~/.creance-gate`（0600：bridge 端口 + bearer）。
+/// token 逐次轮换不进 provision，只能走这条信道。
+fn sync_guest_gate(profile: &str, instance: &str, instance_dir: &str) {
+    for _ in 0..40 {
+        if let Ok(client) = gate::GateClient::open(instance_dir) {
+            if client.record.tcp_port != 0
+                && creance_vm::vm::guest_script(
+                    profile,
+                    instance,
+                    &format!(
+                        "umask 077; printf '%s\\n%s\\n' '{}' '{}' > \"$HOME/.creance-gate\"",
+                        client.record.tcp_port, client.record.token
+                    ),
+                )
+                .is_ok()
+            {
+                return;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
 pub(crate) fn cmd_up() -> i32 {
     let path = config::config_path();
     let cfg = match config::load(&path) {
@@ -418,6 +442,7 @@ pub(crate) fn cmd_up() -> i32 {
             }
             Err(e) => return fail(e),
         }
+        sync_guest_gate(&profile, &instance, &instance_dir);
         println!("Environment is up. The guest's only route out is the managed core (`creance escape-test` proves it).");
     }
     code

@@ -194,6 +194,7 @@ pub fn run_daemon(
             Err(_) => continue, // transient — retry next tick
         }
     }
+    let bridge_port = handle.record.tcp_port;
     handle.gate.shutdown();
     if replaced {
         // Leave the winner's record (and wire) standing: dropping a
@@ -205,6 +206,10 @@ pub fn run_daemon(
         return 0;
     }
     let _ = creance_vm::tunnel::stop(profile_dir);
+    let _ = creance_vm::tunnel::stop_named(profile_dir, "gatebridge");
     creance_vm::tunnel::reap_orphans(profile_dir, instance, proxy_port);
+    if bridge_port != 0 {
+        creance_vm::tunnel::reap_orphans(profile_dir, instance, bridge_port);
+    }
     0
 }

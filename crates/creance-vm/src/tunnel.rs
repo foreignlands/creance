@@ -17,7 +17,19 @@ use std::process::{Command, Stdio};
 /// proving a live ssh (start time included, FINDING-021) → reuse; otherwise
 /// spawn a fresh `ssh -R`.
 pub fn ensure(profile: &str, instance: &str, guest_port: u16) -> Result<(), String> {
-    let pid_file = pidfile::proxy_pid_file(profile, "tunnel.pid");
+    ensure_named(profile, instance, guest_port, "tunnel")
+}
+
+/// Same forward, its own pid file — the guest gate bridge (plugin calls)
+/// shares the ssh -R discipline but must be tracked beside the proxy
+/// wire, not under it.
+pub fn ensure_named(
+    profile: &str,
+    instance: &str,
+    guest_port: u16,
+    tag: &str,
+) -> Result<(), String> {
+    let pid_file = pidfile::proxy_pid_file(profile, &format!("{tag}.pid"));
     if pidfile::alive(&pid_file) {
         return Ok(());
     }
@@ -57,7 +69,13 @@ pub fn ensure(profile: &str, instance: &str, guest_port: u16) -> Result<(), Stri
 /// Tears the tunnel down (VM stop companion). Never signals a process the
 /// pid file cannot prove is ours (start time included, FINDING-021).
 pub fn stop(profile: &str) -> Result<(), String> {
-    pidfile::stop(&pidfile::proxy_pid_file(profile, "tunnel.pid"));
+    stop_named(profile, "tunnel")
+}
+
+/// Stops one named forward (e.g. the guest gate bridge) without touching
+/// the proxy wire's pid file.
+pub fn stop_named(profile: &str, tag: &str) -> Result<(), String> {
+    pidfile::stop(&pidfile::proxy_pid_file(profile, &format!("{tag}.pid")));
     Ok(())
 }
 

@@ -26,11 +26,17 @@ impl Gate {
         let _ = std::fs::remove_file(&socket);
         let listener = UnixListener::bind(&socket).map_err(|e| e.to_string())?;
         creance_vm::private::protect_file(&socket).map_err(|e| e.to_string())?;
+        // Guest 认证桥：loopback TCP 控制口，由 ssh -R 转进 guest——
+        // restrict=on 下仍走 ssh 信道，guest 持 token 才能调用。
+        let tcp = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .map_err(|e| e.to_string())?;
+        let tcp_port = tcp.local_addr().map_err(|e| e.to_string())?.port();
 
         let record = GateRecord {
             socket: socket.clone(),
             token: token.clone(),
             run_id: run_id.clone(),
+            tcp_port,
         };
         // Publish the record atomically; readers check it is private.
         let bytes = serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?;
@@ -67,6 +73,8 @@ impl Gate {
             record_path: record_path.to_string_lossy().into_owned(),
             socket_path: socket.clone(),
             listener: Mutex::new(Some(listener)),
+            tcp_listener: Mutex::new(Some(tcp)),
+            tcp_port,
         });
 
         // The lease watchdog: a gate left open (or checking) without renewal
@@ -107,6 +115,16 @@ impl Gate {
                 if !watchdog.still_owner() {
                     continue;
                 }
+                // Guest 认证桥不是 egress——daemon 活着就转发（gate
+                // Closed 时 guest 仍可调白名单插件），只随 daemon 死。
+                if watchdog.tcp_port != 0 {
+                    let _ = creance_vm::tunnel::ensure_named(
+                        &watchdog.profile_dir,
+                        &watchdog.instance,
+                        watchdog.tcp_port,
+                        "gatebridge",
+                    );
+                }
                 if closed {
                     let _ = creance_vm::tunnel::stop(&watchdog.profile_dir);
                     creance_vm::tunnel::reap_orphans(
@@ -142,8 +160,8 @@ impl Gate {
             }
         });
 
-        // The accept loop also holds only a Weak: it exits when the gate is
-        // dropped or shut down, and owns the socket-file cleanup.
+        // The accept loops also hold only a Weak: they exit when the gate
+        // is dropped or shut down; the unix loop owns socket-file cleanup.
         let accept_sock = socket.clone();
         let accept_dir = sock_dir.to_string_lossy().into_owned();
         let server = Arc::downgrade(&gate);
@@ -166,8 +184,10 @@ impl Gate {
                 };
                 match accepted {
                     Ok(stream) => {
+                        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                        let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
                         let server = server.clone();
-                        std::thread::spawn(move || server.handle(stream));
+                        std::thread::spawn(move || server.handle(stream, false));
                     }
                     Err(_) => {
                         if server.shutdown.load(Ordering::Relaxed) {
@@ -182,6 +202,39 @@ impl Gate {
             }
             let _ = std::fs::remove_file(&accept_sock);
             let _ = std::fs::remove_dir(&accept_dir);
+        });
+        // TCP bridge accept loop — same protocol, same auth, different
+        // transport (the guest reaches it over ssh -R).
+        let server = Arc::downgrade(&gate);
+        std::thread::spawn(move || loop {
+            let Some(server) = server.upgrade() else {
+                break;
+            };
+            if server.shutdown.load(Ordering::Relaxed) {
+                break;
+            }
+            let accepted = {
+                let guard = lock_or_recover(&server.tcp_listener);
+                match guard.as_ref() {
+                    Some(listener) => listener.accept().map(|(s, _)| s),
+                    None => Err(std::io::Error::other("gate closed")),
+                }
+            };
+            match accepted {
+                Ok(stream) => {
+                    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+                    let server = server.clone();
+                    std::thread::spawn(move || server.handle(stream, true));
+                }
+                Err(_) => {
+                    if server.shutdown.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+            drop(server);
         });
         Ok(GateHandle {
             gate,
@@ -201,7 +254,11 @@ impl Gate {
         if let Ok(mut guard) = self.listener.try_lock() {
             *guard = None;
         }
+        if let Ok(mut guard) = self.tcp_listener.try_lock() {
+            *guard = None;
+        }
         let _ = std::os::unix::net::UnixStream::connect(&self.socket_path);
+        let _ = std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, self.tcp_port));
     }
 
     /// The current status snapshot.
@@ -222,10 +279,11 @@ impl Gate {
             .is_some_and(|record| record.run_id == self.run_id)
     }
 
-    fn handle(&self, mut stream: std::os::unix::net::UnixStream) {
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-        let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
-        let (head, mut stream) = match creance_net::wire::read_header_block(&mut stream, 16 << 10) {
+    /// Serves one request. `guest` callers (the TCP bridge) may only
+    /// read status and invoke plugins — check/grant/close stay unix-only
+    /// so the guest bearer can never drive the gate open itself.
+    fn handle<S: std::io::Read + std::io::Write>(&self, stream: S, guest: bool) {
+        let (head, mut stream) = match creance_net::wire::read_header_block(stream, 16 << 10) {
             Ok((h, r)) if !h.is_empty() => (h, r),
             _ => return,
         };
@@ -271,6 +329,17 @@ impl Gate {
         let mut body = vec![0u8; body_len];
         if body_len > 0 && stream.read_exact(&mut body).is_err() {
             return;
+        }
+        if guest && !(method == "GET" && path == "/status") {
+            let allowed = method == "POST"
+                && path == "/control"
+                && serde_json::from_slice::<GateCommand>(&body)
+                    .map(|c| c.action == "plugin")
+                    .unwrap_or(false);
+            if !allowed {
+                let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
+                return;
+            }
         }
         let response = match (method.as_str(), path.as_str()) {
             ("GET", "/status") => {

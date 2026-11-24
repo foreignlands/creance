@@ -107,6 +107,30 @@ case "${{1:-start}}" in
     ;;
 esac
 OAUTHCHAN
+# Guest 认证桥调用端（0.7 插件协议）：token/端口不落 provision——
+# daemon 每次启动轮换，`up` 后经 ssh 写 ~/.creance-gate。这里只装
+# 调用端：读凭据 → POST /control action=plugin。可执行位在内层
+# toolchain 块里置（顶层禁 chmod/install）。
+cat > /usr/local/bin/creance-call <<'PLGCALL'
+#!/bin/sh
+G="${{HOME:-/tmp}}/.creance-gate"
+[ -f "$G" ] || {{ echo 'gate bridge material missing' >&2; exit 1; }}
+PORT="$(sed -n '1p' "$G")"
+TOK="$(sed -n '2p' "$G")"
+NAME="${{1:-}}"
+[ -n "$NAME" ] || {{ echo 'usage: creance-call <plugin> [args…]' >&2; exit 2; }}
+shift
+ARGS="["
+for a in "$@"; do
+  esc=$(printf '%s' "$a" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  ARGS="${{ARGS}}\"${{esc}}\","
+done
+ARGS="${{ARGS%,}}]"
+BODY="{{\"action\":\"plugin\",\"plugin\":\"${{NAME}}\",\"args\":${{ARGS}}}}"
+exec curl -fsS -X POST -H "Authorization: Bearer ${{TOK}}" -H "Host: gate" \
+  -H 'Content-Type: application/json' --data "$BODY" \
+  "http://127.0.0.1:${{PORT}}/control"
+PLGCALL
 export DEBIAN_FRONTEND=noninteractive
 locale-gen {locale} >/dev/null 2>&1 || true
 update-locale LANG={locale} >/dev/null 2>&1 || true
@@ -205,7 +229,7 @@ timeout "$TOOLCHAIN_BUDGET" sh -c '
     && mv /usr/local/bin/node.new /usr/local/bin/node 2>> /var/log/creance-toolchain.log \
     || rm -f /usr/local/bin/node.new /tmp/creance-node.tar.gz
   echo "node install rc=$? path=$(command -v /usr/local/bin/node 2>/dev/null || echo none)" >> /var/log/creance-toolchain.log
-  chmod +x /usr/local/bin/node 2>/dev/null || true
+  chmod +x /usr/local/bin/node /usr/local/bin/creance-call 2>/dev/null || true
   # The pinned download dies fast on MITM-intercepting networks; the
   # apt fallback must therefore run EARLY — the base extras (git, xz —
   # curl and ca-certificates already ship in the image) sink to the end
@@ -468,6 +492,7 @@ mod tests {
             "cat > /etc/iptables/rules.v4 <<'EGRESSRULES'",
             "cat > /etc/systemd/system/egress-lock.service <<'LOCKUNIT'",
             "cat > /usr/local/bin/creance-oauth <<'OAUTHCHAN'",
+            "cat > /usr/local/bin/creance-call <<'PLGCALL'",
             "systemctl enable egress-lock.service >/dev/null",
             "systemctl daemon-reload",
             "systemctl restart egress-lock.service",
@@ -482,7 +507,7 @@ mod tests {
         // concatenates adjacent quoted segments, so `system""d`,
         // `egress-""lock` and `cat >"…"` only differ on the surface.
         let norm: String = s.chars().filter(|c| *c != '\'' && *c != '"').collect();
-        assert_eq!(norm.matches("cat >").count(), 4, "{s}");
+        assert_eq!(norm.matches("cat >").count(), 5, "{s}");
         // Navigation/side-write verbs are banned outright: a `cd` into
         // the unit dir plus a relative `cat > x` writes a second unit
         // without touching the counts; `tee`/`dd` spellings bypass

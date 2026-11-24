@@ -49,6 +49,11 @@ pub struct GateRecord {
     pub socket: String,
     pub token: String,
     pub run_id: String,
+    /// Loopback TCP port the control plane also serves — the guest's
+    /// authenticated plugin bridge rides an `ssh -R` forward to it
+    /// (0 = bridge disabled).
+    #[serde(default)]
+    pub tcp_port: u16,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -211,6 +216,12 @@ pub struct Gate {
     record_path: String,
     socket_path: String,
     listener: Mutex<Option<UnixListener>>,
+    /// The guest-facing TCP bridge (plugin calls); bound on loopback,
+    /// forwarded into the guest by `ssh -R`.
+    tcp_listener: Mutex<Option<std::net::TcpListener>>,
+    /// Its bound port — the watchdog forwards this into the guest while
+    /// the gate is up and reaps the forward when it closes.
+    tcp_port: u16,
 }
 
 /// The owner of one running gate: keeps the server alive while held, stops
