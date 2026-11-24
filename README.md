@@ -59,6 +59,18 @@ creance escape-test           # 验收隔离
 `CREANCE_CONFIG` selects a profile (legacy `CLAUDE_CAGE_CONFIG` honored;
 existing `~/.claude-cage` profiles keep working).
 
+## Command surface
+
+| 分组 | 命令 |
+|---|---|
+| 生命周期 | `init` `setup` `up` `stop` `shell` `list` `check` `doctor` |
+| 代理 | `proxy-import` `proxy-select` `proxy-start` `proxy-stop` `proxy-status` `proxy-refresh` |
+| 身份/迁移 | `identity-reset` `persona-save` `persona-use` `persona-list` `bundle-export` `bundle-import` `migrate-export` |
+| 使用面 | `claude` `oauth` `serve` `approve` |
+| 验收/运维 | `escape-test` `gate-open` `gate-close` `version` |
+
+完整参数走 `creance <cmd> --help`。
+
 ## Night-audit harness
 
 [`harness/`](harness/README.md) — 把一个 LLM（GLM 5.3 Flash）变成整夜

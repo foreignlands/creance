@@ -112,6 +112,7 @@ impl Config {
         if !is_language_tag(&self.browser_language) {
             return Err("invalid browser language tag".to_owned());
         }
+        validate_approval(&self.approval_bot_token, &self.approval_chat_id)?;
         self.exit_policy.validate()
     }
 
@@ -147,6 +148,34 @@ pub fn write_private_config(path: &str, config: &Config) -> Result<(), String> {
     let mut bytes = serde_json::to_vec_pretty(config).map_err(|e| e.to_string())?;
     bytes.push(b'\n');
     crate::write_private_atomic(path, &bytes)
+}
+
+/// 审批通道凭据必须成对出现；token 形如 `123456:ABC…`（BotFather 发放），
+/// chat_id 允许数字或 @name。
+fn validate_approval(token: &str, chat: &str) -> Result<(), String> {
+    if token.is_empty() && chat.is_empty() {
+        return Ok(());
+    }
+    if token.is_empty() || chat.is_empty() {
+        return Err("approval_bot_token 与 approval_chat_id 须成对配置".to_owned());
+    }
+    let mut parts = token.splitn(2, ':');
+    let id_ok = parts
+        .next()
+        .is_some_and(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()));
+    let secret_ok = parts.next().is_some_and(|p| p.len() >= 30);
+    if !id_ok || !secret_ok {
+        return Err("approval_bot_token 形如 <bot_id>:<secret>".to_owned());
+    }
+    let chat_ok = chat
+        .trim_start_matches('-')
+        .chars()
+        .all(|c| c.is_ascii_digit())
+        || (chat.starts_with('@') && chat.len() > 1);
+    if !chat_ok {
+        return Err("approval_chat_id 须为数字或 @name".to_owned());
+    }
+    Ok(())
 }
 
 /// Rejects "Local" and unknown zones; the system zoneinfo database is the
@@ -220,6 +249,26 @@ mod tests {
     #[test]
     fn default_config_validates() {
         assert!(good().validate().is_ok());
+    }
+
+    #[test]
+    fn approval_credentials_must_pair_up() {
+        let good_token = "123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        for (t, c, ok) in [
+            (good_token, "555", true),
+            (good_token, "-100123456789", true),
+            (good_token, "@me", true),
+            (good_token, "", false),     // 半配置
+            ("", "555", false),          // 半配置
+            ("notatoken", "555", false), // 无冒号
+            ("123:short", "555", false), // secret 太短
+            (good_token, "!", false),    // chat 形非法
+        ] {
+            let mut cfg = good();
+            cfg.approval_bot_token = t.to_owned();
+            cfg.approval_chat_id = c.to_owned();
+            assert_eq!(cfg.validate().is_ok(), ok, "{t}|{c}");
+        }
     }
 
     #[test]

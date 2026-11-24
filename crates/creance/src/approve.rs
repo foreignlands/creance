@@ -104,9 +104,10 @@ fn write_grant(profile: &str, action: &str) -> Result<(), String> {
 /// 该操作是否持有效批条（未配置审批通道时默认放行——通道是加固项，
 /// 不是必须项；配置了才强制）。
 pub fn has_grant(profile: &str, cfg: &Config, action: &str) -> bool {
-    if cfg.approval_bot_token.is_empty() {
+    if cfg.approval_bot_token.is_empty() && cfg.approval_chat_id.is_empty() {
         return true;
     }
+    prune_expired(profile);
     let Ok(text) = std::fs::read_to_string(grant_path(profile, action)) else {
         return false;
     };
@@ -118,4 +119,24 @@ pub fn has_grant(profile: &str, cfg: &Config, action: &str) -> bool {
         .map(|d| d.as_secs())
         .unwrap_or(u64::MAX);
     now < expiry
+}
+
+/// 清理过期批条，防止 .approvals/ 无限累积。
+fn prune_expired(profile: &str) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let Ok(entries) = std::fs::read_dir(format!("{profile}/.approvals")) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let expired = std::fs::read_to_string(e.path())
+            .ok()
+            .and_then(|t| t.trim().parse::<u64>().ok())
+            .is_some_and(|exp| now >= exp);
+        if expired {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
 }

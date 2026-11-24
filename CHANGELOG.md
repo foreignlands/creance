@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.9] — 全面自审批
+
+- 审批通道收口：`approval_bot_token`/`approval_chat_id` 成对校验进
+  config validate（token 须 `<bot_id>:<secret>` 形，chat 须数字或
+  @name）；`has_grant` 判启用口径与校验对齐；过期批条自动清理防
+  `.approvals/` 无限累积。
+- README 补全 Command surface 表（28 命令按生命周期/代理/身份迁移/
+  使用面/验收运维分组）——此前只列 4 个，新命令家族全部未记录。
+
 ## [0.7.8] — 手机审批通道
 
 - 复用成熟通道规格落地：`creance approve <action>` 经 Telegram Bot 发
