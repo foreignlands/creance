@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.6] — 2026-11-24
+
+### 新增
+
+- **两层访问控制·防越权层**：安装期属主绑定——`init`/`setup` 在
+  profile 写入 `.owner`（当前 uid，0600）；新探针
+  `access-owner-bound`（uid 不一致即判离）与
+  `access-perms-locked`（profile 目录 0700、config/guest-profile/
+  sources 必须 0600，任何放宽判离）。state 树各级目录收紧
+  0700（纵深防御）。
+- 探针清单 +2（ROADMAP/README 同步）。
+
 ## [0.7.5] — 2026-11-24
 
 ### 新增

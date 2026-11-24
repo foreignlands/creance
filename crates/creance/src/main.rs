@@ -258,6 +258,9 @@ fn cmd_init() -> i32 {
     if let Err(e) = creance_vm::private::ensure_private_dir(&parent) {
         return fail(e.to_string());
     }
+    // 防越权层：安装期属主绑定——记录创建者 uid，越权者拿着目录也
+    // 会被 access-owner-bound 探针判离。
+    let _ = creance_vm::private::record_owner(&parent);
     let bytes = match serde_json::to_vec_pretty(&config::default_config()) {
         Ok(b) => b,
         Err(e) => return fail(e.to_string()),
@@ -860,6 +863,8 @@ fn cmd_setup(memory: u32, cpus: u32) -> i32 {
         browser_language: cfg.browser_language.clone(),
         guest,
     };
+    // 防越权层：既有 profile 首次 setup 时补记属主绑定。
+    let _ = creance_vm::private::record_owner(&profile);
     // F-051: setup on an existing instance rebuilds it — the backend's
     // create refuses to touch a live directory, and every "re-run setup"
     // guidance (drift, promise changes) depends on this path existing.

@@ -115,6 +115,10 @@ pub fn setup_instance(
     }
     let dir = instance_dir(profile, instance);
     let state = vm::state_dir(profile);
+    // Two-layer access control: every state parent is owner-only too —
+    // the profile dir's 0700 already fences it, this is defense-in-depth.
+    crate::private::ensure_private_dir(&state).map_err(|e| e.to_string())?;
+    crate::private::ensure_private_dir(&vm::instances_root(profile)).map_err(|e| e.to_string())?;
     image::ensure_base_image(&state)?;
     std::fs::create_dir_all(&options.workspace).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -712,6 +716,8 @@ mod tests {
                 let (u, z) = match rel.as_str() {
                     "host.rs" => (6, 2),
                     "pidfile.rs" => (5, 0),
+                    // libc::getuid ×2 (owner binding) + the allow line.
+                    "private.rs" => (3, 0),
                     "qemu/mod.rs" => (4, 0),
                     "qemu/runner.rs" => (3, 0),
                     "running.rs" => (2, 0),

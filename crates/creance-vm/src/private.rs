@@ -1,4 +1,5 @@
 //! Private host storage: directories and files only the current user may read.
+#![allow(unsafe_code)] // libc::getuid for the owner-binding record — audited
 
 use std::fs;
 use std::io;
@@ -14,6 +15,34 @@ pub fn ensure_private_dir(path: &str) -> io::Result<()> {
         return Err(io::Error::other("private storage must be a real directory"));
     }
     set_mode(path, 0o700)
+}
+
+/// The owner-binding record name inside a profile directory.
+pub const OWNER_FILE: &str = ".owner";
+
+/// Two-layer access control, anti-escalation half: the profile records
+/// which uid created it. Written once at init/setup; never overwritten
+/// (a rotation must go through the explicit bundle/persona paths).
+pub fn record_owner(profile_dir: &str) -> std::io::Result<()> {
+    let path = crate::paths::join(profile_dir, OWNER_FILE);
+    if Path::new(&path).exists() {
+        return Ok(());
+    }
+    let uid = unsafe { libc::getuid() };
+    crate::write_private_atomic(&path, uid.to_string().as_bytes()).map_err(std::io::Error::other)
+}
+
+/// The uid the profile is bound to; `None` when no binding exists yet.
+pub fn owner_uid(profile_dir: &str) -> Option<u32> {
+    let path = crate::paths::join(profile_dir, OWNER_FILE);
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+}
+
+/// The uid currently running this process.
+pub fn current_uid() -> u32 {
+    unsafe { libc::getuid() }
 }
 
 /// Restricts an existing file or local socket to the current user.

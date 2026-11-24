@@ -223,6 +223,56 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
         },
     });
 
+    // 9. 防越权层·属主绑定：profile 记录的创建者 uid 必须与当前进程
+    //    uid 一致；绑定缺失视为未建立（老 profile 在下次 init/setup
+    //    补记），不一致即判离。
+    out.push(Probe {
+        id: "access-owner-bound",
+        layer: "access",
+        outcome: match creance_vm::private::owner_uid(profile) {
+            Some(uid) if uid != creance_vm::private::current_uid() => Outcome::Escaped(format!(
+                "profile 属主 uid={uid} 与当前 uid={} 不一致",
+                creance_vm::private::current_uid()
+            )),
+            Some(_) => Outcome::Contained,
+            None => Outcome::NotEnforced,
+        },
+    });
+
+    // 10. 防越权层·权限锁：profile 目录 0700、敏感文件 0600。任何一个
+    //    放松了都判离——它是本机其它用户接触身份材料的唯一通道。
+    out.push(Probe {
+        id: "access-perms-locked",
+        layer: "access",
+        outcome: {
+            use std::os::unix::fs::PermissionsExt;
+            let dir_ok = std::fs::metadata(profile)
+                .map(|m| m.is_dir() && m.permissions().mode() & 0o777 == 0o700)
+                .unwrap_or(false);
+            if !std::path::Path::new(profile).exists() {
+                Outcome::NotEnforced
+            } else {
+                let mut loose = Vec::new();
+                if !dir_ok {
+                    loose.push(format!("{profile} 目录权限非 0700"));
+                }
+                for f in ["config.json", "guest-profile.json", "sources.json"] {
+                    let p = creance_vm::paths::join(profile, f);
+                    if let Ok(m) = std::fs::metadata(&p) {
+                        if m.permissions().mode() & 0o077 != 0 {
+                            loose.push(format!("{f} 权限非 0600"));
+                        }
+                    }
+                }
+                if loose.is_empty() {
+                    Outcome::Contained
+                } else {
+                    Outcome::Escaped(loose.join("；"))
+                }
+            }
+        },
+    });
+
     out
 }
 
@@ -513,11 +563,13 @@ mod tests {
             ))
             .to_string_lossy()
             .into_owned();
-        std::fs::create_dir_all(&dir).unwrap();
+        // Mirror cmd_init's discipline: a real profile directory is
+        // owner-only from birth (the perms-locked probe enforces it).
+        creance_vm::private::ensure_private_dir(&dir).unwrap();
         let config_path = paths::join(&dir, "config.json");
-        std::fs::write(
+        creance_vm::write_private_atomic(
             &config_path,
-            serde_json::to_vec_pretty(&config::default_config()).unwrap(),
+            &serde_json::to_vec_pretty(&config::default_config()).unwrap(),
         )
         .unwrap();
         (dir, config_path)
