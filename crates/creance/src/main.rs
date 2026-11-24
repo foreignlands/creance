@@ -59,6 +59,7 @@ fn main() {
         Commands::PersonaSave { name } => cmd_persona_save(&name),
         Commands::PersonaUse { name } => cmd_persona_use(&name),
         Commands::PersonaList => cmd_persona_list(),
+        Commands::MigrateExport { file } => cmd_migrate_export(&file),
         Commands::EscapeTest => cmd_escape_test(),
         Commands::GateOpen => cmd_gate(true),
         Commands::GateClose => cmd_gate(false),
@@ -195,6 +196,14 @@ enum Commands {
     PersonaUse { name: String },
     /// List saved personas.
     PersonaList,
+    /// Export the whole machine state (persona + saved personas) as a
+    /// password-sealed migration bundle. Password from
+    /// CREANCE_BUNDLE_PASSWORD; import with `bundle-import`.
+    MigrateExport {
+        /// Output .crb path.
+        #[arg(long)]
+        file: String,
+    },
     /// Run the containment probe suite (host checks + in-guest probes).
     EscapeTest,
     /// Open the environment gate (check window + grant). The wire follows.
@@ -566,6 +575,28 @@ fn cmd_persona_use(name: &str) -> i32 {
     // guest 内的 hostname/username/machine-id 仍是上一个 persona 的。
     println!("persona 已切换到 {name}，重建实例……");
     cmd_setup(8, 4)
+}
+
+/// 整机迁移导出：persona 文件 + bundles/ 快照树全量进迁移包（与
+/// Bundle 容器一体：argon2id→XChaCha20-Poly1305 双层密封）。
+fn cmd_migrate_export(file: &str) -> i32 {
+    let password = match bundle_password() {
+        Ok(p) => p,
+        Err(e) => return fail(e),
+    };
+    match creance_vm::bundle::export_with(&profile(), &password, true) {
+        Ok(bytes) => match std::fs::write(file, &bytes) {
+            Ok(()) => {
+                println!(
+                    "迁移包已导出（{} 字节，含 persona 快照树）→ {file}",
+                    bytes.len()
+                );
+                0
+            }
+            Err(e) => fail(format!("写入 {file} 失败：{e}")),
+        },
+        Err(e) => fail(e),
+    }
 }
 
 fn cmd_persona_list() -> i32 {

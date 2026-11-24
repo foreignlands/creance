@@ -30,16 +30,59 @@ fn kdf(password: &str, salt: &[u8; 16]) -> Result<[u8; 32], String> {
     Ok(key)
 }
 
-fn manifest_of(profile_dir: &str) -> Result<Vec<u8>, String> {
+/// A manifest entry path is either a top-level persona file or a
+/// `bundles/<name>/<file>` relative path with safe components.
+fn allowed_relpath(name: &str) -> bool {
+    if FILES.contains(&name) {
+        return true;
+    }
+    let parts: Vec<&str> = name.split('/').collect();
+    parts.len() == 3
+        && parts[0] == "bundles"
+        && parts[1..].iter().all(|c| {
+            !c.is_empty()
+                && c.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-' || b == b'.')
+                && *c != ".."
+        })
+}
+
+fn manifest_of(profile_dir: &str, include_bundles: bool) -> Result<Vec<u8>, String> {
     let mut files = serde_json::Map::new();
     let mut carried = 0usize;
-    for name in FILES {
+    let mut names: Vec<String> = FILES.iter().map(|s| s.to_string()).collect();
+    if include_bundles {
+        // 整机迁移：保存过的 persona 快照一并随行。
+        let root = crate::paths::join(profile_dir, "bundles");
+        if let Ok(rd) = std::fs::read_dir(&root) {
+            for persona in rd.flatten() {
+                let pname = persona.file_name().to_string_lossy().into_owned();
+                if !persona.path().is_dir() {
+                    continue;
+                }
+                if let Ok(inner) = std::fs::read_dir(persona.path()) {
+                    for f in inner.flatten() {
+                        if f.path().is_file() {
+                            names.push(format!(
+                                "bundles/{pname}/{}",
+                                f.file_name().to_string_lossy()
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for name in &names {
+        if !allowed_relpath(name) {
+            continue;
+        }
         let path = crate::paths::join(profile_dir, name);
         match std::fs::read(&path) {
             Ok(bytes) => {
                 use base64::Engine;
                 files.insert(
-                    (*name).to_owned(),
+                    name.clone(),
                     serde_json::Value::from(
                         base64::engine::general_purpose::STANDARD.encode(&bytes),
                     ),
@@ -63,10 +106,20 @@ fn manifest_of(profile_dir: &str) -> Result<Vec<u8>, String> {
 
 /// Packs the persona of `profile_dir` and seals it with `password`.
 pub fn export(profile_dir: &str, password: &str) -> Result<Vec<u8>, String> {
+    export_with(profile_dir, password, false)
+}
+
+/// `include_bundles` carries the saved-persona snapshots too — the
+/// whole-machine migration shape.
+pub fn export_with(
+    profile_dir: &str,
+    password: &str,
+    include_bundles: bool,
+) -> Result<Vec<u8>, String> {
     if password.is_empty() {
         return Err("主密码不能为空".to_owned());
     }
-    let plain = manifest_of(profile_dir)?;
+    let plain = manifest_of(profile_dir, include_bundles)?;
     let mut salt = [0u8; 16];
     let mut nonce_bytes = [0u8; 24];
     use rand::RngCore;
@@ -137,8 +190,8 @@ pub fn import(profile_dir: &str, password: &str, bytes: &[u8]) -> Result<usize, 
     let files = manifest["files"].as_object().ok_or("manifest 缺 files")?;
     // Two passes: verify nothing would be clobbered before writing any.
     for name in files.keys() {
-        if !FILES.contains(&name.as_str()) {
-            return Err(format!("bundle 含未知文件 {name}，拒绝落地"));
+        if !allowed_relpath(name) {
+            return Err(format!("bundle 含未白名单路径 {name}，拒绝落地"));
         }
         if std::path::Path::new(&crate::paths::join(profile_dir, name)).exists() {
             return Err(format!(
@@ -154,6 +207,12 @@ pub fn import(profile_dir: &str, password: &str, bytes: &[u8]) -> Result<usize, 
             .and_then(|s| base64::engine::general_purpose::STANDARD.decode(s).ok())
             .ok_or_else(|| format!("{name} 内容损坏"))?;
         let path = crate::paths::join(profile_dir, name);
+        if let Some(parent) = std::path::Path::new(&path).parent() {
+            if !parent.exists() {
+                crate::private::ensure_private_dir(&parent.to_string_lossy())
+                    .map_err(|e| format!("{name} 父目录创建失败：{e}"))?;
+            }
+        }
         crate::write_private_atomic(&path, &raw)?;
         written += 1;
     }
@@ -203,6 +262,30 @@ mod tests {
         });
         assert!(files_set_rejects(&mut manifest));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn migrate_carries_the_saved_persona_tree() {
+        let src = std::env::temp_dir().join(format!("crb-mig-{}", std::process::id()));
+        let dst = std::env::temp_dir().join(format!("crb-migd-{}", std::process::id()));
+        let pdir = src.join("bundles/work");
+        std::fs::create_dir_all(&pdir).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::write(src.join("config.json"), b"{}").unwrap();
+        std::fs::write(pdir.join("guest-profile.json"), br#"{"p":1}"#).unwrap();
+        let sealed = export_with(src.to_str().unwrap(), "pw", true).unwrap();
+        let n = import(dst.to_str().unwrap(), "pw", &sealed).unwrap();
+        assert_eq!(n, 2);
+        assert_eq!(
+            std::fs::read(dst.join("bundles/work/guest-profile.json")).unwrap(),
+            b"{\"p\":1}"
+        );
+        // A traversal-shaped relpath can never have been produced by
+        // export — and is refused on a forged manifest anyway.
+        assert!(!allowed_relpath("bundles/../x"));
+        assert!(!allowed_relpath("../config.json"));
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dst);
     }
 
     // Helper mirroring import's allow-list check, used to prove a forged
