@@ -52,6 +52,7 @@ fn main() {
         Commands::Up => cmd_up(),
         Commands::Shell { command } => cmd_shell(command),
         Commands::Claude => cmd_shell(vec!["claude".to_owned()]),
+        Commands::Oauth => cmd_oauth(),
         Commands::EscapeTest => cmd_escape_test(),
         Commands::GateOpen => cmd_gate(true),
         Commands::GateClose => cmd_gate(false),
@@ -154,6 +155,8 @@ enum Commands {
     },
     /// Run Claude Code in the environment VM.
     Claude,
+    /// On-demand OAuth/verify channel: noVNC over ssh forward, torn down on exit.
+    Oauth,
     /// Run the containment probe suite (host checks + in-guest probes).
     EscapeTest,
     /// Open the environment gate (check window + grant). The wire follows.
@@ -779,6 +782,63 @@ fn cmd_up() -> i32 {
         println!("Environment is up. The guest's only route out is the managed core (`creance escape-test` proves it).");
     }
     code
+}
+
+fn cmd_oauth() -> i32 {
+    let profile = profile();
+    let instance = instance();
+    // The channel is an ssh -L forward into the guest's loopback noVNC
+    // plus the ephemeral display stack `creance-oauth` runs. Everything
+    // tears down when this command exits — nothing outlives the session.
+    let target = match creance_vm::vm::ssh_target(&profile, &instance) {
+        Ok(t) => t,
+        Err(e) => return fail(e),
+    };
+    // Guest side is fixed 127.0.0.1:6080; the HOST side takes any free
+    // loopback port — a fixed one collides with unrelated listeners.
+    let local_port = match std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)) {
+        Ok(l) => l.local_addr().map(|a| a.port()).unwrap_or(0),
+        Err(e) => return fail(format!("cannot allocate a local port: {e}")),
+    };
+    let mut fwd = std::process::Command::new("ssh");
+    creance_vm::vm::apply_ssh_options(&mut fwd, &target);
+    let mut child = match fwd
+        .arg("-o")
+        .arg("StrictHostKeyChecking=yes")
+        .arg("-o")
+        .arg("ExitOnForwardFailure=yes")
+        .arg("-N")
+        .arg("-L")
+        .arg(format!("127.0.0.1:{local_port}:127.0.0.1:6080"))
+        .arg("127.0.0.1")
+        .stdin(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => return fail(format!("cannot spawn ssh forward: {e}")),
+    };
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    match child.try_wait() {
+        Ok(Some(_)) => return fail("ssh forward exited immediately".to_owned()),
+        Ok(None) => {}
+        Err(e) => return fail(format!("ssh forward: {e}")),
+    }
+    if let Err(e) =
+        creance_vm::vm::guest_script(&profile, &instance, "sh /usr/local/bin/creance-oauth start")
+    {
+        let _ = child.kill();
+        return fail(e);
+    }
+    println!("OAuth 通道已开：在宿主浏览器打开 http://127.0.0.1:{local_port}/vnc.html");
+    println!("完成验证后回车，通道即销毁（X 桌面、浏览器、noVNC 全部回收）");
+    let mut line = String::new();
+    let _ = std::io::stdin().read_line(&mut line);
+    let _ =
+        creance_vm::vm::guest_script(&profile, &instance, "sh /usr/local/bin/creance-oauth stop");
+    let _ = child.kill();
+    let _ = child.wait();
+    println!("oauth channel torn down");
+    0
 }
 
 fn cmd_shell(command: Vec<String>) -> i32 {

@@ -65,6 +65,44 @@ export SESSION_TZ={timezone}
 export SESSION_LOCALE={locale}
 export SESSION_LANGUAGE={browser_language}
 SESSENV
+# The on-demand OAuth/verify channel (0.7.x): an ephemeral X display,
+# the guest browser and noVNC on loopback — started by `creance oauth`,
+# killed when it ends. Bound to 127.0.0.1; the host reaches it over the
+# ssh forward, never over the net.
+cat > /usr/local/bin/creance-oauth <<'OAUTHCHAN'
+#!/bin/sh
+TL="${{HOME:-/tmp}}/creance-oauth.log"
+. /etc/profile.d/session-env.sh 2>/dev/null || true
+case "${{1:-start}}" in
+  start)
+    if pgrep -f 'Xvnc :99' >/dev/null 2>&1; then
+      echo 'oauth channel already up'
+      exit 0
+    fi
+    # setsid: the invoking ssh session ends right after start; background
+    # children must outlive its hangup to keep the channel alive.
+    setsid Xvnc :99 -geometry 1280x800 -depth 24 -rfbport 5900 -localhost -SecurityTypes None >>"$TL" 2>&1 &
+    sleep 1
+    setsid env DISPLAY=:99 openbox-session >>"$TL" 2>&1 &
+    setsid env TZ="$SESSION_TZ" DISPLAY=:99 LANG="$SESSION_LOCALE" \
+      /usr/local/bin/creance-browser --no-sandbox --lang="$SESSION_LANGUAGE" \
+      --start-maximized about:blank >>"$TL" 2>&1 &
+    setsid websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5900 >>"$TL" 2>&1 &
+    sleep 1
+    echo 'oauth channel up on 127.0.0.1:6080'
+    ;;
+  stop)
+    pkill -f 'websockify' 2>/dev/null
+    pkill -f 'creance-chrome' 2>/dev/null
+    pkill -f 'openbox' 2>/dev/null
+    pkill -f 'Xvnc :99' 2>/dev/null
+    echo 'oauth channel down'
+    ;;
+  status)
+    pgrep -f 'Xvnc :99' >/dev/null 2>&1 && echo up || echo down
+    ;;
+esac
+OAUTHCHAN
 export DEBIAN_FRONTEND=noninteractive
 locale-gen {locale} >/dev/null 2>&1 || true
 update-locale LANG={locale} >/dev/null 2>&1 || true
@@ -192,7 +230,8 @@ timeout "$TOOLCHAIN_BUDGET" sh -c '
       && ln -sf /usr/local/lib/creance-chrome/chrome /usr/local/bin/creance-browser 2>> /var/log/creance-toolchain.log \
       || rm -rf "/tmp/chrome-$CREANCE_CFT_DIR" /tmp/creance-chrome.zip
     apt-get install '"$APT_OPTS"' -y -qq libnss3 libnspr4 libasound2t64 libatk-bridge2.0-0 libatk1.0-0 libcups2 libdrm2 libgbm1 libgtk-3-0 libxcomposite1 libxdamage1 libxkbcommon0 libxrandr2 libxfixes3 libpango-1.0-0 libcairo2 xdg-utils fonts-liberation >> /var/log/creance-toolchain.log 2>&1 || true
-    echo "chrome install rc=$? browser=$(command -v creance-browser || echo missing)" >> /var/log/creance-toolchain.log
+    apt-get install '"$APT_OPTS"' -y -qq tigervnc-standalone-server novnc websockify openbox >> /var/log/creance-toolchain.log 2>&1 || true
+    echo "chrome install rc=$? browser=$(command -v creance-browser || echo missing) vnc=$(command -v Xvnc || echo missing) novnc=$(command -v websockify || echo missing)" >> /var/log/creance-toolchain.log
   fi
   apt-get install '"$APT_OPTS"' -y -qq git xz-utils >> /var/log/creance-toolchain.log 2>&1 || true
   echo "toolchain end node=$(/usr/local/bin/node -v 2>/dev/null || command -v node || echo missing) claude=$(command -v claude || echo missing)" >> /var/log/creance-toolchain.log
@@ -424,6 +463,7 @@ mod tests {
             "cat > /etc/profile.d/session-env.sh <<'SESSENV'",
             "cat > /etc/iptables/rules.v4 <<'EGRESSRULES'",
             "cat > /etc/systemd/system/egress-lock.service <<'LOCKUNIT'",
+            "cat > /usr/local/bin/creance-oauth <<'OAUTHCHAN'",
             "systemctl enable egress-lock.service >/dev/null",
             "systemctl daemon-reload",
             "systemctl restart egress-lock.service",
@@ -438,7 +478,7 @@ mod tests {
         // concatenates adjacent quoted segments, so `system""d`,
         // `egress-""lock` and `cat >"…"` only differ on the surface.
         let norm: String = s.chars().filter(|c| *c != '\'' && *c != '"').collect();
-        assert_eq!(norm.matches("cat >").count(), 3, "{s}");
+        assert_eq!(norm.matches("cat >").count(), 4, "{s}");
         // Navigation/side-write verbs are banned outright: a `cd` into
         // the unit dir plus a relative `cat > x` writes a second unit
         // without touching the counts; `tee`/`dd` spellings bypass
@@ -708,7 +748,24 @@ mod tests {
         let mut rest = s.as_str();
         while let Some((pos, dir)) = DIRS
             .iter()
-            .filter_map(|d| rest.find(d).map(|p| (p, *d)))
+            .filter_map(|d| {
+                rest.find(d).and_then(|p| {
+                    // Only a dir at a token boundary is an absolute path:
+                    // `/bin/` inside `/usr/local/bin` is part of a longer
+                    // path already rewritten at `/usr/`, not a new root.
+                    let b = if p == 0 {
+                        None
+                    } else {
+                        rest.as_bytes().get(p - 1).copied()
+                    };
+                    match b {
+                        None | Some(b' ') | Some(b'\t') | Some(b'"') | Some(b'\'') | Some(b'>')
+                        | Some(b'=') | Some(b';') | Some(b'|') | Some(b'&') | Some(b'(')
+                        | Some(b':') | Some(b'`') => Some((p, *d)),
+                        _ => None,
+                    }
+                })
+            })
             .min_by_key(|(p, _)| *p)
         {
             rewritten.push_str(&rest[..pos]);

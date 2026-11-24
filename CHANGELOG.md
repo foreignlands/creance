@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.7.1] — 2026-11-24
+
+### 新增
+
+- **`creance oauth` — 按需 OAuth/验证通道**：guest 内预装
+  `creance-oauth` 脚本（Xvnc 虚拟显示 + openbox + creance-browser +
+  noVNC/websockify，全部绑 127.0.0.1，setsid 脱离 ssh 会话存活）；
+  宿主侧 `ssh -L` 空闲端口转发到 noVNC 页面，回车即用即毁
+  （X 桌面/浏览器/noVNC/转发全部回收）。OAuth 的 localhost 回调在
+  guest 内天然闭环。toolchain 腿补装
+  tigervnc-standalone-server/novnc/websockify/openbox。
+
+### Fixed
+
+- 执行测试的 stub 路径重写器：目录前缀只在 token 边界命中——
+  `/usr/local/bin/…` 内的 `/bin/` 曾被二次重写成
+  `$STUB/usr/local/$STUB/bin/…` 不可达路径。
+
 ## [0.7.0] — 2026-11-24
 
 ### 新增（0.6.8 规格落进 0.7.x 版本线）
