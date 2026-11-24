@@ -53,6 +53,7 @@ fn main() {
         Commands::Shell { command } => cmd_shell(command),
         Commands::Claude => cmd_shell(vec!["claude".to_owned()]),
         Commands::Oauth => cmd_oauth(),
+        Commands::IdentityReset { memory, cpus } => cmd_identity_reset(memory, cpus),
         Commands::EscapeTest => cmd_escape_test(),
         Commands::GateOpen => cmd_gate(true),
         Commands::GateClose => cmd_gate(false),
@@ -157,6 +158,16 @@ enum Commands {
     Claude,
     /// On-demand OAuth/verify channel: noVNC over ssh forward, torn down on exit.
     Oauth,
+    /// Rotate the guest identity fingerprint (hostname/username/session
+    /// token/machine-id) by regenerating the guest profile and rebuilding
+    /// the VM disk. The host workspace is untouched; the VM must be
+    /// stopped first.
+    IdentityReset {
+        #[arg(long, default_value_t = 8)]
+        memory: u32,
+        #[arg(long, default_value_t = 4)]
+        cpus: u32,
+    },
     /// Run the containment probe suite (host checks + in-guest probes).
     EscapeTest,
     /// Open the environment gate (check window + grant). The wire follows.
@@ -371,6 +382,30 @@ fn cmd_gate(open: bool) -> i32 {
         }
         Err(e) => fail(e),
     }
+}
+
+/// 指纹一键重置：轮换 guest 身份指纹（hostname/username/session_token，
+/// 重建实例随之换 machine-id）。设计约束：必须先 `creance stop`——运行中
+/// 的实例不能被 setup 的 rebuild 路径删除。客机配置文件不可读时拒绝盲删
+/// （F-022 纪律：不可读的身份不重置）。
+fn cmd_identity_reset(memory: u32, cpus: u32) -> i32 {
+    let profile = profile();
+    let instance = instance();
+    if creance_vm::vm::instance_running(&profile, &instance) {
+        return fail(format!(
+            "实例 {instance} 仍在运行，先 `creance stop` 再重置指纹"
+        ));
+    }
+    let guest_path = creance_vm::paths::join(&profile, creance_vm::guestprofile::FILENAME);
+    if Path::new(&guest_path).exists() {
+        if creance_vm::guestprofile::Profile::load_or_create(&profile).is_err() {
+            return fail("客机配置不可读，拒绝重置身份；请修复权限或手动轮换".to_owned());
+        }
+        if let Err(e) = std::fs::remove_file(&guest_path) {
+            return fail(format!("客机配置删除失败（{e}），重置中止"));
+        }
+    }
+    cmd_setup(memory, cpus)
 }
 
 fn cmd_escape_test() -> i32 {

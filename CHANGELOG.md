@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.3] — 2026-11-24
+
+### 新增
+
+- **`creance identity-reset` — 指纹一键重置**：轮换 guest 身份指纹
+  （hostname/username/session_token，重建实例随之换 machine-id），
+  VM 磁盘重建、宿主 workspace 不动。运行中实例拒绝（先 `creance
+  stop`）；客机配置不可读时拒绝盲删（F-022 纪律）。
+
 ## [0.7.2] — 2026-11-24
 
 ### 新增
