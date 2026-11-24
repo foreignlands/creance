@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.10] — 优化轮（审查清单已批项）
+
+- `gate.rs` 2118 行拆为 `gate/{mod,core,daemon,client,tests}.rs`
+  （265/528/210/164/965 行）——状态机、daemon 管理面、客户端、测试四
+  域分家，原 watchdog 源码钉迁移为四文件拼接断言。
+- 服务侧 8 处 `.expect("status")` 换 `status_json` 降级返回——序列化
+  失败走错误响应而不是 daemon panic。
+- `doctor` 补审批通道启用态检查项。
+
 ## [0.7.9] — 全面自审批
 
 - 审批通道收口：`approval_bot_token`/`approval_chat_id` 成对校验进

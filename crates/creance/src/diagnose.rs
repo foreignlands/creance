@@ -140,6 +140,14 @@ pub fn diagnose(profile: &str, config_path: &str) -> Vec<Check> {
                     detail: e,
                 }),
             }
+            // 审批通道：成对校验已在 config validate 兜底；这里报启用态。
+            if !cfg.approval_bot_token.is_empty() {
+                out.push(Check {
+                    status: Status::Ok,
+                    name: "approval channel",
+                    detail: format!("Telegram bot 已配置，chat {}", cfg.approval_chat_id),
+                });
+            }
         }
         Err(e) => out.push(Check {
             status: Status::Fail,
