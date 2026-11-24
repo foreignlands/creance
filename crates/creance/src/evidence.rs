@@ -18,7 +18,7 @@
 //! silently fails against such a subscription. The evidence keys below
 //! are therefore a 1.1.1.1-path sample, not a whole-egress guarantee. A
 //! second independent source narrows (cannot close) this; until then the
-//! anchor's guarantee is: "the exit reaches Cloudflare from <ip> —
+//! anchor's guarantee is: "the exit reaches Cloudflare from `<ip>` —
 //! everything else rests on the subscription's routing honesty."
 
 use creance_vm::config::Config;
@@ -27,8 +27,10 @@ use std::time::Duration;
 use std::time::Instant;
 
 /// The exit-observation endpoint (shared with the gate watchdog's
-/// periodic sampling — both fetch through `creance_net::trace`).
-pub use creance_net::trace::TRACE_URL;
+/// periodic sampling — both fetch through `creance_net::trace`). Kept
+/// as a const, not a re-export: `pub use` would erase the public API
+/// item (semver-checks flags a missing const).
+pub const TRACE_URL: &str = creance_net::trace::TRACE_URL;
 /// The observation budget: a check window (180s) must survive it easily.
 const TRACE_BUDGET: Duration = Duration::from_secs(25);
 

@@ -3,6 +3,7 @@ name = "creance-net"
 description = "Proxy-only network fabric: SOCKS5/CONNECT/TLS tunnels, DoH, DNS wire codec."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 

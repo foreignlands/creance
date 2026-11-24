@@ -1,3 +1,6 @@
+// The module docs intentionally link private items — they describe the
+// internal seal invariant, which is the point of the doc.
+#![allow(rustdoc::private_intra_doc_links)]
 //! The up-gate egress chain — probe script, verdict, and the sealed
 //! marker arm — in one module so the chain cannot be decomposed.
 //!

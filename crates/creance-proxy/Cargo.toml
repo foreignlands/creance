@@ -3,6 +3,7 @@ name = "creance-proxy"
 description = "Managed proxy lifecycle: subscription store and import, mihomo runtime config, launchd service."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 

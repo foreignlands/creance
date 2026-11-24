@@ -28,7 +28,7 @@ const LONGEST_SOCK: &str = "ssh.sock.1234567890123456";
 /// Fits the longest socket in this home: `<home>/<name>/<socket>` must stay
 /// under `UNIX_PATH_MAX`.
 ///
-/// Lima's formula: <home>/<name>/<socket> must fit UNIX_PATH_MAX-1, i.e.
+/// Lima's formula: `<home>/<name>/<socket>` must fit UNIX_PATH_MAX-1, i.e.
 /// name <= UnixPathMax - 1 - len(home) - len("/") - len("/" + sock).
 pub fn home_limit(home: &str, logical: bool) -> Limit {
     Limit((socket_budget(home, logical).clamp(1, 76)) as usize)

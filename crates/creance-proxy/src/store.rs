@@ -301,7 +301,7 @@ impl Store {
         Ok(())
     }
 
-    /// The generated mihomo configuration (see [runtime]).
+    /// The generated mihomo configuration (see `runtime`).
     pub fn runtime_yaml(&self, profile: &str) -> Result<Vec<u8>, String> {
         crate::runtime::generate(self, profile)
     }

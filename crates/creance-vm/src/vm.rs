@@ -205,7 +205,7 @@ const STRIPPED: &[&str] = &[
     "LIMA_HOME",
 ];
 
-/// The child environment cage's checks see: everything but [STRIPPED], plus
+/// The child environment cage's checks see: everything but `STRIPPED`, plus
 /// `extra`. Documented and tested here; `limactl` applies the same filter
 /// through `env_remove`, and QEMU/ssh children get it applied by us.
 pub fn sanitized_env(extra: &[(&str, String)]) -> Vec<(String, String)> {
@@ -215,7 +215,7 @@ pub fn sanitized_env(extra: &[(&str, String)]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Applies [STRIPPED] to a Command the way [`sanitized_env`] documents.
+/// Applies `STRIPPED` to a Command the way [`sanitized_env`] documents.
 pub fn strip_env(cmd: &mut std::process::Command) {
     for name in STRIPPED {
         cmd.env_remove(name);

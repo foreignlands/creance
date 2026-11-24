@@ -3,6 +3,7 @@ name = "creance"
 description = "creance: a contained workspace for AI agents (CLI + workbench)."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 

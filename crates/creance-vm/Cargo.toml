@@ -3,6 +3,7 @@ name = "creance-vm"
 description = "Host and guest orchestration: profile config, paths, naming, state, Lima lifecycle."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
