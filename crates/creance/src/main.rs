@@ -324,6 +324,20 @@ fn cmd_gate(open: bool) -> i32 {
                 location.ip, location.country_code
             ));
         }
+        // 四元组一致性（0.7.0）：出口国别已实测——persona 的
+        // 时区/语言/locale 落在该地区 plausible 集之外即"US IP + 东八区 +
+        // 中文"式穿帮，fail-closed。未登记国别无判词（unknown 不定罪）。
+        if let Some(Err(reason)) = creance_vm::exit_policy::fingerprint_verdict(
+            &location.country_code,
+            &cfg.timezone,
+            &cfg.locale,
+            &cfg.browser_language,
+        ) {
+            return fail(format!(
+                "出口指纹四元组穿帮，外网保持关闭：{reason}（实测出口 {} {}）",
+                location.ip, location.country_code
+            ));
+        }
         gate::open(&instance_dir, &creance::evidence::grant_checks(&location)).map(|s| {
             format!(
                 "open (epoch {}，出口 {} {})",

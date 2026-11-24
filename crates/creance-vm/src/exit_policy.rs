@@ -331,6 +331,157 @@ fn masked(addr: Ipv4Addr, bits: u8) -> Ipv4Addr {
     Ipv4Addr::from(v)
 }
 
+/// Fingerprint-quadruple plausibility (0.7.0): exit country ↔ VM timezone ↔
+/// Accept-Language ↔ locale. The table answers "would a real user in this
+/// country plausibly carry this fingerprint?" — the "US IP + 东八区 + 中文
+/// 语言" giveaway the roadmap's exit-standard names.
+///
+/// Country → (IANA timezone prefixes, plausible language subtags). `en`
+/// appears in every row: it is the world's default UI language, so only a
+/// NON-English mismatch is a signal. `Etc/UTC` is treated as neutral
+/// (server default, weak signal) — the hard fail is a timezone that
+/// belongs to a DIFFERENT region.
+const COUNTRY_PROFILE: &[(&str, &[&str], &[&str])] = &[
+    ("US", &["America/", "US/"], &["en", "es"]),
+    ("CA", &["America/", "Canada/"], &["en", "fr"]),
+    (
+        "MX",
+        &["America/Mexico", "America/Cancun", "America/Tijuana"],
+        &["es", "en"],
+    ),
+    (
+        "BR",
+        &[
+            "America/Sao_Paulo",
+            "America/Manaus",
+            "America/Fortaleza",
+            "Brazil/",
+        ],
+        &["pt", "en"],
+    ),
+    ("GB", &["Europe/London"], &["en"]),
+    ("IE", &["Europe/Dublin"], &["en"]),
+    ("DE", &["Europe/Berlin"], &["de", "en"]),
+    ("FR", &["Europe/Paris"], &["fr", "en"]),
+    ("NL", &["Europe/Amsterdam"], &["nl", "en"]),
+    ("BE", &["Europe/Brussels"], &["nl", "fr", "en"]),
+    ("CH", &["Europe/Zurich"], &["de", "fr", "it", "en"]),
+    ("AT", &["Europe/Vienna"], &["de", "en"]),
+    ("IT", &["Europe/Rome"], &["it", "en"]),
+    ("ES", &["Europe/Madrid"], &["es", "en"]),
+    ("PT", &["Europe/Lisbon"], &["pt", "en"]),
+    ("SE", &["Europe/Stockholm"], &["sv", "en"]),
+    ("NO", &["Europe/Oslo"], &["no", "nb", "en"]),
+    ("DK", &["Europe/Copenhagen"], &["da", "en"]),
+    ("FI", &["Europe/Helsinki"], &["fi", "en"]),
+    ("PL", &["Europe/Warsaw"], &["pl", "en"]),
+    ("CZ", &["Europe/Prague"], &["cs", "en"]),
+    (
+        "RU",
+        &[
+            "Europe/Moscow",
+            "Asia/Yekaterinburg",
+            "Asia/Novosibirsk",
+            "Asia/Vladivostok",
+        ],
+        &["ru", "en"],
+    ),
+    (
+        "TR",
+        &["Europe/Istanbul", "Asia/Istanbul", "Turkey"],
+        &["tr", "en"],
+    ),
+    ("JP", &["Asia/Tokyo"], &["ja", "en"]),
+    ("KR", &["Asia/Seoul"], &["ko", "en"]),
+    (
+        "CN",
+        &["Asia/Shanghai", "Asia/Urumqi", "PRC"],
+        &["zh", "en"],
+    ),
+    ("HK", &["Asia/Hong_Kong", "Hongkong"], &["zh", "en"]),
+    ("TW", &["Asia/Taipei"], &["zh", "en"]),
+    (
+        "SG",
+        &["Asia/Singapore", "Singapore"],
+        &["en", "zh", "ms", "ta"],
+    ),
+    ("IN", &["Asia/Kolkata", "Asia/Calcutta"], &["en", "hi"]),
+    ("TH", &["Asia/Bangkok"], &["th", "en"]),
+    ("VN", &["Asia/Ho_Chi_Minh", "Asia/Saigon"], &["vi", "en"]),
+    (
+        "ID",
+        &["Asia/Jakarta", "Asia/Makassar", "Asia/Jayapura"],
+        &["id", "en"],
+    ),
+    (
+        "MY",
+        &["Asia/Kuala_Lumpur", "Asia/Kuching"],
+        &["ms", "en", "zh"],
+    ),
+    ("PH", &["Asia/Manila"], &["en", "fil", "tl"]),
+    ("AU", &["Australia/"], &["en"]),
+    ("NZ", &["Pacific/Auckland"], &["en"]),
+    ("AE", &["Asia/Dubai"], &["ar", "en"]),
+    ("IL", &["Asia/Jerusalem", "Israel"], &["he", "en", "ar"]),
+    ("ZA", &["Africa/Johannesburg"], &["en", "af", "zu"]),
+    (
+        "AR",
+        &["America/Argentina/", "America/Buenos_Aires"],
+        &["es", "en"],
+    ),
+    ("CL", &["America/Santiago", "Chile/"], &["es", "en"]),
+    ("CO", &["America/Bogota"], &["es", "en"]),
+];
+
+/// The primary language subtag of a BCP-47 tag or a POSIX locale
+/// (`en-US`, `en_US.UTF-8`, `zh_CN` → `en`/`zh`). `None` on shapes the
+/// validator already rejects — the caller fails closed on its own.
+fn lang_subtag(tag: &str) -> Option<String> {
+    let head = tag.split(['-', '_', '.']).next()?;
+    if head.len() >= 2 && head.bytes().all(|c| c.is_ascii_lowercase()) {
+        Some(head.to_owned())
+    } else {
+        None
+    }
+}
+
+/// Judges one fingerprint triple against an observed exit country.
+///
+/// `None` — the country has no table row (unknown exits never convict).
+/// `Some(Ok(()))` — consistent. `Some(Err(reason))` — a 穿帮组合:
+/// timezone outside the country's zones (and not Etc/UTC), a browser
+/// language nobody there speaks, or a locale language nobody there speaks.
+/// The locale's REGION is deliberately not checked — `en_US.UTF-8` is the
+/// universal baseline locale and convicting it would fail every non-US
+/// profile's default config.
+pub fn fingerprint_verdict(
+    country_code: &str,
+    timezone: &str,
+    locale: &str,
+    browser_language: &str,
+) -> Option<Result<(), String>> {
+    let cc = country_code.to_ascii_uppercase();
+    let (_, zones, langs) = COUNTRY_PROFILE.iter().find(|(c, _, _)| *c == cc)?;
+    let tz = timezone.trim();
+    if tz != "Etc/UTC" && tz != "UTC" && !zones.iter().any(|z| tz.starts_with(z)) {
+        return Some(Err(format!(
+            "时区 {tz} 与出口国别 {cc} 不一致（该地区的时区候选：{}）",
+            zones.join("、")
+        )));
+    }
+    let bl = lang_subtag(browser_language).unwrap_or_default();
+    if !bl.is_empty() && !langs.iter().any(|l| *l == bl) {
+        return Some(Err(format!(
+            "浏览器语言 {browser_language} 与出口国别 {cc} 不一致"
+        )));
+    }
+    let ll = lang_subtag(locale).unwrap_or_default();
+    if !ll.is_empty() && !langs.iter().any(|l| *l == ll) {
+        return Some(Err(format!("locale {locale} 的语言与出口国别 {cc} 不一致")));
+    }
+    Some(Ok(()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,5 +631,56 @@ mod tests {
         // A configured anchor is never overwritten.
         let p2 = dynamic("country", "JP").bind_missing(&location("8.8.4.4", "US"));
         assert_eq!(p2.country_code, "JP");
+    }
+
+    #[test]
+    fn fingerprint_verdict_convicts_the_giveaway_combo() {
+        // The roadmap's named case: US exit + 东八区 + 中文语言.
+        let v = fingerprint_verdict("US", "Asia/Shanghai", "zh_CN.UTF-8", "zh-CN");
+        assert!(matches!(v, Some(Err(_))), "US+Shanghai+zh must convict");
+        // Timezone is the first convicted leg.
+        let v = fingerprint_verdict("US", "Asia/Shanghai", "en_US.UTF-8", "en-US");
+        assert!(matches!(v, Some(Err(ref m)) if m.contains("时区")));
+        // Language leg: zh browser language on a US exit convicts even
+        // with a plausible timezone.
+        let v = fingerprint_verdict("US", "America/New_York", "en_US.UTF-8", "zh-CN");
+        assert!(matches!(v, Some(Err(ref m)) if m.contains("浏览器语言")));
+        // Locale language leg.
+        let v = fingerprint_verdict("JP", "Asia/Tokyo", "zh_CN.UTF-8", "ja-JP");
+        assert!(matches!(v, Some(Err(ref m)) if m.contains("locale")));
+    }
+
+    #[test]
+    fn fingerprint_verdict_passes_consistent_and_neutral() {
+        // Fully consistent persona.
+        assert_eq!(
+            fingerprint_verdict("JP", "Asia/Tokyo", "ja_JP.UTF-8", "ja-JP"),
+            Some(Ok(()))
+        );
+        // Universal baseline: en_US locale + en-US language + UTC pass on
+        // any tabulated exit (default config must stay green).
+        assert_eq!(
+            fingerprint_verdict("DE", "Etc/UTC", "en_US.UTF-8", "en-US"),
+            Some(Ok(()))
+        );
+        assert_eq!(
+            fingerprint_verdict("SG", "Etc/UTC", "en_US.UTF-8", "en-US"),
+            Some(Ok(()))
+        );
+        // Multi-language countries accept each listed language.
+        assert_eq!(
+            fingerprint_verdict("SG", "Asia/Singapore", "zh_SG.UTF-8", "zh-CN"),
+            Some(Ok(()))
+        );
+        // Country with no row: no conviction either way.
+        assert_eq!(
+            fingerprint_verdict("XX", "Asia/Shanghai", "zh_CN.UTF-8", "zh-CN"),
+            None
+        );
+        // Case-insensitive country code.
+        assert!(matches!(
+            fingerprint_verdict("us", "Asia/Shanghai", "en_US.UTF-8", "en-US"),
+            Some(Err(_))
+        ));
     }
 }

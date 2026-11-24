@@ -37,7 +37,7 @@ creance 的定位：**通用的 AI agent 隔离容器**（功能对标 Claude Ca
 
 宿主侧（已强制）：
 <!-- probe-inventory:host-enforced -->
-config-valid / env-no-host-credentials / mounts-workspace-only / gate-record-private / credentials-are-session-only / fingerprint-consistent
+config-valid / env-no-host-credentials / mounts-workspace-only / gate-record-private / credentials-are-session-only / fingerprint-consistent / exit-fingerprint-consistent
 <!-- /probe-inventory:host-enforced -->
 
 VM 内（已强制。sock-docker·lima-guestagent 是参数化 sock-$s 的三运行时家族名；fs-flag-readable 是旗标 oracle；net-icmp-external 0.6.4 新增；proxy-path 是出口正向控制——guest 输出任何含 " ESCAPE" 的行即 exit 1，PASS 需真实订阅节点）：

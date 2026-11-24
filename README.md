@@ -79,7 +79,7 @@ gate-checked against the code by scripts/check-probe-inventory.sh on
 every CI run; ROADMAP.md tracks the honest-SKIP known gap (sock-abstract).
 
 <!-- probe-inventory:readme-enforced -->
-config-valid / env-no-host-credentials / mounts-workspace-only / gate-record-private / credentials-are-session-only / fingerprint-consistent / fs-flag-readable / guest-identity / guest-privilege / env-credentials / env-hex-tokens / ssh-material / sock-docker·lima-guestagent / net-direct-egress / net-dns-external / net-ipv6 / net-icmp-external / proxy-path
+config-valid / env-no-host-credentials / mounts-workspace-only / gate-record-private / credentials-are-session-only / fingerprint-consistent / fs-flag-readable / guest-identity / guest-privilege / env-credentials / env-hex-tokens / ssh-material / sock-docker·lima-guestagent / net-direct-egress / net-dns-external / net-ipv6 / net-icmp-external / proxy-path / exit-fingerprint-consistent
 <!-- /probe-inventory:readme-enforced -->
 
 ## Status

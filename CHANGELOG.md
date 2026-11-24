@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.7.0] — 2026-11-24
+
+### 新增（0.6.8 规格落进 0.7.x 版本线）
+
+- **浏览器进 guest**：provision toolchain 腿新增 Chrome for Testing
+  官方构建（158.0.8127.88，linux64/linux-arm64 双架构 sha256 钉死，
+  与 node tarball 同一供应链纪律——不匹配的 zip 拒解包）；运行库
+  经 apt 补装，软链 `/usr/local/bin/creance-browser`。实机验证：
+  guest 内 `creance-browser --headless` 真实渲染。
+- **出口指纹四元组探针**：`exit_policy::fingerprint_verdict`——实测
+  出口国别 ↔ VM 时区 ↔ 浏览器语言 ↔ locale 语言一致性表（42 国）。
+  "US IP + 东八区 + 中文语言"式穿帮组合现在：
+  (a) `gate open` 时 fail-closed（外网保持关闭）；
+  (b) escape 探针 `exit-fingerprint-consistent` 判 ESCAPE。
+  未登记国别/代理未运行不定罪（NotEnforced）。`Etc/UTC` 视为中立
+  时区，`en_US` locale 视为通用基线——默认配置在任意登记出口保持绿。
+
 All notable changes to creance are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/). During 0.x, breaking changes bump the minor.

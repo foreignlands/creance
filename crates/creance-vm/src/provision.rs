@@ -173,6 +173,27 @@ timeout "$TOOLCHAIN_BUDGET" sh -c '
   [ -x /usr/local/bin/node ] || apt-get install '"$APT_OPTS"' -y -qq nodejs npm >> /var/log/creance-toolchain.log 2>&1 || true
   echo "node fallback rc=$? node=$(command -v node || echo missing)" >> /var/log/creance-toolchain.log
   curl -fsSL -m 120 https://claude.ai/install.sh | bash >> /var/log/creance-toolchain.log 2>&1 || true
+  # Browser in guest (0.7.0): Chrome for Testing — the official Google
+  # build with versioned URLs, so the supply chain is pinnable like the
+  # node tarball above. A substituted zip is refused, not unpacked. The
+  # runtime deps come from apt (best-effort, like the rest of this leg).
+  case "$ARCH" in
+    x64)   CREANCE_CFT_SHA256=59e3b43f8b3aaa292238fbdcfb36a93127debd53e212510dcdc2cc8812b4b57e; CREANCE_CFT_DIR=linux64 ;;
+    arm64) CREANCE_CFT_SHA256=91669b5de79af808d498037dd974e4b09461776a1b5240b3bb656abd17e5d3ab; CREANCE_CFT_DIR=linux-arm64 ;;
+    *)     CREANCE_CFT_SHA256=; CREANCE_CFT_DIR= ;;
+  esac
+  if [ -n "$CREANCE_CFT_SHA256" ]; then
+    curl -fsSL -m 240 -o /tmp/creance-chrome.zip "https://storage.googleapis.com/chrome-for-testing-public/158.0.8127.88/$CREANCE_CFT_DIR/chrome-$CREANCE_CFT_DIR.zip" >> /var/log/creance-toolchain.log 2>&1
+    echo "chrome download rc=$?" >> /var/log/creance-toolchain.log
+    echo "$CREANCE_CFT_SHA256  /tmp/creance-chrome.zip" | sha256sum -c - >> /var/log/creance-toolchain.log 2>&1 || rm -f /tmp/creance-chrome.zip
+    [ -f /tmp/creance-chrome.zip ] && apt-get install '"$APT_OPTS"' -y -qq unzip >> /var/log/creance-toolchain.log 2>&1 \
+      && unzip -q -o /tmp/creance-chrome.zip -d /tmp >> /var/log/creance-toolchain.log 2>&1 \
+      && mv "/tmp/chrome-$CREANCE_CFT_DIR" /usr/local/lib/creance-chrome 2>> /var/log/creance-toolchain.log \
+      && ln -sf /usr/local/lib/creance-chrome/chrome /usr/local/bin/creance-browser 2>> /var/log/creance-toolchain.log \
+      || rm -rf "/tmp/chrome-$CREANCE_CFT_DIR" /tmp/creance-chrome.zip
+    apt-get install '"$APT_OPTS"' -y -qq libnss3 libnspr4 libasound2t64 libatk-bridge2.0-0 libatk1.0-0 libcups2 libdrm2 libgbm1 libgtk-3-0 libxcomposite1 libxdamage1 libxkbcommon0 libxrandr2 libxfixes3 libpango-1.0-0 libcairo2 xdg-utils fonts-liberation >> /var/log/creance-toolchain.log 2>&1 || true
+    echo "chrome install rc=$? browser=$(command -v creance-browser || echo missing)" >> /var/log/creance-toolchain.log
+  fi
   apt-get install '"$APT_OPTS"' -y -qq git xz-utils >> /var/log/creance-toolchain.log 2>&1 || true
   echo "toolchain end node=$(/usr/local/bin/node -v 2>/dev/null || command -v node || echo missing) claude=$(command -v claude || echo missing)" >> /var/log/creance-toolchain.log
 ' || true

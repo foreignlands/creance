@@ -190,6 +190,39 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
         },
     });
 
+    // 8. Exit fingerprint quadruple (0.7.0): while the proxy is up the
+    //    observed exit country must not contradict the persona's
+    //    timezone/language/locale. No evidence source (proxy down) is a
+    //    SKIP — the gate-open path enforces the same verdict hard.
+    out.push(Probe {
+        id: "exit-fingerprint-consistent",
+        layer: "profile",
+        outcome: match &cfg {
+            Ok(c) => {
+                if !instance_running(profile, &instance) {
+                    Outcome::NotEnforced
+                } else {
+                    match crate::evidence::observe(c) {
+                        Ok(location) => match creance_vm::exit_policy::fingerprint_verdict(
+                            &location.country_code,
+                            &c.timezone,
+                            &c.locale,
+                            &c.browser_language,
+                        ) {
+                            Some(Err(reason)) => Outcome::Escaped(format!(
+                                "{reason}（实测出口 {} {}）",
+                                location.ip, location.country_code
+                            )),
+                            _ => Outcome::Contained,
+                        },
+                        Err(_) => Outcome::NotEnforced, // 无证据不定罪：代理未运行时此层无法观测
+                    }
+                }
+            }
+            Err(e) => Outcome::Escaped(e.clone()),
+        },
+    });
+
     out
 }
 
