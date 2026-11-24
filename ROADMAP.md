@@ -23,7 +23,8 @@ creance 的定位：**通用的 AI agent 隔离容器**（功能对标 Claude Ca
 7. **访问控制（两层拆分，第三方审视②采纳）**：
    - **防越权层**（防非管理员用户）：二进制属主锁定+socket 0600+配置目录 0700+安装期属主绑定；
    - **防探测层**（防官方客户端在管理员权限下扫描本机）：guest 零残留（已部分完成）+虚拟硬件特征洗白（0.6.x 起步）+宿主通信通道隐蔽化。如实边界：管理员权限下的官方客户端扫描无法被"权限"挡住，只能靠特征卫生与架构隔离。
-8. 技术债并行：Go 授权集 11 项对齐+config 指纹三维绑定、出口证据二源交叉。
+8. 技术债并行：Go 授权集 11 项对齐+config 指纹三维绑定、出口证据二源交叉（v0.7.19 落地：1.1.1.1/trace + ipinfo.io 双源，分歧即错，二源失败降级 corroborated=no 记审计）。
+9. 数据面自有 wire（v0.7.19 落地，QEMU/Linux）：vhost-vsock + daemon 内建 AF_VSOCK→loopback 桥替 ssh -R 热路径；guest creance-wire 用户单元（socat）随 `.creance-wire` env 推送；legacy/macOS 仍 ssh -R。防探测洗白 QEMU 侧落地（AHCI+OEM ATA、SMBIOS、无 virtio-blk/rng）；残余（ACPI BOCHS/chassis、virtio-net/9p）为 qemu 工具链边界，记档挂外部审计。macOS/vz 侧：Lima 无 qemu 注入面（上游 #932），SMBIOS 层不可注入——边界已记档。
 
 ## v0.8 — 外部 LLM 审核版（一）+ API 稳定化
 其他 LLM 对抗审计+修复；rustdoc/MSRV/semver-checks 入 CI（发布准备）。特性冻结。

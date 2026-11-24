@@ -81,6 +81,12 @@ pub fn generate_lima_yaml(options: &SetupOptions) -> Result<Vec<u8>, String> {
     ssh.insert("localPort".into(), Yaml::from(0));
 
     let mut root = Mapping::new();
+    // Hardware-identity boundary on macOS: vz presents Apple's own
+    // VirtualMac SMBIOS — a uniform, plausible hypervisor identity, but
+    // not a scrubbed one. Lima exposes no qemu-arg passthrough
+    // (lima-vm/lima#932), so the SMBIOS/AHCI scrub stays QEMU-only;
+    // the guest-visible fields (hostname, machine-id, tz, locale)
+    // are already persona-seeded here.
     root.insert("vmType".into(), Yaml::from("vz"));
     root.insert("os".into(), Yaml::from("Linux"));
     root.insert("arch".into(), Yaml::from(arch));

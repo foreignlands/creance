@@ -46,6 +46,7 @@ pub struct Instance {
     /// deserialize to QEMU's default and keep it.
     #[serde(default = "hw_mac_legacy")]
     pub hw_mac: String,
+
     /// Host-side port forwarded to the guest's sshd.
     pub ssh_local_port: u16,
     pub memory_gib: u32,
@@ -75,6 +76,72 @@ impl Instance {
             created: crate::iso8601_now(),
         }
     }
+}
+
+/// Scrub/dataplane facts of one instance, kept in `hw.json` beside
+/// `instance.json` so `Instance` stays frozen — adding a field to an
+/// all-pub struct is a semver break on exhaustive literals (verified
+/// by the CI semver gate).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct HwRecord {
+    pub version: u32,
+    /// `sata` (AHCI + ide-hd with OEM ATA strings) or `virtio` —
+    /// missing hw.json = provisioned before the scrub, stays virtio.
+    pub disks: String,
+    /// vsock guest CID for the own-wire dataplane (vhost-vsock-pci).
+    /// 0 = legacy record: no vsock device, keeps the ssh -R wire.
+    pub cid: u32,
+}
+
+impl HwRecord {
+    /// CID space: 0,1,2 are reserved (any/host/hypervisor); the seed
+    /// keeps the allocation away from low hand-picked values.
+    fn for_instance(instance_id: &str) -> Self {
+        Self {
+            version: 1,
+            disks: "sata".to_owned(),
+            cid: 3 + (hwid::seed(instance_id) % 60_000) as u32,
+        }
+    }
+
+    /// Pre-scrub defaults — the record a pre-0.7.19 instance would
+    /// have written.
+    fn legacy() -> Self {
+        Self {
+            version: 1,
+            disks: "virtio".to_owned(),
+            cid: 0,
+        }
+    }
+}
+
+fn hw_file(profile: &str, instance: &str) -> String {
+    paths::join(&instance_dir(profile, instance), "hw.json")
+}
+
+/// The instance's hw record by its directory — `dir` already IS the
+/// instance dir in the runner path, so no profile lookup is needed.
+pub fn load_hw_dir(dir: &str) -> HwRecord {
+    std::fs::read_to_string(paths::join(dir, "hw.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .filter(|h: &HwRecord| h.version == 1)
+        .unwrap_or_else(HwRecord::legacy)
+}
+
+/// The instance's hw record: `hw.json`, defaulting to the pre-scrub
+/// legacy shape (virtio disks, ssh -R wire) when absent or corrupt.
+pub fn load_hw(profile: &str, instance: &str) -> Result<HwRecord, String> {
+    // Instance must exist — a missing record is a real error (the
+    // caller would otherwise start wiring a phantom instance).
+    load_instance(profile, instance)?;
+    Ok(load_hw_dir(&instance_dir(profile, instance)))
+}
+
+fn save_hw(profile: &str, instance: &str, hw: &HwRecord) -> Result<(), String> {
+    let bytes = serde_json::to_vec_pretty(hw).map_err(|e| e.to_string())?;
+    crate::write_private_atomic(&hw_file(profile, instance), &bytes)
+        .map_err(|e| format!("cannot write hw record: {e}"))
 }
 
 /// QEMU's default first-NIC MAC — what every pre-scrub instance was
@@ -155,6 +222,11 @@ pub fn setup_instance(
     let bytes = serde_json::to_vec_pretty(&inst).map_err(|e| e.to_string())?;
     crate::write_private_atomic(&instance_file(profile, instance), &bytes)
         .map_err(|e| format!("cannot write instance record: {e}"))?;
+    save_hw(
+        profile,
+        instance,
+        &HwRecord::for_instance(&inst.instance_id),
+    )?;
     Ok(0)
 }
 

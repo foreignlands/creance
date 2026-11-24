@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.7.19] — A–F 优化批：vsock 数据面 + 硬盘指纹 + 证据双源
+
+- **A+B 自有 wire 数据面**：新实例（`hw_cid>0`）起 vhost-vsock-pci，
+  gate daemon 内建 AF_VSOCK→loopback 桥替掉 ssh -R 热路径加密层；
+  guest 侧 `creance-wire` 用户单元（socat TCP↔VSOCK）跟随 `.creance-wire`
+  env 文件（daemon 推送 + `.wire-synced` marker），linger 保活跨重启。
+  旧实例（hw_cid=0）与 macOS/Lima 仍走 ssh -R；vsock 绑定失败回退
+  ssh -R。闸态联动不变：Closed→桥停（亚秒切断）。
+- **C 硬盘指纹可行子集**：新实例 virtio-blk→ICH9 AHCI + ide-hd（OEM
+  ATA model/serial，instance_id 种子化）+ 移除 virtio-rng（-cpu host
+  有 RDRAND）。`hw_disks` 记档字段：legacy=virtio，新实例=sata。
+  残余记档：ACPI "BOCHS"/chassis 为 qemu 构建边界，virtio-net/9p 保
+  留（功能边界）。
+- **D Lima/macOS 记档**：vz 呈现 Apple VirtualMac 统一身份，Lima 无
+  qemuArgs 注入面（上游 #932 未实现）——SMBIOS 层 macOS 侧不可注入，
+  guest 可见字段已由 persona 覆盖。
+- **E 证据双源**：trace 采样升级为 1.1.1.1/trace + ipinfo.io 双源——
+  国别分歧报错，二源失败降级 `corroborated=false` 并记
+  `exit_corroborated=no` 审计键。收窄 F-038 单目的地盲区。
+- **F gate 材料自愈**：`.gate-synced` marker 校验失败时 watchdog 每
+  ~10s 重推 `~/.creance-gate`（端口+token）直至落地——daemon 重启后
+  guest 侧材料不再失同步。
+
+## [0.7.18] — API 稳定化入 CI
+
+- MSRV 实证 1.88 并声明 `rust-version`（workspace + 5 crates）；
+  rustdoc `-D warnings`、cargo-semver-checks（基线=上一 tag）入
+  ci.sh——实跑抓获 TRACE_URL re-export 降级与 crate 版本停滞。
+
+## [0.7.17] — 出口证据周期采样
+
+- watchdog 每 ~30s 经托管核心采样出口 trace；国别相对授权基线漂移
+  →熔断，IP-only 漂移/采样失败只计数；无基线跳过。
+
+## [0.7.16] — 自审修钉
+
+- gatebridge stale 孤儿回收；MAC/UUID 尾字节去相关。
+
+## [0.7.15] — 防探测硬件特征洗白（QEMU）
+
+- instance_id 种子化 OEM 签名：SMBIOS 四表（五厂商笔记本池）+ v4
+  UUID + 真实 OUI MAC；identity-reset 随 instance_id 旋转。kvm=off +
+  -hypervisor 隐藏 CPU 标志。
+
+## [0.7.14] — guest 认证桥
+
+- daemon 增绑 127.0.0.1 TCP 控制口（仅 GET /status + action=plugin），
+  ssh -R 转进 guest；`~/.creance-gate` 材料下发（0600，token 逐次
+  轮换）；provision 装 `creance-call` 调用端。
+
+## [0.7.13] — 插件协议（MCP 受控逃逸第一刀）
+
+- gate `plugin` 动作=微型 gate-open：plugins.json 白名单、argv[0] 绝对
+  路径、不经 shell、`allow_args` 显式放开、`approval` 标项须持手机
+  批条；CLI `plugin-list`/`plugin-call`。
+
 ## [0.7.12] — Tauri 桌面壳（0.7 桌面化第一刀）
 
 - `app/` 独立 Tauri 工程（不进 workspace，CI 不受影响）：进程内起

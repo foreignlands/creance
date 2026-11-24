@@ -101,7 +101,7 @@ pub(crate) fn cmd_gate(open: bool) -> i32 {
             }
             Err(e) => return fail(format!("代理配置不可读，拒绝采样出口证据：{e}")),
         }
-        let location = match creance::evidence::observe(&cfg) {
+        let (location, corroborated) = match creance::evidence::observe_full(&cfg) {
             Ok(l) => l,
             Err(e) => return fail(format!("出口观测失败，外网保持关闭：{e}")),
         };
@@ -153,7 +153,11 @@ pub(crate) fn cmd_gate(open: bool) -> i32 {
                 );
             }
         }
-        gate::open(&instance_dir, &creance::evidence::grant_checks(&location)).map(|s| {
+        gate::open(
+            &instance_dir,
+            &creance::evidence::grant_checks_with(&location, corroborated),
+        )
+        .map(|s| {
             format!(
                 "open (epoch {}，出口 {} {})",
                 s.epoch, location.ip, location.country_code

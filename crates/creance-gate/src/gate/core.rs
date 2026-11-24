@@ -51,6 +51,15 @@ impl Gate {
             e.to_string()
         })?;
 
+        // Own-wire dataplane: the instance record's hw_cid selects vsock
+        // over ssh -R. Lima/macOS and legacy records read 0.
+        #[cfg(target_os = "linux")]
+        let hw_cid = creance_vm::qemu::load_hw(profile_dir, instance)
+            .map(|h| h.cid)
+            .unwrap_or(0);
+        #[cfg(not(target_os = "linux"))]
+        let hw_cid: u32 = 0;
+
         let gate = Arc::new(Gate {
             profile_dir: profile_dir.to_owned(),
             instance: instance.to_owned(),
@@ -76,6 +85,8 @@ impl Gate {
             tcp_listener: Mutex::new(Some(tcp)),
             tcp_port,
             evidence: Mutex::new(EvidenceState::default()),
+            hw_cid,
+            vbridge: Mutex::new(None),
         });
 
         // The lease watchdog: a gate left open (or checking) without renewal
@@ -92,6 +103,8 @@ impl Gate {
             // ~30s at the 500ms tick: interval between exit-evidence
             // samples while the gate is Open.
             let mut evidence_ticks = 0u32;
+            let mut gate_sync_ticks = 0u32;
+            let mut wire_sync_ticks = 0u32;
             loop {
                 std::thread::sleep(Duration::from_millis(500));
                 let Some(watchdog) = watchdog.upgrade() else {
@@ -128,6 +141,37 @@ impl Gate {
                         watchdog.tcp_port,
                         "gatebridge",
                     );
+                    // `~/.creance-gate` goes stale whenever a NEW record
+                    // supersedes the one `up` synced (fresh tcp_port +
+                    // token — e.g. daemon restarted without `up`). Push
+                    // the material once per record content; the marker
+                    // tracks what actually landed guest-side. Retried
+                    // every ~10s — a powered-off guest fails fast.
+                    gate_sync_ticks += 1;
+                    let marker = Path::new(&watchdog.record_path)
+                        .parent()
+                        .map(|p| p.join(".gate-synced"));
+                    let expected = format!("{}:{}", watchdog.tcp_port, watchdog.token);
+                    if let Some(marker) = marker {
+                        let synced = std::fs::read_to_string(&marker)
+                            .map(|m| m.trim() == expected)
+                            .unwrap_or(false);
+                        if !synced && gate_sync_ticks >= 20 {
+                            gate_sync_ticks = 0;
+                            if creance_vm::vm::guest_script(
+                                &watchdog.profile_dir,
+                                &watchdog.instance,
+                                &format!(
+                                    "umask 077; printf '%s\\n%s\\n' '{}' '{}' > \"$HOME/.creance-gate\"",
+                                    watchdog.tcp_port, watchdog.token
+                                ),
+                            )
+                            .is_ok()
+                            {
+                                let _ = std::fs::write(&marker, &expected);
+                            }
+                        }
+                    }
                 }
                 if closed {
                     let _ = creance_vm::tunnel::stop(&watchdog.profile_dir);
@@ -136,12 +180,64 @@ impl Gate {
                         &watchdog.instance,
                         watchdog.proxy_port,
                     );
+                    // Own-wire cut: dropping the bridge closes the
+                    // listener and every live splice (stop flag, quarter-
+                    // second poll granularity).
+                    lock_or_recover(&watchdog.vbridge).take();
+                } else if watchdog.hw_cid != 0 {
+                    // Own-wire dataplane (hw_cid > 0): the AF_VSOCK
+                    // bridge, with the ssh -R tunnel as the recorded
+                    // fallback when the host lacks /dev/vhost-vsock.
+                    let mut vb = lock_or_recover(&watchdog.vbridge);
+                    if vb.is_none() {
+                        match super::vsock::VsockBridge::start(watchdog.proxy_port) {
+                            Ok(b) => *vb = Some(b),
+                            Err(_) => {
+                                drop(vb);
+                                let _ = creance_vm::tunnel::ensure(
+                                    &watchdog.profile_dir,
+                                    &watchdog.instance,
+                                    watchdog.proxy_port,
+                                );
+                            }
+                        }
+                    }
+                    // Guest forwarder material: the user unit's env file
+                    // (~/.creance-wire = PORT=…) pushed like .creance-gate,
+                    // throttled, marked .wire-synced on success.
+                    wire_sync_ticks += 1;
+                    let marker = Path::new(&watchdog.record_path)
+                        .parent()
+                        .map(|p| p.join(".wire-synced"));
+                    let expected = format!("PORT={}", watchdog.proxy_port);
+                    if let Some(marker) = marker {
+                        let synced = std::fs::read_to_string(&marker)
+                            .map(|m| m.trim() == expected)
+                            .unwrap_or(false);
+                        if !synced && wire_sync_ticks >= 20 {
+                            wire_sync_ticks = 0;
+                            if creance_vm::vm::guest_script(
+                                &watchdog.profile_dir,
+                                &watchdog.instance,
+                                &format!(
+                                    "umask 077; printf 'PORT=%s\\n' '{}' > \"$HOME/.creance-wire\"; systemctl --user restart creance-wire 2>/dev/null || true",
+                                    watchdog.proxy_port
+                                ),
+                            )
+                            .is_ok()
+                            {
+                                let _ = std::fs::write(&marker, &expected);
+                            }
+                        }
+                    }
                 } else {
                     let _ = creance_vm::tunnel::ensure(
                         &watchdog.profile_dir,
                         &watchdog.instance,
                         watchdog.proxy_port,
                     );
+                }
+                if !closed {
                     // 熔断采样：连接被拒瞬间返回（常见死核心形态）；一个
                     // 存活监听则每 tick 清零计数。只在 Open 态计数——
                     // Checking 有自己的租期，不在此误熔断启动竞态。
@@ -217,10 +313,11 @@ impl Gate {
                                 let result = config::load(&g.config_path).and_then(|cfg| {
                                     creance_net::egress::Egress::new(&cfg.proxy_url, &cfg.dns_url)
                                         .and_then(|e| {
-                                            creance_net::trace::sample(
+                                            creance_net::trace::sample_pair(
                                                 &e,
                                                 Instant::now() + Duration::from_secs(10),
                                             )
+                                            .map(|(s, _)| s)
                                         })
                                 });
                                 lock_or_recover(&g.evidence).result = Some(result);

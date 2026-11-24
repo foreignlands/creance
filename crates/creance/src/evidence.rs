@@ -37,9 +37,16 @@ const TRACE_BUDGET: Duration = Duration::from_secs(25);
 /// Observes the exit through the profile's configured proxy. `Err` means
 /// no evidence at all — the caller must not grant on that.
 pub fn observe(cfg: &Config) -> Result<Location, String> {
+    observe_full(cfg).map(|(location, _)| location)
+}
+
+/// Like [`observe`] but also reports whether the second independent
+/// source corroborated the country (F-038's narrowing).
+pub fn observe_full(cfg: &Config) -> Result<(Location, bool), String> {
     let egress = creance_net::egress::Egress::new(&cfg.proxy_url, &cfg.dns_url)?;
-    let sample = creance_net::trace::sample(&egress, Instant::now() + TRACE_BUDGET)?;
-    Ok(sample_to_location(sample))
+    let (sample, corroborated) =
+        creance_net::trace::sample_pair(&egress, Instant::now() + TRACE_BUDGET)?;
+    Ok((sample_to_location(sample), corroborated))
 }
 
 /// Parses a `key=value` line format trace into a Location. Strict: an
@@ -67,6 +74,16 @@ fn sample_to_location(sample: creance_net::trace::ExitSample) -> Location {
 /// observations) plus the exit-consistency verdict from live evidence,
 /// with the observation itself recorded for the audit trail.
 pub fn grant_checks(location: &Location) -> std::collections::BTreeMap<String, String> {
+    grant_checks_with(location, false)
+}
+
+/// [`grant_checks`] plus the second-source corroboration flag, recorded
+/// as an inert audit key so a later watchdog sample can see how strong
+/// the baseline it compares against is.
+pub fn grant_checks_with(
+    location: &Location,
+    corroborated: bool,
+) -> std::collections::BTreeMap<String, String> {
     let mut checks = std::collections::BTreeMap::new();
     checks.insert("egress_policy".to_owned(), "passed".to_owned());
     checks.insert("fail_closed".to_owned(), "passed".to_owned());
@@ -79,6 +96,10 @@ pub fn grant_checks(location: &Location) -> std::collections::BTreeMap<String, S
     checks.insert("exit_ip".to_owned(), location.ip.clone());
     checks.insert("exit_country".to_owned(), location.country_code.clone());
     checks.insert("exit_sample".to_owned(), "1.1.1.1-path".to_owned());
+    checks.insert(
+        "exit_corroborated".to_owned(),
+        if corroborated { "yes" } else { "no" }.to_owned(),
+    );
     checks
 }
 

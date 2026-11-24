@@ -33,6 +33,9 @@ struct Oem {
     bios_vendor: &'static str,
     bios_version: &'static str,
     mac_oui: &'static str,
+    /// A disk model string that actually shipped inside this OEM's
+    /// laptops — the AHCI scrub leans on it (virtio-blk names Red Hat).
+    disk: &'static str,
 }
 
 const OEMS: &[Oem] = &[
@@ -45,6 +48,7 @@ const OEMS: &[Oem] = &[
         bios_vendor: "Dell Inc.",
         bios_version: "1.14.2",
         mac_oui: "00:14:22",
+        disk: "Micron 2400 MTFDKBK512TFK",
     },
     Oem {
         manufacturer: "LENOVO",
@@ -55,6 +59,7 @@ const OEMS: &[Oem] = &[
         bios_vendor: "LENOVO",
         bios_version: "N3CET58W (1.35 )",
         mac_oui: "68:F7:28",
+        disk: "WDC PC SN810 SDCQNRY-512G-1001",
     },
     Oem {
         manufacturer: "HP",
@@ -65,6 +70,7 @@ const OEMS: &[Oem] = &[
         bios_vendor: "HP",
         bios_version: "V72 Ver. 01.03.05",
         mac_oui: "3C:D9:2B",
+        disk: "Samsung MZVLQ512HBLU-00BH1",
     },
     Oem {
         manufacturer: "ASUSTeK COMPUTER INC.",
@@ -75,6 +81,7 @@ const OEMS: &[Oem] = &[
         bios_vendor: "American Megatrends Inc.",
         bios_version: "UX3405MA.308",
         mac_oui: "04:92:26",
+        disk: "WDC PC SN560 SDDPNQE-512G-1002",
     },
     Oem {
         manufacturer: "Acer",
@@ -85,11 +92,12 @@ const OEMS: &[Oem] = &[
         bios_vendor: "Insyde Corp.",
         bios_version: "V1.12",
         mac_oui: "00:1F:16",
+        disk: "Kingston OM8PCP3512F-AA1",
     },
 ];
 
 /// FNV-1a over the instance id — stable forever, unlike DefaultHasher.
-fn seed(id: &str) -> u64 {
+pub(crate) fn seed(id: &str) -> u64 {
     let mut h: u64 = 0xcbf29ce484222325;
     for b in id.as_bytes() {
         h ^= u64::from(*b);
@@ -117,6 +125,15 @@ pub struct Signature {
     pub smbios_type2: String,
     pub smbios_type3: String,
     pub mac: String,
+}
+
+/// ATA identify strings for the AHCI disk scrub (new instances only;
+/// legacy records keep virtio-blk, pinned like hw_mac). Kept off
+/// `Signature` — adding a field there is a semver break on exhaustive
+/// literals.
+pub struct AtaStrings {
+    pub model: String,
+    pub serial: String,
 }
 
 pub fn signature(instance_id: &str) -> Signature {
@@ -168,6 +185,17 @@ pub fn signature(instance_id: &str) -> Signature {
             oem.manufacturer, serial, chassis_serial, oem.chassis, oem.family
         ),
         mac,
+    }
+}
+
+/// The OEM ATA identify pair for the disk scrub — same seed → same OEM
+/// pool pick as `signature`, so model and DMI tell one story.
+pub fn ata(instance_id: &str) -> AtaStrings {
+    let h = seed(instance_id);
+    let oem = &OEMS[(h % OEMS.len() as u64) as usize];
+    AtaStrings {
+        model: oem.disk.to_owned(),
+        serial: format!("S{}", b32(h / 23, 9)),
     }
 }
 

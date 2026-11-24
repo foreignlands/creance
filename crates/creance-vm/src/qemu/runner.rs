@@ -108,6 +108,10 @@ pub fn build_args(inst: &Instance, dir: &str, state: &str) -> Result<Vec<String>
     // without; their visibility is the documented edge of the layer.
     let cpu = super::hwid::cpu_model();
     let hw = super::hwid::signature(&inst.instance_id);
+    let ata = super::hwid::ata(&inst.instance_id);
+    // Scrub/dataplane record lives beside instance.json (hw.json);
+    // absent = pre-scrub legacy record → virtio disks, no vsock.
+    let hw_rec = super::load_hw_dir(dir);
     let base = super::image::base_image_path(state, &inst.arch);
     let disk = super::image::overlay_path(dir);
     let seed = paths::join(dir, "seed.img");
@@ -119,7 +123,7 @@ pub fn build_args(inst: &Instance, dir: &str, state: &str) -> Result<Vec<String>
         }
     }
     let provisioned = Path::new(&paths::join(dir, "provisioned")).is_file();
-    let args: Vec<String> = vec![
+    let mut args: Vec<String> = vec![
         "-machine".into(),
         machine.into(),
         "-cpu".into(),
@@ -131,13 +135,6 @@ pub fn build_args(inst: &Instance, dir: &str, state: &str) -> Result<Vec<String>
         // The boot disk: the instance's overlay of the verified base image.
         "-drive".into(),
         format!("file={disk},if=none,id=boot,format=qcow2,discard=on"),
-        "-device".into(),
-        "virtio-blk-pci,drive=boot,bootindex=1".into(),
-        // The NoCloud seed on its own virtio disk.
-        "-drive".into(),
-        format!("file={seed},if=none,id=seed,format=raw,readonly=on"),
-        "-device".into(),
-        "virtio-blk-pci,drive=seed".into(),
         // slirp user networking: unprivileged NAT, same posture as the
         // macOS backend's usernet — the in-guest OUTPUT DROP firewall
         // (provision script) is the enforcement plane, so first-boot
@@ -161,9 +158,6 @@ pub fn build_args(inst: &Instance, dir: &str, state: &str) -> Result<Vec<String>
         // records keep QEMU's default because their netplan was rendered
         // for it; new instances carry the seeded real-vendor OUI.
         format!("virtio-net-pci,netdev=net0,mac={}", inst.hw_mac),
-        "-device".into(),
-        "virtio-rng-pci".into(),
-        // The single writable share: this workspace, 9p over virtio.
         "-fsdev".into(),
         format!(
             "local,id=host0,path={},security_model=mapped-xattr",
@@ -191,6 +185,55 @@ pub fn build_args(inst: &Instance, dir: &str, state: &str) -> Result<Vec<String>
         "-smbios".into(),
         hw.smbios_type3,
     ];
+    // Disks: legacy records keep virtio-blk (their first boot rendered
+    // for it); new instances get an ICH9 AHCI controller + OEM ATA
+    // identify strings — a real laptop's storage topology, no Red Hat
+    // strings. virtio-rng is gone for everyone: -cpu host gives the
+    // guest RDRAND, the device only ever advertised itself.
+    if hw_rec.disks == "sata" {
+        // The seed rides the AHCI bus as a plain ATA disk, not ATAPI:
+        // ds-identify runs before the cdrom driver probes, so a seed on
+        // sr0 is missed and cloud-init falls back to DataSourceNone
+        // (verified live — the guest user was never created). ide-hd
+        // rejects read-only drives, so the backing loses readonly=on;
+        // NoCloud never writes it anyway.
+        args.extend([
+            "-drive".into(),
+            format!("file={seed},if=none,id=seed,format=raw"),
+            "-device".into(),
+            "ich9-ahci,id=ahci".into(),
+            "-device".into(),
+            format!(
+                "ide-hd,drive=boot,bus=ahci.0,bootindex=1,model={},serial={}",
+                ata.model, ata.serial
+            ),
+            "-device".into(),
+            format!(
+                "ide-hd,drive=seed,bus=ahci.1,model={},serial={}",
+                ata.model, ata.serial
+            ),
+        ]);
+    } else {
+        // The NoCloud seed on its own read-only disk.
+        args.extend([
+            "-drive".into(),
+            format!("file={seed},if=none,id=seed,format=raw,readonly=on"),
+            "-device".into(),
+            "virtio-blk-pci,drive=boot,bootindex=1".into(),
+            "-device".into(),
+            "virtio-blk-pci,drive=seed".into(),
+        ]);
+    }
+    // Own-wire dataplane: the gate daemon bridges this AF_VSOCK
+    // listener to the managed core's loopback port, replacing the
+    // ssh -R encryption layer on the hot path. hw_cid 0 = legacy
+    // record — no device, the ssh -R wire keeps serving it.
+    if hw_rec.cid > 0 {
+        args.extend([
+            "-device".into(),
+            format!("vhost-vsock-pci,guest-cid={}", hw_rec.cid),
+        ]);
+    }
     Ok(args)
 }
 
@@ -404,6 +447,41 @@ mod tests {
         assert!(joined.contains("-display none"));
         assert!(joined.contains("serial"));
         assert!(joined.contains("qmp.sock"));
+        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::remove_dir_all(&state).unwrap();
+    }
+
+    #[test]
+    fn sata_hw_record_emits_ahci_and_vsock() {
+        let dir = dir_with_files();
+        let state = dir_with_files();
+        let base = super::super::image::base_image_path(&state, "amd64");
+        std::fs::create_dir_all(Path::new(&base).parent().unwrap()).unwrap();
+        std::fs::write(&base, b"x").unwrap();
+        std::fs::write(
+            Path::new(&dir).join("hw.json"),
+            r#"{"version":1,"disks":"sata","cid":40001}"#,
+        )
+        .unwrap();
+        let args = build_args(&inst(), &dir, &state).unwrap();
+        let joined = args.join(" ");
+        // AHCI disks carry OEM ATA strings — no virtio-blk, no Red Hat.
+        assert!(joined.contains("ich9-ahci"), "{joined}");
+        assert!(joined.contains("ide-hd,drive=boot,bus=ahci.0"), "{joined}");
+        assert!(joined.contains("ide-hd,drive=seed,bus=ahci.1"), "{joined}");
+        assert!(!joined.contains("virtio-blk"), "{joined}");
+        assert!(!joined.contains("readonly=on"), "{joined}");
+        // Own-wire dataplane: the vsock device rides the record's CID.
+        assert!(
+            joined.contains("vhost-vsock-pci,guest-cid=40001"),
+            "{joined}"
+        );
+        // The seed is a writable drive — ide-hd refuses read-only
+        // backends (live-verified; ATAPI seeds go DataSourceNone).
+        assert!(
+            joined.contains("file=") && joined.contains("id=seed"),
+            "{joined}"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
         std::fs::remove_dir_all(&state).unwrap();
     }

@@ -182,6 +182,27 @@ WantedBy=multi-user.target
 LOCKUNIT
 systemctl daemon-reload
 systemctl enable egress-lock.service >/dev/null
+# Own-wire forwarder (A+B): a USER unit bridging loopback:PORT to the
+# host's AF_VSOCK listener — the ssh -R wire's replacement. It waits on
+# ~/.creance-wire (PORT=…) which the gate daemon pushes per open; linger
+# keeps the user manager alive across boots so the unit re-arms on its
+# own. socat arrives with the toolchain extras below.
+mkdir -p /etc/systemd/user /var/lib/systemd/linger
+touch "/var/lib/systemd/linger/{username}"
+cat > /etc/systemd/user/creance-wire.service <<'WIREUNIT'
+[Unit]
+Description=creance own-wire forwarder
+ConditionPathExists=%h/.creance-wire
+
+[Service]
+ExecStart=/bin/sh -c '. "$HOME/.creance-wire" && exec socat TCP-LISTEN:$PORT,bind=127.0.0.1,reuseaddr,fork VSOCK-CONNECT:2:$PORT'
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+WIREUNIT
+systemctl --global enable creance-wire.service
 # Toolchain installs are best-effort (F-031) AND time-bounded (F-054):
 # `|| true` guards against failure, but a network BLACKHOLE neither
 # fails nor succeeds — the provisioner's own timeout then killed the
@@ -261,7 +282,7 @@ timeout "$TOOLCHAIN_BUDGET" sh -c '
     apt-get install '"$APT_OPTS"' -y -qq tigervnc-standalone-server novnc websockify openbox >> /var/log/creance-toolchain.log 2>&1 || true
     echo "chrome install rc=$? browser=$(command -v creance-browser || echo missing) vnc=$(command -v Xvnc || echo missing) novnc=$(command -v websockify || echo missing)" >> /var/log/creance-toolchain.log
   fi
-  apt-get install '"$APT_OPTS"' -y -qq git xz-utils >> /var/log/creance-toolchain.log 2>&1 || true
+  apt-get install '"$APT_OPTS"' -y -qq git socat xz-utils >> /var/log/creance-toolchain.log 2>&1 || true
   echo "toolchain end node=$(/usr/local/bin/node -v 2>/dev/null || command -v node || echo missing) claude=$(command -v claude || echo missing)" >> /var/log/creance-toolchain.log
 ' || true
 
@@ -493,6 +514,7 @@ mod tests {
             "cat > /etc/systemd/system/egress-lock.service <<'LOCKUNIT'",
             "cat > /usr/local/bin/creance-oauth <<'OAUTHCHAN'",
             "cat > /usr/local/bin/creance-call <<'PLGCALL'",
+            "cat > /etc/systemd/user/creance-wire.service <<'WIREUNIT'",
             "systemctl enable egress-lock.service >/dev/null",
             "systemctl daemon-reload",
             "systemctl restart egress-lock.service",
@@ -507,7 +529,7 @@ mod tests {
         // concatenates adjacent quoted segments, so `system""d`,
         // `egress-""lock` and `cat >"…"` only differ on the surface.
         let norm: String = s.chars().filter(|c| *c != '\'' && *c != '"').collect();
-        assert_eq!(norm.matches("cat >").count(), 5, "{s}");
+        assert_eq!(norm.matches("cat >").count(), 6, "{s}");
         // Navigation/side-write verbs are banned outright: a `cd` into
         // the unit dir plus a relative `cat > x` writes a second unit
         // without touching the counts; `tee`/`dd` spellings bypass
@@ -574,7 +596,8 @@ mod tests {
                     [
                         "systemctl daemon-reload",
                         "systemctl enable egress-lock.service >/dev/null",
-                        "systemctl restart egress-lock.service"
+                        "systemctl restart egress-lock.service",
+                        "systemctl --global enable creance-wire.service"
                     ]
                     .contains(&ln.as_str()),
                     "unexpected systemctl line: {l}"
@@ -592,7 +615,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(norm.matches("systemd/").count(), 1, "{s}");
+        assert_eq!(norm.matches("systemd/").count(), 5, "{s}");
         // F-096/F-098: the rules.v4 heredoc is checked STRUCTURALLY AND
         // EXECUTED. Structure: the `cat >` line is exactly the literal
         // (no `if`/`&&` prefix can mask it), exactly two lines mention
@@ -861,6 +884,7 @@ mod tests {
             [
                 "daemon-reload",
                 "enable egress-lock.service",
+                "--global enable creance-wire.service",
                 "restart egress-lock.service"
             ],
             "systemctl calls: {calls}"
@@ -955,7 +979,7 @@ mod tests {
             "apt node install is a fallback, not the primary"
         );
         let fallback = s.find("node fallback rc=").expect("fallback marker");
-        let extras = s.find("git xz-utils").expect("base extras");
+        let extras = s.find("git socat xz-utils").expect("base extras");
         assert!(
             fallback < extras,
             "the node fallback must precede the base extras"

@@ -11,6 +11,7 @@ repository.workspace = true
 url = { workspace = true }
 rustls = { workspace = true }
 rustls-pki-types = { workspace = true }
+serde_json = { workspace = true }
 webpki-roots = { workspace = true }
 
 [lints]

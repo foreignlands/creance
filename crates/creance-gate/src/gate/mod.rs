@@ -41,6 +41,7 @@ mod daemon;
 pub mod plugin;
 #[cfg(test)]
 mod tests;
+mod vsock;
 pub use client::*;
 pub use daemon::*;
 
@@ -228,6 +229,12 @@ pub struct Gate {
     /// grant-time observation convicts (node flip / subscription
     /// reroute), a failed sample only counts — upstream may flap.
     evidence: Mutex<EvidenceState>,
+    /// vsock guest CID from the instance record: >0 switches the
+    /// dataplane from `ssh -R` to the AF_VSOCK bridge below. 0 = legacy
+    /// instance (or macOS/Lima, which has no vsock device).
+    hw_cid: u32,
+    /// The own-wire bridge, live only while the gate is non-Closed.
+    vbridge: Mutex<Option<vsock::VsockBridge>>,
 }
 
 #[derive(Default)]

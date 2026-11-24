@@ -836,7 +836,8 @@ fn watchdog_fuse_source_pins() {
         include_str!("plugin.rs"),
         include_str!("core.rs"),
         include_str!("daemon.rs"),
-        include_str!("client.rs")
+        include_str!("client.rs"),
+        include_str!("vsock.rs")
     );
     // Global prod-region counts: pinning the loop's region by brace
     // matching is brittle, and a duplicated counter elsewhere is a
@@ -899,12 +900,12 @@ fn watchdog_fuse_source_pins() {
     let fuse_start = prod.find("let mut core_down_ticks").unwrap();
     let fuse_end = prod.rfind("core_down_ticks = 0;").unwrap();
     let fuse = &prod[fuse_start..fuse_end];
-    assert_eq!(fuse.matches("let mut").count(), 3, "{fuse}");
+    assert_eq!(fuse.matches("let mut").count(), 6, "{fuse}");
     assert!(
         !fuse.contains("bool"),
         "fuse softener in watchdog region: bool"
     );
-    assert_eq!(prod.matches("let mut").count(), 21, "{prod}");
+    assert_eq!(prod.matches("let mut").count(), 28, "{prod}");
     assert_eq!(prod.matches("= true;").count(), 3, "{prod}");
     assert_eq!(prod.matches("= false;").count(), 3, "{prod}");
     for needle in ["mem::take", "u32::from"] {
@@ -926,10 +927,12 @@ fn watchdog_fuse_source_pins() {
         1,
         "the watchdog's own closed-branch cut must exist"
     );
+    // The vsock dataplane keeps ssh -R as its recorded fallback plus
+    // the legacy-instance path — two ensure legs, one owner.
     assert_eq!(
         prod.matches("tunnel::ensure(").count(),
-        1,
-        "the open-path ensure leg must exist"
+        2,
+        "vsock fallback + legacy ensure legs"
     );
     assert!(prod.contains("代理核心不可达，自动熔断"));
     // Exit-evidence sampling (0.6.6 second half): the sampler must stay
@@ -949,7 +952,7 @@ fn watchdog_fuse_source_pins() {
         "sampler de-dup flag set"
     );
     assert!(
-        prod.contains("creance_net::trace::sample("),
+        prod.contains("creance_net::trace::sample_pair("),
         "samples through the shared trace path"
     );
     assert!(prod.contains("exit_ip_drift"), "IP-only drift is counted");
