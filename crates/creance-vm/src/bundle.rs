@@ -16,7 +16,7 @@ use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 pub const MAGIC: &[u8; 4] = b"CRB1";
 /// persona files a bundle carries. sources.json rides along because the
 /// account's dedicated exit node is part of the persona.
-const FILES: &[&str] = &["guest-profile.json", "config.json", "sources.json"];
+pub const FILES: &[&str] = &["guest-profile.json", "config.json", "sources.json"];
 
 fn kdf(password: &str, salt: &[u8; 16]) -> Result<[u8; 32], String> {
     let mut key = [0u8; 32];

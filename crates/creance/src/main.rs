@@ -56,6 +56,9 @@ fn main() {
         Commands::IdentityReset { memory, cpus } => cmd_identity_reset(memory, cpus),
         Commands::BundleExport { file } => cmd_bundle_export(&file),
         Commands::BundleImport { file } => cmd_bundle_import(&file),
+        Commands::PersonaSave { name } => cmd_persona_save(&name),
+        Commands::PersonaUse { name } => cmd_persona_use(&name),
+        Commands::PersonaList => cmd_persona_list(),
         Commands::EscapeTest => cmd_escape_test(),
         Commands::GateOpen => cmd_gate(true),
         Commands::GateClose => cmd_gate(false),
@@ -184,6 +187,14 @@ enum Commands {
         #[arg(long)]
         file: String,
     },
+    /// Snapshot the current persona (identity + config + exits) under a
+    /// name for later atomic switching.
+    PersonaSave { name: String },
+    /// Atomically switch to a saved persona: requires the VM stopped,
+    /// restores the persona files and rebuilds the VM disk.
+    PersonaUse { name: String },
+    /// List saved personas.
+    PersonaList,
     /// Run the containment probe suite (host checks + in-guest probes).
     EscapeTest,
     /// Open the environment gate (check window + grant). The wire follows.
@@ -464,6 +475,115 @@ fn cmd_bundle_import(file: &str) -> i32 {
         }
         Err(e) => fail(e),
     }
+}
+
+/// Persona name discipline: a name is a directory under `bundles/` — only
+/// [A-Za-z0-9_-] survives; anything else refuses before any path is built.
+fn persona_dir(profile: &str, name: &str) -> Result<String, String> {
+    if name.is_empty()
+        || name.len() > 64
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    {
+        return Err(format!("persona 名 {name:?} 非法（仅允许字母数字_-）"));
+    }
+    Ok(creance_vm::paths::join(
+        &creance_vm::paths::join(profile, "bundles"),
+        name,
+    ))
+}
+
+fn cmd_persona_save(name: &str) -> i32 {
+    let profile = profile();
+    let dir = match persona_dir(&profile, name) {
+        Ok(d) => d,
+        Err(e) => return fail(e),
+    };
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return fail(format!("persona 目录创建失败：{e}"));
+    }
+    let mut saved = 0usize;
+    for f in creance_vm::bundle::FILES {
+        let src = creance_vm::paths::join(&profile, f);
+        if Path::new(&src).exists() {
+            let dst = creance_vm::paths::join(&dir, f);
+            if let Err(e) = std::fs::copy(&src, &dst) {
+                return fail(format!("保存 {f} 失败：{e}"));
+            }
+            saved += 1;
+        }
+    }
+    if saved == 0 {
+        return fail("没有身份文件可快照".to_owned());
+    }
+    println!("persona {name} 已保存（{saved} 个文件）");
+    0
+}
+
+fn cmd_persona_use(name: &str) -> i32 {
+    let profile = profile();
+    let instance = instance();
+    if creance_vm::vm::instance_running(&profile, &instance) {
+        return fail(format!(
+            "实例 {instance} 仍在运行，先 `creance stop` 再切换 persona"
+        ));
+    }
+    let dir = match persona_dir(&profile, name) {
+        Ok(d) => d,
+        Err(e) => return fail(e),
+    };
+    if !Path::new(&dir).is_dir() {
+        return fail(format!(
+            "persona {name} 不存在（`creance persona-list` 查看）"
+        ));
+    }
+    // 原子语义：先验全部源文件可读可写回，再动手——中途失败不留下半换
+    // 状态。身份文件逐一覆盖写回（目标已存在是常态，bundle 导入才是
+    // 拒绝覆盖的场景）。
+    let mut staged = Vec::new();
+    for f in creance_vm::bundle::FILES {
+        let src = creance_vm::paths::join(&dir, f);
+        match std::fs::read(&src) {
+            Ok(bytes) => staged.push((f.to_string(), bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return fail(format!("persona {name} 的 {f} 不可读（{e}），切换中止")),
+        }
+    }
+    if staged.is_empty() {
+        return fail(format!("persona {name} 是空的，拒绝切换"));
+    }
+    for (f, bytes) in &staged {
+        let dst = creance_vm::paths::join(&profile, f);
+        if let Err(e) = creance_vm::write_private_atomic(&dst, bytes) {
+            return fail(format!("换回 {f} 失败：{e}"));
+        }
+    }
+    // 持久 device_id 物理隔离：身份文件换回后必须重建 VM 磁盘，否则
+    // guest 内的 hostname/username/machine-id 仍是上一个 persona 的。
+    println!("persona 已切换到 {name}，重建实例……");
+    cmd_setup(8, 4)
+}
+
+fn cmd_persona_list() -> i32 {
+    let dir = creance_vm::paths::join(&profile(), "bundles");
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        println!("（无已保存 persona）");
+        return 0;
+    };
+    let mut names: Vec<String> = rd
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().to_str().map(|s| s.to_owned()))
+        .collect();
+    names.sort();
+    for n in &names {
+        println!("{n}");
+    }
+    if names.is_empty() {
+        println!("（无已保存 persona）");
+    }
+    0
 }
 
 fn cmd_escape_test() -> i32 {
