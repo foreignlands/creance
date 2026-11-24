@@ -128,6 +128,20 @@ kill %1
 
 两行 `ok`（trace + DoH 真实出网往返）即冒烟通过。
 
+## 身份与审批
+
+多账号/迁移/手机审批三件套（v0.7.x 新面）：
+
+```sh
+creance persona-save us1            # 快照当前身份为 persona
+creance persona-use us1             # 原子切换（会重建 VM 磁盘）
+creance identity-reset              # 一键轮换指纹（需停机）
+creance migrate-export --file mv.crb && creance bundle-import --file mv.crb
+creance approve identity-reset      # 手机审批（需 config 配 approval_bot_token + approval_chat_id）
+```
+
+配置了审批通道后，`identity-reset`/`persona-use` 须持 10 分钟内批条。
+
 ## 常见问题
 
 - **`proxy-start` 报端口占用**：换个 store 端口或找到占用者；creance 绝不

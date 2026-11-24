@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.11] — 优化轮续：main.rs 拆分 + 返回码统一
+
+- `main.rs` 1334 行按域拆为 `cmds/{mod,identity,proxy,vm}.rs`
+  （42/230/177/496 行），main.rs 只剩 Cli/Commands + 分发（405 行含
+  测试钉）；源码钉改扫 cmds 四文件。
+- `vm::setup_instance` 返回码统一为 `i32`（与同族 `up`/`stop`/`shell`
+  一致，错误自打印）——`Result<i32>` 异类消灭。
+- QUICKSTART 补「身份与审批」节（persona/identity-reset/迁移/approve）。
+
 ## [0.7.10] — 优化轮（审查清单已批项）
 
 - `gate.rs` 2118 行拆为 `gate/{mod,core,daemon,client,tests}.rs`

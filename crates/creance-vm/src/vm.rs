@@ -516,24 +516,30 @@ pub fn up(profile: &str, instance: &str) -> i32 {
     }
 }
 
-/// Creates (provisions) the environment VM.
-pub fn setup_instance(
-    profile: &str,
-    instance: &str,
-    options: &SetupOptions,
-) -> Result<i32, String> {
+/// Creates (provisions) the environment VM. Unifies with the sibling
+/// `-> i32` surface: errors print and return 1.
+pub fn setup_instance(profile: &str, instance: &str, options: &SetupOptions) -> i32 {
     #[cfg(target_os = "macos")]
     {
-        crate::lima::setup_instance(profile, instance, options)?;
+        if let Err(e) = crate::lima::setup_instance(profile, instance, options) {
+            eprintln!("creance: {e}");
+            return 1;
+        }
         let yaml = paths::join(
             &paths::join(&state_dir(profile), "setup"),
             &format!("{instance}.yaml"),
         );
-        Ok(run_attached(profile, &["create", &yaml]))
+        run_attached(profile, &["create", &yaml])
     }
     #[cfg(not(target_os = "macos"))]
     {
-        crate::qemu::setup_instance(profile, instance, options)
+        match crate::qemu::setup_instance(profile, instance, options) {
+            Ok(code) => code,
+            Err(e) => {
+                eprintln!("creance: {e}");
+                1
+            }
+        }
     }
 }
 
