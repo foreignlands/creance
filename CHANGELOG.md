@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.8] — 手机审批通道
+
+- 复用成熟通道规格落地：`creance approve <action>` 经 Telegram Bot 发
+  审批请求（含随机回执码），等本人回复该码后在
+  `<profile>/.approvals/` 落 10 分钟批条（0600）。Bot 凭据走
+  config.json `approval_bot_token` + `approval_chat_id`；API 调用经
+  既有代理 egress 栈，宿主机无入站端口。
+- 敏感操作接线：`identity-reset` 与 `persona-use` 在通道已配置时须持
+  有效批条，否则拒绝并给 `creance approve` 指引；未配置通道默认放行
+  （加固项非必须项）。
+
 ## [0.7.7] — 2026-11-24
 
 ### 新增

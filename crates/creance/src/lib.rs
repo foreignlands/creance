@@ -1,6 +1,7 @@
 //! creance — assembly crate: the CLI, the workbench service, and
 //! diagnostics over the layer crates.
 
+pub mod approve;
 pub mod diagnose;
 pub mod escape;
 pub mod evidence;

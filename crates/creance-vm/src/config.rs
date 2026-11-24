@@ -37,6 +37,11 @@ pub struct Config {
     pub browser_language: String,
     #[serde(default)]
     pub exit_policy: ExitPolicy,
+    /// 手机审批通道（Telegram Bot）：敏感操作要求手机回执。空=未启用。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub approval_bot_token: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub approval_chat_id: String,
 }
 
 /// The configuration a fresh profile starts with.

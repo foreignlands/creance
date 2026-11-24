@@ -60,6 +60,7 @@ fn main() {
         Commands::PersonaUse { name } => cmd_persona_use(&name),
         Commands::PersonaList => cmd_persona_list(),
         Commands::MigrateExport { file } => cmd_migrate_export(&file),
+        Commands::Approve { action } => cmd_approve(&action),
         Commands::EscapeTest => cmd_escape_test(),
         Commands::GateOpen => cmd_gate(true),
         Commands::GateClose => cmd_gate(false),
@@ -204,6 +205,9 @@ enum Commands {
         #[arg(long)]
         file: String,
     },
+    /// Request phone approval for a sensitive action (Telegram channel
+    /// configured in config.json); grants a 10-minute pass on confirm.
+    Approve { action: String },
     /// Run the containment probe suite (host checks + in-guest probes).
     EscapeTest,
     /// Open the environment gate (check window + grant). The wire follows.
@@ -435,6 +439,9 @@ fn cmd_identity_reset(memory: u32, cpus: u32) -> i32 {
             "实例 {instance} 仍在运行，先 `creance stop` 再重置指纹"
         ));
     }
+    if let Err(e) = require_grant(&profile, "identity-reset") {
+        return fail(e);
+    }
     let guest_path = creance_vm::paths::join(&profile, creance_vm::guestprofile::FILENAME);
     if Path::new(&guest_path).exists() {
         if creance_vm::guestprofile::Profile::load_or_create(&profile).is_err() {
@@ -512,6 +519,9 @@ fn cmd_persona_save(name: &str) -> i32 {
         Ok(d) => d,
         Err(e) => return fail(e),
     };
+    if let Err(e) = require_grant(&profile, &format!("persona-use-{name}")) {
+        return fail(e);
+    }
     if let Err(e) = std::fs::create_dir_all(&dir) {
         return fail(format!("persona 目录创建失败：{e}"));
     }
@@ -597,6 +607,31 @@ fn cmd_migrate_export(file: &str) -> i32 {
         },
         Err(e) => fail(e),
     }
+}
+
+fn cmd_approve(action: &str) -> i32 {
+    let cfg = match config::load(&config::config_path()) {
+        Ok(c) => c,
+        Err(e) => return fail(e),
+    };
+    match creance::approve::request_approval(&profile(), &cfg, action) {
+        Ok(()) => {
+            println!("已批准：{action}（10 分钟内对该操作免复批）");
+            0
+        }
+        Err(e) => fail(e),
+    }
+}
+
+/// 配置了审批通道时要求持有效批条；未配置即放行（通道是加固项）。
+fn require_grant(profile: &str, action: &str) -> Result<(), String> {
+    let cfg = config::load(&config::config_path())?;
+    if creance::approve::has_grant(profile, &cfg, action) {
+        return Ok(());
+    }
+    Err(format!(
+        "{action} 需手机批准：先 `creance approve {action}` 并在手机上回执"
+    ))
 }
 
 fn cmd_persona_list() -> i32 {
