@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.12] — Tauri 桌面壳（0.7 桌面化第一刀）
+
+- `app/` 独立 Tauri 工程（不进 workspace，CI 不受影响）：进程内起
+  `creance::serve`（系统分配空闲口），窗口指到 127.0.0.1；托盘每 5s
+  轮询 `/api/status` 呈现核心/节点/实例态；IPC `creance_up`/`creance_stop`
+  /`proxy_start` 直调 creance-vm 的 `i32` 面——与 CLI 同一代码路径。
+- CSP 收紧到 `127.0.0.1:*`；serve 仍绑 loopback 不出网卡。
+- Linux 运行需 `libayatana-appindicator3-1`（托盘）；macOS 原生托盘。
+
 ## [0.7.11] — 优化轮续：main.rs 拆分 + 返回码统一
 
 - `main.rs` 1334 行按域拆为 `cmds/{mod,identity,proxy,vm}.rs`

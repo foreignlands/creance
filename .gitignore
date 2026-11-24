@@ -10,3 +10,4 @@ target/
 .vscode/
 .DS_Store
 .zcode/
+app/target/

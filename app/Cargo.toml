@@ -1,0 +1,18 @@
+[package]
+name = "creance-app"
+version = "0.7.12"
+edition = "2021"
+description = "creance desktop shell (Tauri) — thin shell over `creance serve`"
+build = "build.rs"
+
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2.5", features = [] }
+
+[dependencies]
+tauri = { version = "2.12", features = ["tray-icon"] }
+serde_json = "1"
+creance = { path = "../crates/creance" }
+creance-vm = { path = "../crates/creance-vm" }
+creance-proxy = { path = "../crates/creance-proxy" }

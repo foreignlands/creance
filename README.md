@@ -71,6 +71,12 @@ existing `~/.claude-cage` profiles keep working).
 
 完整参数走 `creance <cmd> --help`。
 
+## Desktop shell
+
+`app/` — Tauri 桌面壳（独立工程，不在 workspace）：进程内复用
+`creance serve`，窗口指向 loopback 端口 + 托盘巡检。构建需本机
+webkit/tauri 依赖：`cd app && cargo build`。
+
 ## Night-audit harness
 
 [`harness/`](harness/README.md) — 把一个 LLM（GLM 5.3 Flash）变成整夜
