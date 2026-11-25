@@ -1029,10 +1029,17 @@ fn watchdog_fuse_source_pins() {
     // permanent ssh -R in the host's ps.
     assert_eq!(
         prod.lines()
-            .filter(|l| l.trim() == "if watchdog.hw_cid != 0 {")
+            .filter(|l| l.trim() == "let cbridged = if watchdog.hw_cid != 0 {")
             .count(),
         1,
         "control-plane vsock leg verbatim"
+    );
+    assert_eq!(
+        prod.lines()
+            .filter(|l| l.trim() == "let restart = if cbridged {")
+            .count(),
+        1,
+        "forwarder restart is conditional on the bridge serving (F-A1 control-wire shape)"
     );
     assert!(
         prod.contains("restart creance-gatewire"),
@@ -1041,6 +1048,11 @@ fn watchdog_fuse_source_pins() {
     assert!(
         prod.contains("lock_or_recover(&watchdog.cbridge)"),
         "control bridge state is tracked"
+    );
+    assert_eq!(
+        prod.matches("tunnel::ensure_named(").count(),
+        2,
+        "control fallback + legacy ensure legs — dropping the fallback leaves no-vsock hosts dead (M16)"
     );
     // F-A2: a finished guest connection must never stop the bridge —
     // `stop.store` exists exactly once in prod (VsockBridge::stop),

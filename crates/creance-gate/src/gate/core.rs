@@ -142,7 +142,7 @@ impl Gate {
                     // long-lived forwarding process left in the host's
                     // ps. ssh -R remains the fallback when the host has
                     // no vhost-vsock, and for legacy/macOS instances.
-                    if watchdog.hw_cid != 0 {
+                    let cbridged = if watchdog.hw_cid != 0 {
                         {
                             let mut cb = lock_or_recover(&watchdog.cbridge);
                             if cb.is_none() {
@@ -164,6 +164,7 @@ impl Gate {
                                     }
                                 }
                             }
+                            cb.is_some()
                         }
                     } else {
                         let _ = creance_vm::tunnel::ensure_named(
@@ -172,7 +173,8 @@ impl Gate {
                             watchdog.tcp_port,
                             "gatebridge",
                         );
-                    }
+                        false
+                    };
                     // `~/.creance-gate` goes stale whenever a NEW record
                     // supersedes the one `up` synced (fresh tcp_port +
                     // token — e.g. daemon restarted without `up`). Push
@@ -190,11 +192,22 @@ impl Gate {
                             .unwrap_or(false);
                         if !synced && gate_sync_ticks >= 20 {
                             gate_sync_ticks = 0;
+                            // The forwarder restart rides along ONLY when
+                            // the control plane is actually on vsock — in
+                            // the ssh -R fallback the guest port already
+                            // belongs to the tunnel and a competing socat
+                            // bind would fight it (F-A1's shape on the
+                            // control wire).
+                            let restart = if cbridged {
+                                "; systemctl --user restart creance-gatewire 2>/dev/null || true"
+                            } else {
+                                ""
+                            };
                             if creance_vm::vm::guest_script(
                                 &watchdog.profile_dir,
                                 &watchdog.instance,
                                 &format!(
-                                    "umask 077; printf '%s\\n%s\\n' '{}' '{}' > \"$HOME/.creance-gate\"; systemctl --user restart creance-gatewire 2>/dev/null || true",
+                                    "umask 077; printf '%s\\n%s\\n' '{}' '{}' > \"$HOME/.creance-gate\"{restart}",
 
                                     watchdog.tcp_port, watchdog.token
                                 ),

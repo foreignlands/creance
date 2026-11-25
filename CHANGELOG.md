@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.7.22] - 2026-11-25
+
+### 深度自审第三轮：fallback 抢端口修复 + 变异矩阵扩展
+
+#### 修复
+- **控制面 fallback 抢端口（F-A1 同类隐患）**：vsock 控制桥未服务时，
+  gatewire 重启推送不再激活 guest socat——重启改为 `if cbridged` 条件化，
+  与数据面同一纪律；fallback 路径（ssh -R gatebridge）独占端口不再被打。
+- **覆盖缺口补钉**：控制面 fallback `ensure_named` 腿原无任何钉（M16 变异
+  存活）——计数钉补上后复注转红。
+
+#### 自审矩阵第三轮（全部转红）
+- M15 重启去条件化 / M16 控制面 fallback 丢弃 / M17 gatewire 单元缺失——
+  注入即红，还原即绿。
+
+#### 实机复验
+- 控制面 vsock 桥端到端：guest 内 `creance-call` 经 socat→vsock→桥→
+  daemon 全程打通；daemon 重起后 resync 推送新端口+token 且 gatewire
+  单元条件重启生效；非 plugin 动作在桥上仍 403。
+
 ## [0.7.21] — 控制面 vsock 化（宿主通道隐蔽化）+ corroborated 入判词
 
 - **宿主通信通道隐蔽化**：插件控制面从常驻 ssh -R（gatebridge）改为
