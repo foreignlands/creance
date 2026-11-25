@@ -87,6 +87,7 @@ impl Gate {
             evidence: Mutex::new(EvidenceState::default()),
             hw_cid,
             vbridge: Mutex::new(None),
+            cbridge: Mutex::new(None),
         });
 
         // The lease watchdog: a gate left open (or checking) without renewal
@@ -135,12 +136,43 @@ impl Gate {
                 // Guest 认证桥不是 egress——daemon 活着就转发（gate
                 // Closed 时 guest 仍可调白名单插件），只随 daemon 死。
                 if watchdog.tcp_port != 0 {
-                    let _ = creance_vm::tunnel::ensure_named(
-                        &watchdog.profile_dir,
-                        &watchdog.instance,
-                        watchdog.tcp_port,
-                        "gatebridge",
-                    );
+                    // Control plane over vsock (host-channel hygiene): a
+                    // second AF_VSOCK bridge on the daemon's tcp_port
+                    // replaces the permanent gatebridge ssh -R — no
+                    // long-lived forwarding process left in the host's
+                    // ps. ssh -R remains the fallback when the host has
+                    // no vhost-vsock, and for legacy/macOS instances.
+                    if watchdog.hw_cid != 0 {
+                        {
+                            let mut cb = lock_or_recover(&watchdog.cbridge);
+                            if cb.is_none() {
+                                match super::vsock::VsockBridge::start(watchdog.tcp_port) {
+                                    Ok(b) => {
+                                        *cb = Some(b);
+                                        let _ = creance_vm::tunnel::stop_named(
+                                            &watchdog.profile_dir,
+                                            "gatebridge",
+                                        );
+                                    }
+                                    Err(_) => {
+                                        let _ = creance_vm::tunnel::ensure_named(
+                                            &watchdog.profile_dir,
+                                            &watchdog.instance,
+                                            watchdog.tcp_port,
+                                            "gatebridge",
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        let _ = creance_vm::tunnel::ensure_named(
+                            &watchdog.profile_dir,
+                            &watchdog.instance,
+                            watchdog.tcp_port,
+                            "gatebridge",
+                        );
+                    }
                     // `~/.creance-gate` goes stale whenever a NEW record
                     // supersedes the one `up` synced (fresh tcp_port +
                     // token — e.g. daemon restarted without `up`). Push
@@ -162,7 +194,8 @@ impl Gate {
                                 &watchdog.profile_dir,
                                 &watchdog.instance,
                                 &format!(
-                                    "umask 077; printf '%s\\n%s\\n' '{}' '{}' > \"$HOME/.creance-gate\"",
+                                    "umask 077; printf '%s\\n%s\\n' '{}' '{}' > \"$HOME/.creance-gate\"; systemctl --user restart creance-gatewire 2>/dev/null || true",
+
                                     watchdog.tcp_port, watchdog.token
                                 ),
                             )
@@ -286,7 +319,7 @@ impl Gate {
                         ev.in_flight = false;
                         let mut inner = lock_or_recover(&watchdog.inner);
                         match result {
-                            Ok(sample) => {
+                            Ok((sample, corroborated)) => {
                                 if let Some(reason) =
                                     evidence_verdict(inner.report.as_ref(), &sample)
                                 {
@@ -302,6 +335,25 @@ impl Gate {
                                         *inner
                                             .counts
                                             .entry("exit_ip_drift".to_owned())
+                                            .or_default() += 1;
+                                    }
+                                    // F-038 narrowing in the verdict path:
+                                    // the grant-time baseline corroborated
+                                    // but the live sample does not — the
+                                    // second source going silent (or
+                                    // starting to disagree) is counted,
+                                    // never convicted: ipinfo availability
+                                    // is not evidence of laundering.
+                                    let base_corrob = inner
+                                        .report
+                                        .as_ref()
+                                        .and_then(|r| r.checks.get("exit_corroborated"))
+                                        .map(String::as_str)
+                                        .unwrap_or_default();
+                                    if base_corrob == "yes" && !corroborated {
+                                        *inner
+                                            .counts
+                                            .entry("exit_corrob_lost".to_owned())
                                             .or_default() += 1;
                                     }
                                 }
@@ -334,7 +386,6 @@ impl Gate {
                                                 &e,
                                                 Instant::now() + Duration::from_secs(10),
                                             )
-                                            .map(|(s, _)| s)
                                         })
                                 });
                                 lock_or_recover(&g.evidence).result = Some(result);

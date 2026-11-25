@@ -41,7 +41,20 @@ mod daemon;
 pub mod plugin;
 #[cfg(test)]
 mod tests;
+#[cfg(target_os = "linux")]
 mod vsock;
+// macOS/Lima has no vhost-vsock device — the stub keeps the gate struct
+// platform-uniform: `start` always fails there, so the watchdog takes the
+// ssh -R fallback on every leg and the type system never special-cases.
+#[cfg(not(target_os = "linux"))]
+mod vsock {
+    pub struct VsockBridge;
+    impl VsockBridge {
+        pub fn start(_port: u16) -> Result<VsockBridge, String> {
+            Err("vhost-vsock does not exist on this platform".to_owned())
+        }
+    }
+}
 pub use client::*;
 pub use daemon::*;
 
@@ -235,12 +248,16 @@ pub struct Gate {
     hw_cid: u32,
     /// The own-wire bridge, live only while the gate is non-Closed.
     vbridge: Mutex<Option<vsock::VsockBridge>>,
+    /// The control-plane bridge (plugin channel) on the daemon's
+    /// tcp_port — unlike the data wire it lives while the DAEMON lives,
+    /// independent of gate state. Absent = the gatebridge ssh -R serves.
+    cbridge: Mutex<Option<vsock::VsockBridge>>,
 }
 
 #[derive(Default)]
 struct EvidenceState {
     in_flight: bool,
-    result: Option<Result<creance_net::trace::ExitSample, String>>,
+    result: Option<Result<(creance_net::trace::ExitSample, bool), String>>,
 }
 
 /// Conviction rule for a sampled exit against the grant-time baseline:

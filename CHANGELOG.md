@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.7.21] — 控制面 vsock 化（宿主通道隐蔽化）+ corroborated 入判词
+
+- **宿主通信通道隐蔽化**：插件控制面从常驻 ssh -R（gatebridge）改为
+  第二座 AF_VSOCK 桥（daemon tcp_port）+ guest `creance-gatewire`
+  用户单元——闸开状态下宿主 ps 零常驻端口转发进程，剩余 ssh 仅为
+  瞬时 guest_script 执行。ssh -R 保留为无 vhost-vsock 宿主与
+  legacy/macOS 实例的回退。实机验证：guest 插件调用经 vsock 打通，
+  宿主无 gatebridge 进程。
+- **macOS 编译修复（平台诚实）**：v0.7.19/20 的 vsock.rs 无条件编译，
+  用了 libc 在 macOS 不存在的 accept4/SOCK_CLOEXEC——Mac 上实际编译
+  不过。`mod vsock` 现 cfg 门控 Linux，非 Linux 平台用 start 恒失败
+  的 stub（watchdog 自然走 ssh -R 回退）。
+- **corroborated 入 watchdog 判词**：基线 corroborated=yes 而实测
+  未 corroborated → `exit_corrob_lost` 计数（收窄语义：ipinfo 缺席
+  不定罪）。守卫行 verbatim 钉死（M14 变异复验转红）。
+- 变异矩阵复验：M12 控制面腿反转、M13 forwarder 重启丢失均转红。
+
 ## [0.7.20] — A–F 自审修复批（变异注入矩阵）
 
 自审方式：对 v0.7.19 新面做变异注入（逐项注入绕过手段 → 测试必须转红

@@ -900,12 +900,14 @@ fn watchdog_fuse_source_pins() {
     let fuse_start = prod.find("let mut core_down_ticks").unwrap();
     let fuse_end = prod.rfind("core_down_ticks = 0;").unwrap();
     let fuse = &prod[fuse_start..fuse_end];
-    assert_eq!(fuse.matches("let mut").count(), 6, "{fuse}");
+    // 7 = the four tick counters + the fuse-region temporaries; `let mut cb`
+    // is the control-bridge lock guard, not fuse state.
+    assert_eq!(fuse.matches("let mut").count(), 7, "{fuse}");
     assert!(
         !fuse.contains("bool"),
         "fuse softener in watchdog region: bool"
     );
-    assert_eq!(prod.matches("let mut").count(), 28, "{prod}");
+    assert_eq!(prod.matches("let mut").count(), 29, "{prod}");
     assert_eq!(prod.matches("= true;").count(), 3, "{prod}");
     assert_eq!(prod.matches("= false;").count(), 3, "{prod}");
     for needle in ["mem::take", "u32::from"] {
@@ -957,6 +959,17 @@ fn watchdog_fuse_source_pins() {
     );
     assert!(prod.contains("exit_ip_drift"), "IP-only drift is counted");
     assert!(
+        prod.contains("exit_corrob_lost"),
+        "lost corroboration against a yes-baseline is counted, never convicted"
+    );
+    assert_eq!(
+        prod.lines()
+            .filter(|l| l.trim() == r#"if base_corrob == "yes" && !corroborated {"#)
+            .count(),
+        1,
+        "the corroboration guard is verbatim — `if false` softening fails (M14)"
+    );
+    assert!(
         prod.contains("exit_sample_failed"),
         "failed samples are counted, not convicted"
     );
@@ -977,8 +990,8 @@ fn watchdog_fuse_source_pins() {
     );
     assert_eq!(
         prod.matches("VsockBridge::start(").count(),
-        1,
-        "bridge start is a single site"
+        2,
+        "data wire + control plane, one start site each"
     );
     assert_eq!(
         prod.matches("lock_or_recover(&watchdog.vbridge).take();")
@@ -1009,6 +1022,25 @@ fn watchdog_fuse_source_pins() {
     assert!(
         prod.contains("if bridge_active {"),
         "wire push only when the bridge serves — the ssh -R fallback owns the port (F-A1)"
+    );
+    // Control-plane over vsock (host-channel hygiene): the leg must
+    // exist and the pushed material must reactivate the guest-side
+    // forwarder, or the plugin channel silently falls back to a
+    // permanent ssh -R in the host's ps.
+    assert_eq!(
+        prod.lines()
+            .filter(|l| l.trim() == "if watchdog.hw_cid != 0 {")
+            .count(),
+        1,
+        "control-plane vsock leg verbatim"
+    );
+    assert!(
+        prod.contains("restart creance-gatewire"),
+        "gate-sync push reactivates the control forwarder"
+    );
+    assert!(
+        prod.contains("lock_or_recover(&watchdog.cbridge)"),
+        "control bridge state is tracked"
     );
     // F-A2: a finished guest connection must never stop the bridge —
     // `stop.store` exists exactly once in prod (VsockBridge::stop),

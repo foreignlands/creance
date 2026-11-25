@@ -203,6 +203,24 @@ RestartSec=3
 WantedBy=default.target
 WIREUNIT
 systemctl --global enable creance-wire.service
+# Control-plane forwarder: the plugin bridge rides the same vsock instead
+# of a permanent ssh -R (host-channel hygiene — no persistent forwarding
+# process left in the host's ps). ~/.creance-gate's first line is the
+# tcp_port lives there; the gate-sync push restarts this unit per rewrite.
+cat > /etc/systemd/user/creance-gatewire.service <<'GATEWIREUNIT'
+[Unit]
+Description=creance control forwarder
+ConditionPathExists=%h/.creance-gate
+
+[Service]
+ExecStart=/bin/sh -c 'read GP < "$HOME/.creance-gate" && exec socat TCP-LISTEN:$GP,bind=127.0.0.1,reuseaddr,fork VSOCK-CONNECT:2:$GP'
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+GATEWIREUNIT
+systemctl --global enable creance-gatewire.service
 # Toolchain installs are best-effort (F-031) AND time-bounded (F-054):
 # `|| true` guards against failure, but a network BLACKHOLE neither
 # fails nor succeeds — the provisioner's own timeout then killed the
@@ -515,6 +533,7 @@ mod tests {
             "cat > /usr/local/bin/creance-oauth <<'OAUTHCHAN'",
             "cat > /usr/local/bin/creance-call <<'PLGCALL'",
             "cat > /etc/systemd/user/creance-wire.service <<'WIREUNIT'",
+            "cat > /etc/systemd/user/creance-gatewire.service <<'GATEWIREUNIT'",
             "systemctl enable egress-lock.service >/dev/null",
             "systemctl daemon-reload",
             "systemctl restart egress-lock.service",
@@ -529,7 +548,7 @@ mod tests {
         // concatenates adjacent quoted segments, so `system""d`,
         // `egress-""lock` and `cat >"…"` only differ on the surface.
         let norm: String = s.chars().filter(|c| *c != '\'' && *c != '"').collect();
-        assert_eq!(norm.matches("cat >").count(), 6, "{s}");
+        assert_eq!(norm.matches("cat >").count(), 7, "{s}");
         // Navigation/side-write verbs are banned outright: a `cd` into
         // the unit dir plus a relative `cat > x` writes a second unit
         // without touching the counts; `tee`/`dd` spellings bypass
@@ -597,7 +616,8 @@ mod tests {
                         "systemctl daemon-reload",
                         "systemctl enable egress-lock.service >/dev/null",
                         "systemctl restart egress-lock.service",
-                        "systemctl --global enable creance-wire.service"
+                        "systemctl --global enable creance-wire.service",
+                        "systemctl --global enable creance-gatewire.service"
                     ]
                     .contains(&ln.as_str()),
                     "unexpected systemctl line: {l}"
@@ -615,7 +635,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(norm.matches("systemd/").count(), 5, "{s}");
+        assert_eq!(norm.matches("systemd/").count(), 6, "{s}");
         // F-096/F-098: the rules.v4 heredoc is checked STRUCTURALLY AND
         // EXECUTED. Structure: the `cat >` line is exactly the literal
         // (no `if`/`&&` prefix can mask it), exactly two lines mention
@@ -885,6 +905,7 @@ mod tests {
                 "daemon-reload",
                 "enable egress-lock.service",
                 "--global enable creance-wire.service",
+                "--global enable creance-gatewire.service",
                 "restart egress-lock.service"
             ],
             "systemctl calls: {calls}"
