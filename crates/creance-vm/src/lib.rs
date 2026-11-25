@@ -20,6 +20,12 @@ pub mod provision;
 #[cfg(target_os = "linux")]
 pub mod qemu;
 pub mod running;
+
+// 平台矩阵是二元的：macOS（Lima/vz）与 Linux（QEMU/KVM）。其余 cfg 分支
+// 一律按 `not(macos)` → Linux 后端书写——第三个系统在这里就地编译失败，
+// 而不是在某个深处的 qemu 引用上炸出一条误导性错误。
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+compile_error!("creance-vm supports macOS and Linux only");
 pub mod tunnel;
 pub mod vm;
 pub mod vmname;

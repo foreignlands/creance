@@ -1045,6 +1045,24 @@ fn watchdog_fuse_source_pins() {
         prod.contains("restart creance-gatewire"),
         "gate-sync push reactivates the control forwarder"
     );
+    // M-A4: the daemon also pushes the ~/.creance-vsock marker the
+    // gatewire unit's second ConditionPathExists arms on — vsock path
+    // only — and sweeps it on the fallback write (a stale marker would
+    // let systemd fire the socat port-fight the restart guard cannot
+    // reach). The needles carry the source's own escaped-quote spelling —
+    // one `touch` arm (cbridged) and one `rm -f` arm (fallback).
+    assert!(
+        prod.contains("touch \\\"$HOME/.creance-vsock"),
+        "vsock path must plant the gatewire arming marker"
+    );
+    assert!(
+        prod.contains("rm -f \\\"$HOME/.creance-vsock"),
+        "fallback must sweep a stale arming marker"
+    );
+    assert!(
+        prod.contains("stop creance-gatewire"),
+        "fallback must stop a stale-marker-fired forwarder"
+    );
     assert!(
         prod.contains("lock_or_recover(&watchdog.cbridge)"),
         "control bridge state is tracked"

@@ -1,8 +1,8 @@
 //! creance desktop shell — a thin Tauri window over `creance::serve`.
 //!
 //! 壳不重新发明 UI：进程内起 workbench 的 127.0.0.1 服务，窗口指过去；
-//! 托盘轮询 /api/status 呈现存活态；IPC 命令直调 creance-vm 的 `i32`
-//! 面（与 CLI 同一条代码路径，不做第二条逻辑线）。
+//! 托盘轮询 /api/status 呈现存活态并给出真正的动作菜单；IPC 命令直调
+//! creance-vm 的 `i32` 面（与 CLI 同一条代码路径，不做第二条逻辑线）。
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -11,8 +11,9 @@ use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::time::Duration;
 
+use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 fn profile() -> String {
     let path = creance_vm::config::config_path();
@@ -31,6 +32,19 @@ fn status_get(port: u16) -> Option<serde_json::Value> {
     let text = String::from_utf8_lossy(&buf);
     let body = text.split("\r\n\r\n").nth(1)?;
     serde_json::from_str(body).ok()
+}
+
+fn start_core() {
+    let profile = profile();
+    if let Err(e) = creance_proxy::start_managed(&profile, &creance_vm::config::config_path()) {
+        eprintln!("creance: {e}");
+    }
+}
+
+fn stop_core() {
+    let profile = profile();
+    let _ = creance_gate::gate::close_gates(&profile);
+    let _ = creance_proxy::service::stop(&profile);
 }
 
 #[tauri::command]
@@ -81,14 +95,44 @@ fn main() {
     tauri::Builder::default()
         .setup(move |app| {
             let url: tauri::Url = format!("http://127.0.0.1:{port}").parse().unwrap();
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
+            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title("creance")
                 .inner_size(1024.0, 720.0)
+                .min_inner_size(720.0, 480.0)
                 .build()?;
+
+            // 关窗≠退出：workbench 收到后台托盘，与菜单栏工具的惯例一致。
+            let w = window.clone();
+            window.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = w.hide();
+                }
+            });
+
+            // 托盘菜单：窗口/核心生命周期/退出——不只一个被动图标。
+            let show = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
+            let start = MenuItem::with_id(app, "start", "启动核心", true, None::<&str>)?;
+            let stop = MenuItem::with_id(app, "stop", "停止核心", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "退出 creance", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show, &start, &stop, &quit])?;
 
             let tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
                 .tooltip("creance — 巡检中")
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "show" => {
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                    "start" => start_core(),
+                    "stop" => stop_core(),
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
                 .build(app)?;
             // 托盘巡检：每 5s 采一次 /api/status。
             std::thread::spawn(move || loop {

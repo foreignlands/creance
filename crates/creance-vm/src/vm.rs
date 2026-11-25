@@ -247,6 +247,22 @@ mod imp {
                 let _ = std::os::unix::fs::symlink(&real, &link);
             }
         }
+        // Opportunistic GC (M-A5): every profile that ever ran on this
+        // machine leaves a `vmhome-<uid>-<hash>` link; deleted profiles
+        // leave dangling ones that pile up forever. Prune only links
+        // whose target is GONE — a live profile's link is left alone,
+        // and a pruned link is cheaply re-created on that profile's
+        // next call anyway (the real dir is made above first).
+        let prefix = format!("vmhome-{}-", users_uid());
+        if let Ok(entries) = std::fs::read_dir("/tmp") {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let path = entry.path();
+                if name.starts_with(&prefix) && path.is_symlink() && !path.exists() {
+                    let _ = std::fs::remove_file(&path);
+                }
+            }
+        }
         link
     }
 
@@ -759,6 +775,40 @@ mod tests {
         std::fs::remove_file(&home).ok();
         let again = lima_home(&profile);
         assert!(std::path::Path::new(&again).exists(), "{again}");
+        std::fs::remove_dir_all(&profile).unwrap();
+        let _ = std::fs::remove_file(&home);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn lima_home_prunes_dangling_sibling_links() {
+        // M-A5: a dead profile's short link dangles forever — lima_home
+        // must sweep it while planting its own, and leave live links
+        // (its own just-created one included) untouched.
+        let profile = std::env::temp_dir()
+            .join(format!("cage-gc-{}", crate::token()[..12].to_owned()))
+            .to_string_lossy()
+            .into_owned();
+        let home = lima_home(&profile);
+        // home is /tmp/vmhome-<uid>-<hash>: another profile's link shares
+        // the "/tmp/vmhome-<uid>-" prefix.
+        let prefix = &home[..=home.rfind('-').unwrap()];
+        let gone_target = std::env::temp_dir()
+            .join(format!("cage-gone-{}", crate::token()[..8].to_owned()))
+            .to_string_lossy()
+            .into_owned();
+        let dangling = format!("{prefix}deadbeef");
+        std::os::unix::fs::symlink(&gone_target, &dangling).unwrap();
+        assert!(
+            !std::path::Path::new(&dangling).exists(),
+            "link must dangle"
+        );
+        let _ = lima_home(&profile);
+        assert!(
+            std::fs::read_link(&dangling).is_err(),
+            "dangling link not pruned: {dangling}"
+        );
+        assert!(std::path::Path::new(&home).exists(), "own link must live");
         std::fs::remove_dir_all(&profile).unwrap();
         let _ = std::fs::remove_file(&home);
     }

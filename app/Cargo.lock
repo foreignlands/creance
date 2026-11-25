@@ -616,7 +616,7 @@ dependencies = [
 
 [[package]]
 name = "creance"
-version = "0.7.11"
+version = "0.7.22"
 dependencies = [
  "clap",
  "creance-gate",
@@ -632,9 +632,10 @@ dependencies = [
 
 [[package]]
 name = "creance-app"
-version = "0.7.11"
+version = "0.7.22"
 dependencies = [
  "creance",
+ "creance-gate",
  "creance-proxy",
  "creance-vm",
  "serde_json",
@@ -644,29 +645,32 @@ dependencies = [
 
 [[package]]
 name = "creance-gate"
-version = "0.7.11"
+version = "0.7.22"
 dependencies = [
  "creance-net",
  "creance-proxy",
  "creance-vm",
+ "hex",
  "libc",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]
 name = "creance-net"
-version = "0.7.11"
+version = "0.7.22"
 dependencies = [
  "rustls",
  "rustls-pki-types",
+ "serde_json",
  "url",
  "webpki-roots 0.26.11",
 ]
 
 [[package]]
 name = "creance-proxy"
-version = "0.7.11"
+version = "0.7.22"
 dependencies = [
  "creance-net",
  "creance-vm",
@@ -681,7 +685,7 @@ dependencies = [
 
 [[package]]
 name = "creance-vm"
-version = "0.7.11"
+version = "0.7.22"
 dependencies = [
  "argon2",
  "base64 0.23.1",

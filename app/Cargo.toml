@@ -16,3 +16,4 @@ serde_json = "1"
 creance = { path = "../crates/creance" }
 creance-vm = { path = "../crates/creance-vm" }
 creance-proxy = { path = "../crates/creance-proxy" }
+creance-gate = { path = "../crates/creance-gate" }

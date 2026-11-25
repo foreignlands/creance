@@ -11,3 +11,4 @@ target/
 .DS_Store
 .zcode/
 app/target/
+app/gen/

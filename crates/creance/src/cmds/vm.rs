@@ -286,6 +286,16 @@ pub(crate) fn cmd_setup(memory: u32, cpus: u32) -> i32 {
         browser_language: cfg.browser_language.clone(),
         guest,
     };
+    // The environment dir may not exist yet (fresh profile, the
+    // `<profile>-downloads` fallback) — Lima warns on a missing mount
+    // source and QEMU's share is just as dead. Materialize it before
+    // the backend sees the path.
+    if let Err(e) = std::fs::create_dir_all(&options.workspace) {
+        return fail(format!(
+            "cannot create environment dir {}: {e}",
+            options.workspace
+        ));
+    }
     // 防越权层：既有 profile 首次 setup 时补记属主绑定。
     let _ = creance_vm::private::record_owner(&profile);
     // F-051: setup on an existing instance rebuilds it — the backend's

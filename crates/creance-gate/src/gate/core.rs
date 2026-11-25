@@ -197,11 +197,22 @@ impl Gate {
                             // the ssh -R fallback the guest port already
                             // belongs to the tunnel and a competing socat
                             // bind would fight it (F-A1's shape on the
-                            // control wire).
+                            // control wire). The same predicate pushes the
+                            // ~/.creance-vsock marker the unit's second
+                            // ConditionPathExists arms on (M-A4: systemd
+                            // re-fires enabled units at boot on its own —
+                            // the restart guard alone could not stop a
+                            // fallback-path boot trigger); a stale marker
+                            // is swept on the fallback write.
                             let restart = if cbridged {
-                                "; systemctl --user restart creance-gatewire 2>/dev/null || true"
+                                "; touch \"$HOME/.creance-vsock\"; systemctl --user restart creance-gatewire 2>/dev/null || true"
                             } else {
-                                ""
+                                // Fallback: sweep the marker AND stop a
+                                // unit a stale marker may already have
+                                // fired this boot — a running socat
+                                // ignores later file deletes and would
+                                // hold its stale port until reboot.
+                                "; rm -f \"$HOME/.creance-vsock\"; systemctl --user stop creance-gatewire 2>/dev/null || true"
                             };
                             if creance_vm::vm::guest_script(
                                 &watchdog.profile_dir,

@@ -104,6 +104,34 @@ pub fn generate_lima_yaml(options: &SetupOptions) -> Result<Vec<u8>, String> {
         Yaml::from(format!("{}GiB", options.disk_gib)),
     );
     root.insert("mounts".into(), Yaml::Sequence(vec![Yaml::Mapping(mount)]));
+    // M-A2: Lima seeds the guest env from the host's PROXY SETTINGS
+    // (osutil.ProxySettings — macOS system proxy, not just process env),
+    // rewritten to the usernet gateway — a host-side route credential the
+    // design promises never to land guest-side, and a live trap: nothing
+    // listens on that address for a loopback-bound host proxy, so every
+    // env-honoring guest tool (curl/apt, incl. creance-call's loopback
+    // POST) stalls against a dead endpoint. `propagateProxyEnv: false`
+    // only closes the limactl-PROCESS-env channel; the system-settings
+    // channel stays open and is what we observed injected live. Lima's
+    // own escape hatch: an env key set to "" deletes the resolved value
+    // before /etc/environment is written — blank every spelling.
+    root.insert("propagateProxyEnv".into(), Yaml::from(false));
+    let mut env = Mapping::new();
+    for k in [
+        "http_proxy",
+        "https_proxy",
+        "ftp_proxy",
+        "all_proxy",
+        "no_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "FTP_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+    ] {
+        env.insert(k.into(), Yaml::from(""));
+    }
+    root.insert("env".into(), Yaml::Mapping(env));
     root.insert(
         "provision".into(),
         Yaml::Sequence(vec![Yaml::Mapping(provision)]),
@@ -239,6 +267,17 @@ mod tests {
             script.contains("CREANCE_SESSION_TOKEN="),
             "credential handed off"
         );
+        // M-A2: host proxy env must never reach the guest — the injection
+        // lands in /etc/environment and survives the lockdown, where the
+        // rewritten gateway address is a dead endpoint (and creance-call's
+        // loopback POST gets proxied into it). propagateProxyEnv covers
+        // the process-env channel; blank env values delete the
+        // system-settings channel Lima seeds unconditionally.
+        assert_eq!(v["propagateProxyEnv"], Yaml::Bool(false), "{yaml}");
+        let env = v["env"].as_mapping().expect("env map present");
+        for k in ["http_proxy", "https_proxy", "HTTP_PROXY", "no_proxy"] {
+            assert_eq!(env.get(Yaml::from(k)), Some(&Yaml::from("")), "{k}");
+        }
         assert_eq!(v["cpus"], 4);
         assert_eq!(v["memory"], "8GiB");
         assert_eq!(v["disk"], "24GiB");

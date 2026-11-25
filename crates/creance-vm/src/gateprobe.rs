@@ -378,25 +378,34 @@ mod tests {
         assert!(err.contains("无法"), "{err}");
         assert_eq!(stopped.borrow().len(), 2);
         // Passing output arms the marker AT the instance's own dir.
-        let profile = std::env::temp_dir()
-            .join(format!("creance-vam-{}", std::process::id()))
-            .to_string_lossy()
-            .into_owned();
-        let dir = crate::qemu::instance_dir(&profile, "good-inst");
-        std::fs::create_dir_all(&dir).unwrap();
-        let res = verify_and_mark_with(
-            &profile,
-            "good-inst",
-            |p, i, s| {
-                assert_eq!((p, i), (profile.as_str(), "good-inst"));
-                assert_eq!(s, egress_probe_script(vm::nat_allow_hosts()).as_str());
-                Ok("tcp-blocked\nicmp-blocked\nfw-armed\n".to_owned())
-            },
-            |_p, _i| panic!("a pass must not stop"),
-        );
-        assert_eq!(res, Ok(true), "{res:?}");
-        assert!(std::path::Path::new(&crate::paths::join(&dir, "provisioned")).exists());
-        let _ = std::fs::remove_dir_all(&profile);
+        // QEMU-only leg: the `provisioned` marker exists only where the
+        // backend has a restrict-equivalent — `mark_provisioned` is a
+        // macOS no-op returning false, and `crate::qemu` itself is
+        // cfg'd out there, so this block compiles and runs on Linux
+        // alone. (Found broken on macOS 0.7.22: a single cfg'd-out
+        // path inside a shared test kills the whole lib test target.)
+        #[cfg(not(target_os = "macos"))]
+        {
+            let profile = std::env::temp_dir()
+                .join(format!("creance-vam-{}", std::process::id()))
+                .to_string_lossy()
+                .into_owned();
+            let dir = crate::qemu::instance_dir(&profile, "good-inst");
+            std::fs::create_dir_all(&dir).unwrap();
+            let res = verify_and_mark_with(
+                &profile,
+                "good-inst",
+                |p, i, s| {
+                    assert_eq!((p, i), (profile.as_str(), "good-inst"));
+                    assert_eq!(s, egress_probe_script(vm::nat_allow_hosts()).as_str());
+                    Ok("tcp-blocked\nicmp-blocked\nfw-armed\n".to_owned())
+                },
+                |_p, _i| panic!("a pass must not stop"),
+            );
+            assert_eq!(res, Ok(true), "{res:?}");
+            assert!(std::path::Path::new(&crate::paths::join(&dir, "provisioned")).exists());
+            let _ = std::fs::remove_dir_all(&profile);
+        }
     }
 
     /// Run the shipped fw fragment — sliced out of the real

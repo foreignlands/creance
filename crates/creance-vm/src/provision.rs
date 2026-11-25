@@ -127,7 +127,9 @@ for a in "$@"; do
 done
 ARGS="${{ARGS%,}}]"
 BODY="{{\"action\":\"plugin\",\"plugin\":\"${{NAME}}\",\"args\":${{ARGS}}}}"
-exec curl -fsS -X POST -H "Authorization: Bearer ${{TOK}}" -H "Host: gate" \
+# --noproxy '*': any *_proxy env (e.g. a leftover /etc/environment
+# injection on pre-fix guests) must never reroute this loopback POST.
+exec curl --noproxy '*' -fsS -X POST -H "Authorization: Bearer ${{TOK}}" -H "Host: gate" \
   -H 'Content-Type: application/json' --data "$BODY" \
   "http://127.0.0.1:${{PORT}}/control"
 PLGCALL
@@ -207,10 +209,21 @@ systemctl --global enable creance-wire.service
 # of a permanent ssh -R (host-channel hygiene — no persistent forwarding
 # process left in the host's ps). ~/.creance-gate's first line is the
 # tcp_port lives there; the gate-sync push restarts this unit per rewrite.
+# M-A4: the unit must arm ONLY on the vsock path. ~/.creance-gate is pushed
+# on every backend (ssh -R fallback included — creance-call needs port +
+# token there too), and ConditionPathExists re-arms at every boot where
+# linger is enabled, so gating on it alone makes this unit fire on macOS
+# and on vsock-less Linux hosts: socat then races the gatebridge ssh -R
+# for the same loopback port — the F-A1 fight the sync-side `if cbridged`
+# guard cannot reach, because systemd triggers the unit on its own.
+# ~/.creance-vsock is the daemon-pushed marker landing only where the
+# control plane is actually on vsock — the `cbridged` predicate,
+# guest-side. The fallback push removes a stale marker on the same write.
 cat > /etc/systemd/user/creance-gatewire.service <<'GATEWIREUNIT'
 [Unit]
 Description=creance control forwarder
 ConditionPathExists=%h/.creance-gate
+ConditionPathExists=%h/.creance-vsock
 
 [Service]
 ExecStart=/bin/sh -c 'read GP < "$HOME/.creance-gate" && exec socat TCP-LISTEN:$GP,bind=127.0.0.1,reuseaddr,fork VSOCK-CONNECT:2:$GP'
@@ -236,6 +249,16 @@ APT_OPTS="-o Acquire::http::Timeout=20 -o Acquire::Retries=1"
 # diagnosable after the lockdown makes the guest unreachable.
 TLLOG=/var/log/creance-toolchain.log
 : >"$TLLOG" 2>/dev/null || true
+# Replay guard (Mac M-A3): Lima re-runs this WHOLE script on every
+# `limactl start`, and post-lockdown every network step below can only
+# stall its own deadline against the dead wire — burning the full budget
+# (minutes added to every boot) while the tail installs never land. The
+# armed stamp exists exactly on such replays: boot one writes it only at
+# the lockdown apply BELOW this leg, so the guard never fires on the one
+# run that can actually download. cloud-init runs once either way.
+if [ -f /run/egress-armed ]; then
+  echo "toolchain skipped: egress armed (provision replay)" >> "$TLLOG" 2>/dev/null || true
+else
 timeout "$TOOLCHAIN_BUDGET" sh -c '
   echo "toolchain start $(date -u +%FT%TZ)" >> /var/log/creance-toolchain.log
   ARCH=$(case "$(uname -m)" in aarch64) echo arm64;; *) echo x64;; esac)
@@ -275,6 +298,11 @@ timeout "$TOOLCHAIN_BUDGET" sh -c '
   # so they can never eat the budget the node fallback needs.
   apt-get update -qq >> /var/log/creance-toolchain.log 2>&1 || true
   echo "apt update rc=$?" >> /var/log/creance-toolchain.log
+  # socat is not optional tooling: the own-wire/gatewire forwarders exec
+  # it. It goes EARLY — the extras line at the tail can die to a spent
+  # budget, and a missing socat is a silent wire outage, not a cosmetic
+  # gap (live lesson: the extras line never ran, gatewire crash-looped).
+  apt-get install '"$APT_OPTS"' -y -qq socat xz-utils >> /var/log/creance-toolchain.log 2>&1 || true
   [ -x /usr/local/bin/node ] || apt-get install '"$APT_OPTS"' -y -qq nodejs npm >> /var/log/creance-toolchain.log 2>&1 || true
   echo "node fallback rc=$? node=$(command -v node || echo missing)" >> /var/log/creance-toolchain.log
   curl -fsSL -m 120 https://claude.ai/install.sh | bash >> /var/log/creance-toolchain.log 2>&1 || true
@@ -303,6 +331,7 @@ timeout "$TOOLCHAIN_BUDGET" sh -c '
   apt-get install '"$APT_OPTS"' -y -qq git socat xz-utils >> /var/log/creance-toolchain.log 2>&1 || true
   echo "toolchain end node=$(/usr/local/bin/node -v 2>/dev/null || command -v node || echo missing) claude=$(command -v claude || echo missing)" >> /var/log/creance-toolchain.log
 ' || true
+fi
 
 # 0.3b TOPOLOGY LOCKDOWN — runtime apply, LAST and unskippable: the
 # guest's only wire out is the ssh -R tunnel to the host-side core on
@@ -478,8 +507,16 @@ mod tests {
         // adds an occurrence and fails this regardless of spelling.
         // `egress-armed` alone (no /run/ prefix) catches an alternate
         // spelling of the SAME path (/run/./egress-armed, /run//…).
-        assert_eq!(s.matches("/run/egress-armed").count(), 1, "{s}");
-        assert_eq!(s.matches("egress-armed").count(), 1, "{s}");
+        // M-A3 added ONE read of the stamp — the toolchain replay guard
+        // (`[ -f /run/egress-armed ]`, a test, never a write). The count
+        // is 2: the unit's write plus that read; any third occurrence
+        // (a forged write, a smuggled line) still fails here.
+        assert_eq!(s.matches("/run/egress-armed").count(), 2, "{s}");
+        assert_eq!(s.matches("egress-armed").count(), 2, "{s}");
+        assert!(
+            s.contains("[ -f /run/egress-armed ]"),
+            "the toolchain leg skips on provision replays (M-A3)"
+        );
         // F-095+F-097/NC-UNIT+ESPsp+STAMPq: exactly one ExecStartPost
         // under ANY spelling — systemd accepts `=` flanked by blanks
         // (`ExecStartPost = …` executes, verified on systemd 249) and
@@ -950,6 +987,33 @@ mod tests {
             want,
         );
         let _ = std::fs::remove_dir_all(&stub);
+    }
+
+    #[test]
+    fn gatewire_arms_only_on_the_vsock_path() {
+        // M-A4: `~/.creance-gate` lands on EVERY backend (the ssh -R
+        // fallback needs port+token for creance-call too), so it alone
+        // cannot arm the forwarder — linger makes ConditionPathExists
+        // re-fire at every boot, and on macOS/vsock-less hosts socat
+        // would race the gatebridge ssh -R for the port (F-A1's shape).
+        // `.creance-vsock` is the daemon-pushed marker that exists only
+        // where the control plane is actually on vsock.
+        let s = script();
+        let unit = s
+            .split("GATEWIREUNIT")
+            .nth(1)
+            .expect("gatewire unit heredoc");
+        assert!(
+            unit.contains("ConditionPathExists=%h/.creance-gate")
+                && unit.contains("ConditionPathExists=%h/.creance-vsock"),
+            "gatewire must require BOTH the credentials and the vsock marker: {unit}"
+        );
+        // And the data-plane forwarder keeps its own predicate.
+        let wire = s.split("WIREUNIT").nth(1).expect("wire unit heredoc");
+        assert!(
+            wire.contains("ConditionPathExists=%h/.creance-wire"),
+            "{wire}"
+        );
     }
 
     #[test]
