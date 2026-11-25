@@ -188,45 +188,62 @@ impl Gate {
                     // Own-wire dataplane (hw_cid > 0): the AF_VSOCK
                     // bridge, with the ssh -R tunnel as the recorded
                     // fallback when the host lacks /dev/vhost-vsock.
-                    let mut vb = lock_or_recover(&watchdog.vbridge);
-                    if vb.is_none() {
-                        match super::vsock::VsockBridge::start(watchdog.proxy_port) {
-                            Ok(b) => *vb = Some(b),
-                            Err(_) => {
-                                drop(vb);
-                                let _ = creance_vm::tunnel::ensure(
-                                    &watchdog.profile_dir,
-                                    &watchdog.instance,
-                                    watchdog.proxy_port,
-                                );
+                    let bridge_active = {
+                        let mut vb = lock_or_recover(&watchdog.vbridge);
+                        if vb.is_none() {
+                            match super::vsock::VsockBridge::start(watchdog.proxy_port) {
+                                Ok(b) => {
+                                    *vb = Some(b);
+                                    // The ssh -R fallback may have served
+                                    // earlier ticks of THIS open session —
+                                    // retire it so the guest port belongs to
+                                    // the own-wire forwarder alone (the
+                                    // unit's Restart=always heals the brief
+                                    // teardown race). A no-op when the
+                                    // fallback never ran.
+                                    let _ = creance_vm::tunnel::stop(&watchdog.profile_dir);
+                                }
+                                Err(_) => {
+                                    let _ = creance_vm::tunnel::ensure(
+                                        &watchdog.profile_dir,
+                                        &watchdog.instance,
+                                        watchdog.proxy_port,
+                                    );
+                                }
                             }
                         }
-                    }
+                        vb.is_some()
+                    };
                     // Guest forwarder material: the user unit's env file
                     // (~/.creance-wire = PORT=…) pushed like .creance-gate,
-                    // throttled, marked .wire-synced on success.
-                    wire_sync_ticks += 1;
-                    let marker = Path::new(&watchdog.record_path)
-                        .parent()
-                        .map(|p| p.join(".wire-synced"));
-                    let expected = format!("PORT={}", watchdog.proxy_port);
-                    if let Some(marker) = marker {
-                        let synced = std::fs::read_to_string(&marker)
-                            .map(|m| m.trim() == expected)
-                            .unwrap_or(false);
-                        if !synced && wire_sync_ticks >= 20 {
-                            wire_sync_ticks = 0;
-                            if creance_vm::vm::guest_script(
-                                &watchdog.profile_dir,
-                                &watchdog.instance,
-                                &format!(
-                                    "umask 077; printf 'PORT=%s\\n' '{}' > \"$HOME/.creance-wire\"; systemctl --user restart creance-wire 2>/dev/null || true",
-                                    watchdog.proxy_port
-                                ),
-                            )
-                            .is_ok()
-                            {
-                                let _ = std::fs::write(&marker, &expected);
+                    // throttled, marked .wire-synced on success. Only when
+                    // the bridge is actually serving: the ssh -R fallback
+                    // already lands the port inside the guest, and a socat
+                    // bind on the same port would fight it (F-A1).
+                    if bridge_active {
+                        wire_sync_ticks += 1;
+                        let marker = Path::new(&watchdog.record_path)
+                            .parent()
+                            .map(|p| p.join(".wire-synced"));
+                        let expected = format!("PORT={}", watchdog.proxy_port);
+                        if let Some(marker) = marker {
+                            let synced = std::fs::read_to_string(&marker)
+                                .map(|m| m.trim() == expected)
+                                .unwrap_or(false);
+                            if !synced && wire_sync_ticks >= 20 {
+                                wire_sync_ticks = 0;
+                                if creance_vm::vm::guest_script(
+                                    &watchdog.profile_dir,
+                                    &watchdog.instance,
+                                    &format!(
+                                        "umask 077; printf 'PORT=%s\\n' '{}' > \"$HOME/.creance-wire\"; systemctl --user restart creance-wire 2>/dev/null || true",
+                                        watchdog.proxy_port
+                                    ),
+                                )
+                                .is_ok()
+                                {
+                                    let _ = std::fs::write(&marker, &expected);
+                                }
                             }
                         }
                     }

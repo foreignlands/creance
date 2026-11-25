@@ -168,7 +168,12 @@ fn splice(a: i32, b: i32, stop: Arc<AtomicBool>) {
             }
             let r = unsafe { libc::read(from, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
             if r <= 0 {
-                stop.store(true, Ordering::Relaxed);
+                // This connection is over — THIS splice dies. It must
+                // never touch the shared stop flag: one guest stream
+                // closing is not the bridge closing (F-A2 — a single
+                // finished connection otherwise killed the accept loop
+                // and every live splice, permanently: the watchdog saw
+                // Some(bridge) and never restarted it).
                 break;
             }
             let mut off = 0usize;
@@ -181,14 +186,10 @@ fn splice(a: i32, b: i32, stop: Arc<AtomicBool>) {
                     )
                 };
                 if w <= 0 {
-                    stop.store(true, Ordering::Relaxed);
                     break;
                 }
                 off += w as usize;
             }
-        }
-        if stop.load(Ordering::Relaxed) {
-            break;
         }
     }
     unsafe {

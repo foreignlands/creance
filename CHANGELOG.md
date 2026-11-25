@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.7.20] — A–F 自审修复批（变异注入矩阵）
+
+自审方式：对 v0.7.19 新面做变异注入（逐项注入绕过手段 → 测试必须转红
+→ 还原），覆盖缺口先补钉再复验。
+
+- **F-A2（critical）**：vsock splice 在单条连接正常 EOF 时写共享 stop
+  旗——任意一条 guest 连接结束即杀死整座桥（accept 循环+全部在飞连
+  接），且 watchdog 见 `Some(bridge)` 永不重启，数据面永久死亡。此前
+  实机序列（每轮新开闸=新桥）恰好掩盖。修复：连接终结只退出本 splice，
+  共享旗仅 `VsockBridge::stop` 可写（prod `stop.store`==1 钉死）。
+  实机复验：同一座桥上 FIRST/SECOND/THIRD 三次连续 echo 全通。
+- **F-A1**：桥启动失败走 ssh -R 回退时，wire env 推送仍激活 guest
+  socat 与 ssh -R 抢同一端口。修复：推送仅在桥实际服务时进行；桥随后
+  接管时退役回退隧道（`tunnel::stop` 计数钉 1→2）。
+- **覆盖缺口（变异存活→补钉→转红）**：M1 vsock 路由条件反转、M3
+  `.gate-synced` 重同步失效、M8 wire 推送失效、M9 关闸不切桥、M10
+  fallback 端口冲突、M7 双源取证被旁路——六例补钉前全绿存活，补钉
+  后全红。钉新增：vsock 编排 9 项（gate/tests.rs）+ 双源接线 1 项
+  （trace.rs `sample_pair_wires_both_sources`）。
+
 ## [0.7.19] — A–F 优化批：vsock 数据面 + 硬盘指纹 + 证据双源
 
 - **A+B 自有 wire 数据面**：新实例（`hw_cid>0`）起 vhost-vsock-pci，

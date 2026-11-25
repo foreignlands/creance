@@ -136,6 +136,22 @@ mod tests {
     }
 
     #[test]
+    fn sample_pair_wires_both_sources() {
+        // The pure corroborate tests do not prove sample_pair CALLS it —
+        // dropping the call survived the suite (M7, mutation-verified).
+        let src = include_str!("trace.rs");
+        let prod = &src[..src.find("#[cfg(test)]").unwrap()];
+        let f = prod.find("pub fn sample_pair").unwrap();
+        let body = &prod[f..];
+        assert!(body.contains("TRACE_URL"), "first source fetch");
+        assert!(body.contains("IPINFO_URL"), "second source fetch");
+        assert!(
+            body.contains("corroborate(&sample,"),
+            "the verdict is wired into the fetch path"
+        );
+    }
+
+    #[test]
     fn corroborate_three_states() {
         let s = parse("ip=203.0.113.7\nloc=SE\n").unwrap();
         // Agreement marks corroborated.

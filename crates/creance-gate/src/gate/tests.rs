@@ -924,8 +924,8 @@ fn watchdog_fuse_source_pins() {
     assert!(prod.contains("let core_up = !open"));
     assert_eq!(
         prod.matches("tunnel::stop(&watchdog.profile_dir)").count(),
-        1,
-        "the watchdog's own closed-branch cut must exist"
+        2,
+        "closed-branch cut + fallback retirement when the bridge takes over"
     );
     // The vsock dataplane keeps ssh -R as its recorded fallback plus
     // the legacy-instance path — two ensure legs, one owner.
@@ -969,6 +969,56 @@ fn watchdog_fuse_source_pins() {
     // legitimate relay rotation, a missing baseline must not guess.
     assert!(prod.contains("fn evidence_verdict("));
     assert!(prod.contains("checks.get(\"exit_country\")"));
+    // A–F own-wire orchestration — every mutation below survived the
+    // suite before these pins (M1/M3/M8/M9, mutation-verified).
+    assert!(
+        prod.contains("} else if watchdog.hw_cid != 0 {"),
+        "vsock routing leg verbatim — inverting it silently demotes vsock instances"
+    );
+    assert_eq!(
+        prod.matches("VsockBridge::start(").count(),
+        1,
+        "bridge start is a single site"
+    );
+    assert_eq!(
+        prod.matches("lock_or_recover(&watchdog.vbridge).take();")
+            .count(),
+        1,
+        "the closed branch drops the bridge — the wire must die with the gate"
+    );
+    assert!(prod.contains(".wire-synced"), "wire push marker exists");
+    assert!(prod.contains(".gate-synced"), "F resync marker exists");
+    assert_eq!(
+        prod.lines()
+            .filter(|l| l.trim() == "if !synced && wire_sync_ticks >= 20 {")
+            .count(),
+        1,
+        "wire push throttle verbatim"
+    );
+    assert_eq!(
+        prod.lines()
+            .filter(|l| l.trim() == "if !synced && gate_sync_ticks >= 20 {")
+            .count(),
+        1,
+        "gate resync throttle verbatim"
+    );
+    assert!(
+        prod.contains("systemctl --user restart creance-wire"),
+        "wire env push reactivates the guest forwarder"
+    );
+    assert!(
+        prod.contains("if bridge_active {"),
+        "wire push only when the bridge serves — the ssh -R fallback owns the port (F-A1)"
+    );
+    // F-A2: a finished guest connection must never stop the bridge —
+    // `stop.store` exists exactly once in prod (VsockBridge::stop),
+    // never inside splice. Mutation-verified: reintroducing a store
+    // in the read/write error arms turns this red.
+    assert_eq!(
+        prod.matches("stop.store").count(),
+        1,
+        "only VsockBridge::stop may set the shared stop flag"
+    );
 }
 
 fn call_raw(record: &GateRecord, body: &str) -> Result<(String, serde_json::Value), String> {
