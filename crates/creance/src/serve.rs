@@ -347,6 +347,78 @@ mod tests {
     }
 
     #[test]
+    fn workbench_calls_only_real_routes() {
+        // Every /api path the embedded UI calls must resolve through the
+        // router — a dead endpoint is a silent broken button (the old
+        // /api/proxy/refresh-x call was exactly that). Exercise the real
+        // dispatcher: any (method, path) the UI uses must not fall to
+        // the 404 arm.
+        let ctx = ServeCtx {
+            profile: std::env::temp_dir()
+                .join(format!("creance-serve-test-{}", std::process::id()))
+                .to_string_lossy()
+                .into_owned(),
+            config_path: "/nonexistent".into(),
+        };
+        let mut paths: Vec<&str> = Vec::new();
+        for needle in ["'/api/", "\"/api/"] {
+            for m in WORKBENCH_HTML.match_indices(needle) {
+                let rest = &WORKBENCH_HTML[m.0 + 1..];
+                let end = rest.find(['\'', '"', '<', ' ']).unwrap_or(rest.len());
+                paths.push(&rest[..end]);
+            }
+        }
+        paths.sort();
+        paths.dedup();
+        assert!(!paths.is_empty(), "UI must call at least one endpoint");
+        for path in paths {
+            let hit = ["GET", "POST"]
+                .iter()
+                .any(|m| route(&ctx, m, path, b"{}").0 != 404);
+            assert!(hit, "UI calls {path} but the router does not serve it");
+        }
+        // All fetches must stay loopback-relative — an absolute URL in
+        // the UI would be an off-origin call (and a CSRF the Origin
+        // check is built to refuse).
+        for m in WORKBENCH_HTML.match_indices("fetch(") {
+            let rest = &WORKBENCH_HTML[m.0 + 6..m.0 + 6 + 24.min(WORKBENCH_HTML.len() - m.0 - 6)];
+            assert!(
+                !rest.trim_start().starts_with("h") && !rest.contains("http"),
+                "absolute fetch target near offset {}: {rest}",
+                m.0
+            );
+        }
+    }
+
+    #[test]
+    fn workbench_escapes_subscription_controlled_fields() {
+        // Node name/type/source/id arrive from subscription data — an
+        // attacker-controlled string. Every emission into innerHTML must
+        // go through esc(); raw `${n.field}` in a rendered position is
+        // stored XSS in the workbench.
+        assert!(WORKBENCH_HTML.contains("const esc ="), "esc helper missing");
+        for f in ["id", "name", "type", "source"] {
+            assert!(
+                WORKBENCH_HTML.contains(&format!("esc(n.{f})")),
+                "n.{f} emitted without esc()"
+            );
+        }
+        for f in ["name", "type", "source"] {
+            assert!(
+                !WORKBENCH_HTML.contains(&format!("${{n.{f}}}")),
+                "raw interpolation of n.{f}"
+            );
+        }
+        // Status fields likewise render as text, never parsed markup.
+        for f in ["instance", "timezone", "locale", "route", "nodes"] {
+            assert!(
+                !WORKBENCH_HTML.contains(&format!("innerHTML = s.{f}")),
+                "status field {f} rendered via innerHTML"
+            );
+        }
+    }
+
+    #[test]
     fn transfer_encoding_is_rejected() {
         // F-079/F-084: TE must stay a hard 400 — removing the check lets
         // a chunked body desync the parser (request smuggling).

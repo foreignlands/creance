@@ -65,6 +65,14 @@ export SESSION_TZ={timezone}
 export SESSION_LOCALE={locale}
 export SESSION_LANGUAGE={browser_language}
 SESSENV
+# Existing-guest convergence (M-A6): Lima used to inject the host
+# system proxy into /etc/environment (rewritten to the dead usernet
+# gateway — a route credential that must never be guest-side). The
+# lima.yaml env blanks only protect NEWLY created instances; this leg
+# runs on every provision replay and strips every injected spelling, so
+# pre-fix guests converge on their next boot instead of needing a
+# rebuild.
+sed -i -E '/^(http|https|ftp|all|no)_proxy=/Id' /etc/environment 2>/dev/null || true
 # The on-demand OAuth/verify channel (0.7.x): an ephemeral X display,
 # the guest browser and noVNC on loopback — started by `creance oauth`,
 # killed when it ends. Bound to 127.0.0.1; the host reaches it over the
@@ -517,6 +525,18 @@ mod tests {
             s.contains("[ -f /run/egress-armed ]"),
             "the toolchain leg skips on provision replays (M-A3)"
         );
+        // M-A6: pre-fix guests carry the injected proxy spellings in
+        // /etc/environment; the scrub must run unconditionally — i.e.
+        // OUTSIDE the replay guard's else-branch — or stale guests
+        // never converge. The bare-word form keeps the pin immune to
+        // a quote-reshuffled spelling.
+        assert!(
+            s.contains("sed -i -E '/^(http|https|ftp|all|no)_proxy=/Id' /etc/environment"),
+            "{s}"
+        );
+        let scrub = s.find("/etc/environment").unwrap();
+        let guard = s.find("[ -f /run/egress-armed ]").unwrap();
+        assert!(scrub < guard, "scrub must precede the toolchain leg, {s}");
         // F-095+F-097/NC-UNIT+ESPsp+STAMPq: exactly one ExecStartPost
         // under ANY spelling — systemd accepts `=` flanked by blanks
         // (`ExecStartPost = …` executes, verified on systemd 249) and

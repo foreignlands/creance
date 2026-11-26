@@ -194,11 +194,10 @@ pub(crate) fn cmd_escape_test() -> i32 {
         let guest = creance_vm::guestprofile::Profile::load_or_create(&profile).ok();
         let script = escape::guest_script(
             &flag,
-            &store.as_ref().map(|s| s.auth.clone()).unwrap_or_default(),
-            store
-                .as_ref()
-                .map(|s| s.port)
-                .unwrap_or(creance_proxy::DEFAULT_PORT),
+            // No store → no managed route → proxy-path reports SKIP,
+            // not a false ESCAPE (the tunnel target legitimately does
+            // not exist).
+            store.as_ref().map(|s| (s.auth.as_str(), s.port)),
             &guest.map(|g| g.username).unwrap_or_default(),
         );
         match creance_vm::vm::guest_script(&profile, &instance, &script) {

@@ -393,7 +393,7 @@ fn place_oracle_flag(path: &str) -> bool {
 /// RESULT` line per check (RESULT in PASS/ESCAPE/SKIP). Kept POSIX-sh so it
 /// runs on any guest. `expected_user` is the generated guest identity the
 /// VM must be running as (F-022).
-pub fn guest_script(flag_path: &str, auth: &str, port: u16, expected_user: &str) -> String {
+pub fn guest_script(flag_path: &str, proxy: Option<(&str, u16)>, expected_user: &str) -> String {
     // F-074/F-078: the flag is placed here, inside the same call that
     // renders the probe — a caller can never pass a flag state that
     // does not match the disk. Unplaceable flag → SKIP fragment, never
@@ -407,6 +407,22 @@ else
 fi"#
     } else {
         r#"echo "PROBE fs-flag-readable SKIP — oracle flag 未能落盘""#
+    };
+    // The positive control exists only when the host configured a
+    // managed route (a store). Without one the tunnel target does not
+    // exist by DESIGN — refusing the socks handshake is "layer not
+    // implemented", and reporting ESCAPE there was a false alarm that
+    // trained users to ignore real ones. A configured-but-dead route
+    // still reports ESCAPE honestly.
+    let proxy_probe = match proxy {
+        Some((auth, port)) => format!(
+            r#"if curl -m 8 -s --noproxy '*' --socks5-hostname "session:{auth}"@127.0.0.1:{port} https://1.1.1.1/cdn-cgi/trace | grep -q ip=; then
+  echo "PROBE proxy-path PASS"
+else
+  echo "PROBE proxy-path ESCAPE"
+fi"#
+        ),
+        None => r#"echo "PROBE proxy-path SKIP — 未配置托管路由""#.to_owned(),
     };
     format!(
         r#"#!/bin/sh
@@ -510,15 +526,12 @@ if command -v ping >/dev/null 2>&1; then
 else
   echo "PROBE net-icmp-external SKIP"
 fi
-# Positive control: the ONLY route (loopback tunnel to the host core) works.
-# The username must match the core's configured auth (store::endpoint's
-# 'session' — a drift here fails the probe honestly, as the 2026-11-21
-# sweep's first live round demonstrated).
-if curl -m 8 -s --socks5-hostname "session:{auth}"@127.0.0.1:{port} https://1.1.1.1/cdn-cgi/trace | grep -q ip=; then
-  echo "PROBE proxy-path PASS"
-else
-  echo "PROBE proxy-path ESCAPE"
-fi
+# Positive control: the ONLY route (loopback tunnel to the host core)
+# works — when a managed route exists at all. The username must match
+# the core's configured auth (store::endpoint's 'session' — a drift
+# here fails the probe honestly, as the 2026-11-21 sweep's first live
+# round demonstrated).
+{proxy_probe}
 "#
     )
 }
@@ -857,12 +870,16 @@ mod tests {
         // A flag path that lands → the real probe fragment.
         let flag = std::env::temp_dir().join(format!("creance-test-flag-{}", std::process::id()));
         let flag = flag.to_str().unwrap().to_owned();
-        let script = guest_script(&flag, "deadbeef", 17896, "devabc12345");
+        let script = guest_script(&flag, Some(("deadbeef", 17896)), "devabc12345");
         assert!(script.contains("PROBE fs-flag-readable ESCAPE"), "{script}");
         assert!(script.starts_with("#!/bin/sh"));
         // F-074/F-076: without the oracle the fs probe emits exactly one
         // SKIP line — never a vacuous PASS beside it.
-        let no_oracle = guest_script("/nonexistent-flag", "deadbeef", 17896, "devabc12345");
+        let no_oracle = guest_script(
+            "/nonexistent-flag",
+            Some(("deadbeef", 17896)),
+            "devabc12345",
+        );
         assert_eq!(
             no_oracle.matches("PROBE fs-flag-readable").count(),
             1,
@@ -876,7 +893,9 @@ mod tests {
         // the SKIP script — guest_script places it internally, so this
         // is the same code path the caller runs (no wiring to fake).
         let unwritable = "/nonexistent-dir-nope/flag";
-        assert!(guest_script(unwritable, "a", 1, "u").contains("PROBE fs-flag-readable SKIP"));
+        assert!(
+            guest_script(unwritable, Some(("a", 1)), "u").contains("PROBE fs-flag-readable SKIP")
+        );
         for required in [
             "PROBE fs-flag-readable ESCAPE",
             "PROBE fs-flag-readable PASS",
@@ -900,6 +919,25 @@ mod tests {
             "sock-abstract is not implemented: SKIP, never a fake PASS"
         );
         assert!(!script.contains("PROBE sock-abstract PASS"));
+        // proxy-path (M-A7): a configured route gets the positive
+        // control; no store means the tunnel target does not exist BY
+        // DESIGN — honest SKIP, never a false ESCAPE that trains users
+        // to ignore real ones. Exactly one proxy-path line either way.
+        assert!(
+            script.contains("--socks5-hostname \"session:deadbeef\"@127.0.0.1:17896"),
+            "{script}"
+        );
+        assert!(script.contains("PROBE proxy-path PASS"), "{script}");
+        assert!(script.contains("PROBE proxy-path ESCAPE"), "{script}");
+        let no_route = guest_script(&flag, None, "u");
+        assert_eq!(
+            no_route.matches("PROBE proxy-path").count(),
+            1,
+            "{no_route}"
+        );
+        assert!(no_route.contains("PROBE proxy-path SKIP"), "{no_route}");
+        assert!(!no_route.contains("PROBE proxy-path ESCAPE"), "{no_route}");
+        assert!(!no_route.contains("socks5-hostname"), "{no_route}");
     }
 
     /// A lima.yaml with an extra mount must be caught however it is spelled
