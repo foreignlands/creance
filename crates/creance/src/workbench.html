@@ -435,7 +435,10 @@ $('agent-list').addEventListener('click', async e => {
     const d = await j('/api/agents/detect', {id: a.id});
     if (!d.installed) {
       if (!a.installable) {
-        log(a.name + ' 需要手工安装——' + a.note, true);
+        const infra = a.kind !== 'cli';
+        log(a.name + (infra
+          ? ' 的桌面通道不可用——若环境是旧版 provision 请重建（creance up 全新实例）。' + a.note
+          : ' 需要手工安装——' + a.note), true);
         row.classList.remove('busy');
         return;
       }

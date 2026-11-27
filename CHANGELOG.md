@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.9] - 2026-11-27
+
+### desktop 通道实测修复（测试代理驱动）
+
+- **open 假成功**（严重）：guest_script 不看远端退出码——老 guest
+  无 creance-oauth 时 open 仍返回 ok+端口，给用户坏 iframe。
+  修复：start 后 status 必须验证 up，缺资产时杀转发+明确文案
+  （指向重建环境）。
+- **检测语义错层**：web/desktop 类 detect 改为串流基础设施存在性
+  （creance-oauth），不再用应用二进制——缺基础设施的文案从
+  「手工安装浏览器」死路改为「老 provision 需重建」可行动引导。
+
 ## [0.8.8] - 2026-11-27
 
 ### desktop 通道（产品化轮第四期）

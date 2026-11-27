@@ -237,12 +237,29 @@ fn desktop_open(ctx: &ServeCtx) -> Result<u16, String> {
     if let Ok(Some(_)) = child.try_wait() {
         return Err("ssh 转发立即退出——环境在运行吗？".to_owned());
     }
-    // guest 侧 X 栈拉起（幂等——已开直接返回）
+    // guest 侧 X 栈拉起（幂等——已开直接返回）。
+    // 诚实验证（0.8.8 实测）：guest_script 不看远端退出码——脚本缺失
+    // 时 stdout 为空也算"成功"。start 后必须 status 验证确实 up，
+    // 老 provision guest 无此资产时给出可行动文案而非假成功。
     creance_vm::vm::guest_script(
         &ctx.profile,
         &instance,
         "sh /usr/local/bin/creance-oauth start",
     )?;
+    let status = creance_vm::vm::guest_script(
+        &ctx.profile,
+        &instance,
+        "sh /usr/local/bin/creance-oauth status 2>/dev/null || echo missing",
+    )
+    .unwrap_or_else(|_| "missing".to_owned());
+    if !status.trim().ends_with("up") {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(
+            "guest 缺少桌面串流资产（creance-oauth/Xvnc/noVNC）——该环境是旧版 provision，请重建环境（creance up 全新实例）后重试"
+                .to_owned(),
+        );
+    }
     if let Ok(mut guard) = DESKTOP.lock() {
         *guard = Some((local_port, child));
     }

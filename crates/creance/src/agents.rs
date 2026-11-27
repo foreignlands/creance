@@ -88,13 +88,15 @@ pub const REGISTRY: &[AgentEntry] = &[
         detect: "test -d /opt/antigravity || which antigravity",
         install: "",
         launch: "antigravity",
-        note: "官方 Linux 桌面版；首保对象，需手工装一次（0.8.6 核实安装包路径）",
+        note: "官方 Linux 桌面版；需手工装一次。若提示未装而实际已装，可能是老 provision 缺桌面资产——重建环境",
     },
     AgentEntry {
         id: "browser",
         name: "浏览器",
         kind: "web",
-        detect: "which chromium || which chromium-browser || which google-chrome",
+        // web/desktop 类检测的是串流基础设施而非应用二进制——
+        // 缺基础设施=老 provision，错误文案指向重建环境而非手工安装
+        detect: "test -x /usr/local/bin/creance-oauth",
         install: "",
         launch: "chromium",
         note: "内置浏览器通道——OAuth 授权与网页访问",
