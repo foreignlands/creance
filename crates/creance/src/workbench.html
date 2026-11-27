@@ -114,6 +114,24 @@
     text-overflow:ellipsis; white-space:nowrap; flex:1; }
   .scan-item input { width:130px; flex:none; }
   @media (max-width:760px) { .grid { grid-template-columns:1fr; } }
+  body { max-width:1200px; }
+  .shell { display:flex; gap:18px; align-items:flex-start; }
+  .sidebar { width:196px; flex:none; background:var(--card); border:1px solid var(--line);
+    border-radius:14px; padding:12px 10px; position:sticky; top:20px; }
+  .sidebar h3 { font-size:11px; font-weight:600; color:var(--dim); text-transform:uppercase;
+    letter-spacing:.07em; margin:10px 8px 6px; }
+  .sidebar h3:first-child { margin-top:2px; }
+  .side-item { display:flex; align-items:center; gap:9px; padding:7px 9px; border-radius:9px;
+    cursor:pointer; transition:background .1s; font-size:13px; }
+  .side-item:hover { background:color-mix(in srgb,var(--dim) 8%,transparent); }
+  .side-item .ico { width:22px; height:22px; border-radius:6px; flex:none; display:flex;
+    align-items:center; justify-content:center; font-size:11px; font-weight:600; color:#fff;
+    background:var(--dim); }
+  .side-item .st { margin-left:auto; font-size:10.5px; color:var(--faint); }
+  .side-item .st.inst { color:var(--ok); }
+  .side-item.busy { opacity:.6; pointer-events:none; }
+  .maincol { flex:1; min-width:0; }
+  @media (max-width:860px) { .shell { flex-direction:column; } .sidebar { width:100%; position:static; } }
 </style>
 </head>
 <body>
@@ -123,7 +141,15 @@
   <span class="live off" id="live">连接中…</span>
 </header>
 
-<div class="grid">
+<div class="shell">
+<nav class="sidebar">
+  <h3>Agents</h3>
+  <div id="agent-list"><div class="empty" style="padding:8px">加载中…</div></div>
+  <h3>系统</h3>
+  <div class="side-item" onclick="document.getElementById('proxy-cards').scrollIntoView({behavior:'smooth'})"><span class="ico" style="background:#0071e3">网</span>节点网络</div>
+</nav>
+<div class="maincol">
+<div class="grid" id="proxy-cards">
   <div class="card">
     <h2>状态</h2>
     <div class="row"><span class="k">实例</span><span class="v mono" id="st-instance">—</span></div>
@@ -184,6 +210,8 @@
     <h2>操作日志</h2>
     <div id="log"></div>
   </div>
+</div>
+</div>
 </div>
 
 <script>
@@ -343,6 +371,51 @@ $('node-list').addEventListener('click', e => {
   const row = e.target.closest('.node');
   if (row) selectNode(row.dataset.id, row.querySelector('.n')?.textContent);
 });
+const KIND_COLOR = {cli:'#34c759', desktop:'#af52de', web:'#0071e3'};
+let agentsCache = [];
+async function refreshAgents() {
+  try {
+    agentsCache = await j('/api/agents');
+    $('agent-list').innerHTML = agentsCache.map(a =>
+      `<div class="side-item" data-id="${esc(a.id)}" title="${esc(a.note)}">
+        <span class="ico" style="background:${KIND_COLOR[a.kind]||'#86868b'}">${esc(a.name.slice(0,1).toUpperCase())}</span>
+        ${esc(a.name)}<span class="st" id="ast-${esc(a.id)}"></span></div>`).join('');
+  } catch (e) { $('agent-list').innerHTML = '<div class="empty" style="padding:8px">加载失败</div>'; }
+}
+$('agent-list').addEventListener('click', async e => {
+  const row = e.target.closest('.side-item');
+  if (!row || !row.dataset.id) return;
+  const a = agentsCache.find(x => x.id === row.dataset.id);
+  if (!a) return;
+  row.classList.add('busy');
+  try {
+    // 懒安装逻辑：先检测；未装→安装；已装→启动
+    const d = await j('/api/agents/detect', {id: a.id});
+    if (!d.installed) {
+      if (!a.installable) {
+        log(a.name + ' 需要手工安装——' + a.note, true);
+        row.classList.remove('busy');
+        return;
+      }
+      log('正在安装 ' + a.name + '（guest 内执行，可能需要几分钟）…');
+      $('ast-' + a.id).textContent = '安装中';
+      await j('/api/agents/install', {id: a.id});
+      log(a.name + ' 安装完成——再次点击启动');
+      $('ast-' + a.id).textContent = '已装';
+      $('ast-' + a.id).classList.add('inst');
+    } else {
+      $('ast-' + a.id).textContent = '已装';
+      $('ast-' + a.id).classList.add('inst');
+      // 启动通道：终端内嵌是 0.8.5 下半期；先诚实引导
+      log('→ ' + a.name + ' 已安装；终端内嵌通道建设中（0.8.5 下半期）——当前可 ssh 进 guest 直接运行');
+    }
+  } catch (e2) {
+    log(a.name + ': ' + e2.message, true);
+    $('ast-' + a.id).textContent = '';
+  }
+  row.classList.remove('busy');
+});
+refreshAgents();
 refresh(); setInterval(refresh, 5000);
 </script>
 </body>

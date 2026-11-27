@@ -108,6 +108,42 @@ fn handle(mut stream: std::net::TcpStream, port: u16, ctx: ServeCtx) {
     let _ = stream.write_all(&payload);
 }
 
+/// 经 ssh 在 guest 内执行脚本（agent 检测/安装的唯一通道——
+/// 永远不在 host 执行）。输出 capped 防内存炸弹。
+fn guest_exec(ctx: &ServeCtx, script: &str) -> Result<std::process::Output, String> {
+    let instance = running_instance(&ctx.profile)?;
+    let target = creance_vm::vm::ssh_target(&ctx.profile, &instance)?;
+    let mut cmd = std::process::Command::new("ssh");
+    creance_vm::vm::apply_ssh_options(&mut cmd, &target);
+    cmd.arg("-o")
+        .arg("StrictHostKeyChecking=yes")
+        .arg("127.0.0.1")
+        .args(["sh", "-s"]);
+    cmd.stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    let mut child = cmd.spawn().map_err(|e| format!("guest 通道失败：{e}"))?;
+    use std::io::Write as _;
+    child
+        .stdin
+        .take()
+        .expect("piped")
+        .write_all(script.as_bytes())
+        .map_err(|e| format!("guest 写入失败：{e}"))?;
+    child
+        .wait_with_output()
+        .map_err(|e| format!("guest 执行失败：{e}"))
+}
+
+fn running_instance(profile: &str) -> Result<String, String> {
+    // 实例名是确定性派生；ssh_target 在实例未运行时自己拒绝，
+    // 错误文案在那里统一。
+    Ok(creance_vm::vm::instance_name(
+        profile,
+        &creance_vm::vm::environment_dir(profile),
+    ))
+}
+
 /// 扫描本机常见 Clash 系配置（0.8.3 迁移引导）：Verge/Mihomo/Clash
 /// 的 profiles 目录，返回可导入的 YAML 路径清单。只读不拷贝——
 /// 用户在 UI 确认后才经 import-paste 路径入库。
@@ -206,6 +242,48 @@ fn route(ctx: &ServeCtx, method: &str, path: &str, body: &[u8]) -> (u16, &'stati
             });
             match saved {
                 Ok(count) => (200, json!({"ok": true, "nodes": count})),
+                Err(e) => (409, json!({"error": e})),
+            }
+        }),
+        ("GET", "/api/agents") => (
+            200,
+            "application/json",
+            crate::agents::registry_json().to_string().into_bytes(),
+        ),
+        ("POST", "/api/agents/detect") => json_action(ctx, body, |ctx, v| {
+            let id = v["id"].as_str().unwrap_or_default();
+            let Some(agent) = crate::agents::find(id) else {
+                return (404, json!({"error": "unknown agent"}));
+            };
+            match guest_exec(ctx, agent.detect) {
+                Ok(out) => (200, json!({"installed": out.status.success()})),
+                Err(e) => (409, json!({"error": e})),
+            }
+        }),
+        ("POST", "/api/agents/install") => json_action(ctx, body, |ctx, v| {
+            let id = v["id"].as_str().unwrap_or_default();
+            let Some(agent) = crate::agents::find(id) else {
+                return (404, json!({"error": "unknown agent"}));
+            };
+            if agent.install.is_empty() {
+                return (
+                    409,
+                    json!({"error": format!("{} 需要手工安装——{}", agent.name, agent.note)}),
+                );
+            }
+            match guest_exec(ctx, &format!("set -e; {}", agent.install)) {
+                Ok(out) if out.status.success() => (200, json!({"ok": true})),
+                Ok(out) => {
+                    let tail = String::from_utf8_lossy(&out.stdout);
+                    let tail = tail
+                        .lines()
+                        .last()
+                        .unwrap_or("")
+                        .chars()
+                        .take(120)
+                        .collect::<String>();
+                    (409, json!({"error": format!("安装失败：{tail}")}))
+                }
                 Err(e) => (409, json!({"error": e})),
             }
         }),
