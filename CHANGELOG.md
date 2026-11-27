@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.8.6] - 2026-11-27
+
+### 终端通道实测修复（v0.8.5 首轮端到端测试）
+
+测试代理在真实 QEMU guest 上端到端验证：终端字节双向流通✅、
+ssh 孤儿零残留✅、跨站 WS 拒绝✅。抓到两枚真问题已修：
+
+- **安装假成功**（严重）：`curl|bash` 管道中 curl 失败时 bash 读空
+  输入仍返回 0——opencode 实际未安装 UI 却报"安装完成/已装"。
+  修复三件套：guest 执行改 bash（pipefail 可用）+ `set -eo pipefail`
+  + stderr 不再丢弃（DNS/网络错误全部可见），失败文案带出口连通
+  性引导。
+- **TUI 开箱失败**：默认 TERM 未传导致 `htop` 报 Error opening
+  terminal——现在通道显式 `export TERM=xterm-256color`（与 xterm.js
+  匹配）。pty 传输本身实测无碍（手动设 TERM 后 htop 完整渲染）。
+
 ## [0.8.5] - 2026-11-27
 
 ### 工作台骨架 + agent 注册表 + 终端通道（产品化轮第二期）

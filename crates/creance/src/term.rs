@@ -71,7 +71,7 @@ pub fn run(
         .arg("-tt")
         .arg("127.0.0.1")
         .arg(format!(
-            "stty rows {} cols {} 2>/dev/null; exec {}",
+            "export TERM=xterm-256color; stty rows {} cols {} 2>/dev/null; exec {}",
             params.rows, params.cols, params.launch
         ));
     cmd.stdin(Stdio::piped())

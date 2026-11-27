@@ -167,10 +167,14 @@ fn guest_exec(ctx: &ServeCtx, script: &str) -> Result<std::process::Output, Stri
     cmd.arg("-o")
         .arg("StrictHostKeyChecking=yes")
         .arg("127.0.0.1")
-        .args(["sh", "-s"]);
+        // bash 而非 sh：安装命令含管道，pipefail 是 bash 特性——
+        // `curl|bash` 中 curl 失败必须使整体失败（dash 无 pipefail，
+        // 空输入的 bash 返回 0 造成"假成功"，0.8.5 实测踩中）。
+        .args(["bash", "-s"]);
     cmd.stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null());
+        // stderr 必须保留——DNS/网络错误全在那里，丢弃=错误无痕
+        .stderr(std::process::Stdio::piped());
     let mut child = cmd.spawn().map_err(|e| format!("guest 通道失败：{e}"))?;
     use std::io::Write as _;
     child
@@ -327,18 +331,27 @@ fn route(ctx: &ServeCtx, method: &str, path: &str, body: &[u8]) -> (u16, &'stati
                     json!({"error": format!("{} 需要手工安装——{}", agent.name, agent.note)}),
                 );
             }
-            match guest_exec(ctx, &format!("set -e; {}", agent.install)) {
+            match guest_exec(ctx, &format!("set -eo pipefail; {}", agent.install)) {
                 Ok(out) if out.status.success() => (200, json!({"ok": true})),
                 Ok(out) => {
-                    let tail = String::from_utf8_lossy(&out.stdout);
-                    let tail = tail
+                    let err_tail = String::from_utf8_lossy(&out.stderr);
+                    let out_tail = String::from_utf8_lossy(&out.stdout);
+                    let pick = if err_tail.trim().is_empty() {
+                        out_tail
+                    } else {
+                        err_tail
+                    };
+                    let tail = pick
                         .lines()
-                        .last()
-                        .unwrap_or("")
+                        .rfind(|l| !l.trim().is_empty())
+                        .unwrap_or("未知原因")
                         .chars()
-                        .take(120)
+                        .take(140)
                         .collect::<String>();
-                    (409, json!({"error": format!("安装失败：{tail}")}))
+                    (
+                        409,
+                        json!({"error": format!("安装失败：{tail} → 检查 guest 出口连通性（节点是否已应用并启动核心）")}),
+                    )
                 }
                 Err(e) => (409, json!({"error": e})),
             }
