@@ -7,6 +7,7 @@ pub mod approve;
 pub mod diagnose;
 pub mod escape;
 pub mod evidence;
+pub mod gateopen;
 pub mod serve;
 pub mod term;
 pub mod ws;

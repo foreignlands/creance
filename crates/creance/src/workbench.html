@@ -403,11 +403,35 @@ async function act(btn, path, okMsg, errMsg) {
   busy(btn, true);
   try { await j(path, {}); log(okMsg || (path + ' 成功')); }
   catch (e) {
-    $('status-err').textContent = e.message;
+    if (e.message.includes('尚未绑定')) { offerBind(e.message); }
+    else $('status-err').textContent = e.message;
     log((errMsg ? errMsg + ' — ' : '') + path + ' 失败: ' + e.message, true);
   }
   busy(btn, false);
   refresh();
+}
+// 出口绑定确认（0.9.2）：动态政策要求用户显式确认出口国别——这是
+// 安全决策，必须用户亲手点。确认后提示重新检查（绑定本身不开闸）。
+function offerBind(msg) {
+  const el = $('status-err');
+  el.innerHTML = '';
+  const span = document.createElement('span');
+  span.textContent = '首次使用需要确认出口地区。';
+  const btn = document.createElement('button');
+  btn.className = 'ghost';
+  btn.style.marginLeft = '8px';
+  btn.textContent = '观测并绑定出口地区';
+  btn.onclick = async () => {
+    busy(btn, true);
+    try {
+      const r = await j('/api/exit-bind', {});
+      log('出口已绑定：' + r.country + '（' + r.ip + '）——请再次点击「出口检查」开闸');
+      el.textContent = '已绑定 ' + r.country + '，请再次点击「出口检查」。';
+    } catch (e2) { el.textContent = e2.message; }
+    busy(btn, false);
+  };
+  el.appendChild(span);
+  el.appendChild(btn);
 }
 $('node-list').addEventListener('click', e => {
   const row = e.target.closest('.node');

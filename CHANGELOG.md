@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.9.2] - 2026-11-27
+
+### 全产品链验证发现的三枚连环修复
+
+- **F-GATEOPEN（严重）**：workbench 的"检查"按钮只做宿主侧浅检——
+  gate 的开闸流（证据采样+grant）只有 CLI `gate-open` 走，serve 层
+  根本没有开闸入口。workbench 用户核心在跑、线缆永远关着。修复：
+  开闸流提取为库函数 `gateopen::gate_open_flow`，CLI 与 serve 共用；
+  /api/check 浅检通过后走完整开闸流。
+- **F-PROVGEN（中）**：vsock 数据面之前的 provisioning 创建的磁盘
+  永远长不出 wire/gatewire 单元——升级用户出口全死且无指引。现在
+  provision 完成时落 `provision-gen` 代际戳，`up` 遇到无戳旧环境
+  给出重建引导。
+- 架构备注：gate 开闸是宿主驱动的证据流（observe→evaluate→grant），
+  非 guest 探针驱动；本次验证澄清了此语义。
+- **F-BIND（严重）**：动态政策要求的"绑定出口国别"是首开必经动作，
+  但 workbench 没有绑定入口——纯 UI 流永远开不了闸。新增
+  /api/exit-bind 端点+检查失败时的绑定引导按钮。连带修复：绑定写
+  配置会触发运行指纹漂移锁死 guest 操作（死循环）——exit_policy
+  与 proxy_revision 纯宿主侧，移出运行指纹（安全性由 daemon
+  revision 同步+关闸机制保证，F-036 设计本意）。
+- **实机验证进展**：select→start→bind→check 开闸→wire 推送→guest
+  forwarder active 全链实证。最后一英里 vsock 传输在本 dev 机
+  （嵌套虚拟化云 VM）内核层整体 reset——连宿主 vsock 自环都不通，
+  非产品逻辑缺陷。但暴露真问题：VsockBridge bind 成功≠传输可用，
+  fallback 不会触发。记档待决：vsock 健康度需要连接级验证或回到
+  ssh -R 为主的数据面。
+
 ## [0.9.1] - 2026-11-27
 
 ### 首次使用死锁修复（严重，全产品链验证发现）

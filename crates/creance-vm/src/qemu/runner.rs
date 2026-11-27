@@ -123,6 +123,13 @@ pub fn build_args(inst: &Instance, dir: &str, state: &str) -> Result<Vec<String>
         }
     }
     let provisioned = Path::new(&paths::join(dir, "provisioned")).is_file();
+    if provisioned && !Path::new(&paths::join(dir, "provision-gen")).is_file() {
+        eprintln!(
+            "注意：此环境由 vsock 数据面之前的 provisioning 创建，guest 内缺少 wire/gatewire \
+             单元——出口可能不通。若 escape-test 报 proxy-path ESCAPE，请重建环境（备份项目后 \
+             删除实例目录重新 up）。"
+        );
+    }
     let mut args: Vec<String> = vec![
         "-machine".into(),
         machine.into(),

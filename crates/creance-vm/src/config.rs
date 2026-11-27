@@ -148,7 +148,18 @@ impl Config {
     /// concerned: any change requires a stop first.
     pub fn fingerprint(&self) -> String {
         let mut normalized = self.clone();
-        normalized.exit_policy = normalized.exit_policy.normalized();
+        // F-BIND（0.9.2 全链验证发现）：exit_policy 是纯宿主侧政策——
+        // 判词在 gate-open 的宿主证据流里评估，guest 从不可感知。把它
+        // 留在指纹里会让"绑定出口国别"这个首开必经动作把运行中环境
+        // 锁死（shell/terminal 全 409），形成绑定→重启→再绑定的死循环。
+        // 政策变化的安全性由 daemon 的 revision 复检 + 关闸机制保证，
+        // 不需要运行记录锁这把钝刀。
+        normalized.exit_policy = crate::exit_policy::Policy::default();
+        // 同理 proxy_revision：select 节点是 workbench 的常规运行时
+        // 操作，revision 每次 select 都变。节点变更的安全性由 daemon
+        // 的 proxy-revision 同步机制保证（adopted 即关闸重检，F-036），
+        // guest 本身不感知 revision——锁运行环境纯属误伤正常流。
+        normalized.proxy_revision.clear();
         let b = serde_json::to_vec(&normalized).expect("config serializes");
         hex::encode(Sha256::digest(&b))
     }
@@ -382,10 +393,14 @@ mod tests {
         std::fs::write(&path, r#"{"proxy_url":"socks5://1.2.3.4:1080","dns_url":"https://1.1.1.1/dns-query","timezone":"Etc/UTC","locale":"en_US.UTF-8","browser_language":"en-US"}"#).unwrap();
         let cfg = load(path.to_str().unwrap()).unwrap();
         assert_eq!(cfg.exit_policy.normalized().mode, "dynamic");
-        // Fingerprint changes when the exit policy changes.
+        // F-BIND（0.9.2）：exit_policy 不再参与指纹——纯宿主侧政策，
+        // 变化不得锁死运行中环境。指纹必须仍响应身份字段变化。
         let mut changed = cfg.clone();
         changed.exit_policy.country_code = "US".to_owned();
+        assert_eq!(cfg.fingerprint(), changed.fingerprint());
+        changed.timezone = "Asia/Tokyo".to_owned();
         assert_ne!(cfg.fingerprint(), changed.fingerprint());
+        changed.timezone.clone_from(&cfg.timezone);
         // Fingerprint is stable across a load round-trip.
         std::fs::write(&path, serde_json::to_vec_pretty(&changed).unwrap()).unwrap();
         assert_eq!(

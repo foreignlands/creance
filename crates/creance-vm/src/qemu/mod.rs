@@ -421,7 +421,15 @@ fn write_marker(dir: &str) -> bool {
     if Path::new(&marker).is_file() {
         return false;
     }
-    std::fs::write(&marker, b"ok\n").is_ok()
+    if !std::fs::write(&marker, b"ok\n").is_ok() {
+        return false;
+    }
+    // Generation stamp (0.9.2): the guest-internal unit set (wire/gatewire/
+    // probe) is provision-time baked, so a disk built before the vsock
+    // generation can never grow a data plane. The stamp lets `up` name
+    // that drift instead of leaving a dead-egress mystery.
+    let _ = std::fs::write(paths::join(dir, "provision-gen"), b"1\n");
+    true
 }
 
 /// Polls `cloud-init status` in the guest until it reports a terminal

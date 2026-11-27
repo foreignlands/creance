@@ -558,6 +558,28 @@ fn route(ctx: &ServeCtx, method: &str, path: &str, body: &[u8]) -> (u16, &'stati
                 Err(e) => (409, json!({"error": e})),
             }
         }),
+        ("POST", "/api/exit-bind") => json_action(ctx, body, |ctx, _v| {
+            // 0.9.2：出口绑定的 workbench 入口。动态政策要求用户显式确认
+            // 出口国别——这是安全决策不是可自动化的步骤。确认后写入
+            // bind_missing（只补空白，已绑字段不动），返回实测落点供 UI
+            // 复述。绑定本身不开闸：用户随后点检查走完整证据流。
+            let r: Result<serde_json::Value, String> = (|| {
+                let mut cfg = config::load(&ctx.config_path)?;
+                let (location, _corroborated) = crate::evidence::observe_full(&cfg)
+                    .map_err(|e| format!("出口观测失败：{e}"))?;
+                cfg.exit_policy = cfg.exit_policy.bind_missing(&location);
+                config::write_private_config(&ctx.config_path, &cfg)?;
+                Ok(json!({
+                    "ip": location.ip,
+                    "country": location.country_code,
+                    "bound": cfg.exit_policy.country_code,
+                }))
+            })();
+            match r {
+                Ok(v) => (200, v),
+                Err(e) => (409, json!({"error": e})),
+            }
+        }),
         ("POST", "/api/proxy/start") => cmd_action(ctx, || {
             // F-036: gates learn about the (possibly changed) exit BEFORE
             // the core restarts — same ordering as the CLI's proxy-start,
@@ -586,11 +608,17 @@ fn route(ctx: &ServeCtx, method: &str, path: &str, body: &[u8]) -> (u16, &'stati
                 &[],
                 Instant::now() + CHECK_BUDGET,
             )?;
-            if response.status == 200 {
-                Ok(())
-            } else {
-                Err(format!("proxy check returned HTTP {}", response.status))
+            if response.status != 200 {
+                return Err(format!("proxy check returned HTTP {}", response.status));
             }
+            // 0.9.2：workbench 的"检查"必须真正开闸——此前这里只做宿主
+            // 侧浅检，gate 永远关着，用户核心在跑、线缆却至死不通。
+            // 环境不在运行（未 setup/已停止）时开闸流会报错，但浅检
+            // 本身已通过——此时跳过开闸不算失败（用户可能只验节点）。
+            if let Ok(inst) = crate::serve::running_instance(&ctx.profile) {
+                crate::gateopen::gate_open_flow(&ctx.profile, &inst)?;
+            }
+            Ok(())
         }),
         _ => (
             404,
