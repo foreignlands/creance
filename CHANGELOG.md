@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.9.3] - 2026-11-27
+
+### 全链贯通 + probe 自废武功修复
+
+- **F-NOPROXY（严重）**：escape 探针的 proxy-path 正控制用
+  `--noproxy '*' --socks5-hostname`——现代 curl 语义下 noproxy 连显式
+  代理一起禁用，探针直连必然失败，永远假 ESCAPE。这是母鸡级谎言：
+  出口实际是通的，探针却报告不通。修复：去掉 noproxy（显式代理
+  本来就压过环境变量，noproxy 毫无作用只有害处）。
+- **全产品链首次端到端实证**：select→start→exit-bind→check 开闸→
+  wire 推送→guest 经托管核心真实出网（ip=140.232.64.3 实测）。
+  数据面走的是 ssh -R fallback——vsock 在本 dev 机（嵌套虚拟化）
+  内核层全 reset，记档待决。
+- **记档下一设计缺口**：guest 防火墙按设计丢弃全部 DNS（防泄漏），
+  但 socks5 远端解析只对 proxy-aware 工具有效；真实 agent 工具
+  （opencode 安装器等）走系统 DNS 全灭。需要 guest 内 DNS  sanctioned
+  路径设计（转发 mihomo DNS 监听 / dnsmasq 摆渡等方案待评）。
+
 ## [0.9.2] - 2026-11-27
 
 ### 全产品链验证发现的三枚连环修复

@@ -415,7 +415,7 @@ fi"#
     // still reports ESCAPE honestly.
     let proxy_probe = match proxy {
         Some((auth, port)) => format!(
-            r#"if curl -m 8 -s --noproxy '*' --socks5-hostname "session:{auth}"@127.0.0.1:{port} https://1.1.1.1/cdn-cgi/trace | grep -q ip=; then
+            r#"if curl -m 8 -s --socks5-hostname "session:{auth}"@127.0.0.1:{port} https://1.1.1.1/cdn-cgi/trace | grep -q ip=; then
   echo "PROBE proxy-path PASS"
 else
   echo "PROBE proxy-path ESCAPE"
