@@ -148,3 +148,23 @@ vibe-kanban 编排十个 agent，就是把攻击面乘十。
    必要时评估 RDP/wayland 直投——0.8.6 实机数据说话。
 3. agent 注册表的分发：内置编译 vs 在线拉取更新（后者涉及
    供应链校验，倾向首期内置+版本钉住）。
+
+## 0.8.5 下半期：终端通道设计决议（2026-11-27 深夜）
+
+架构定论（联网印证+现有资产盘点后）：
+- **传输**：serve.rs 手写 RFC6455 WebSocket（std-only，~200行）——
+  握手 SHA1+base64、帧编解码、客户端掩码。不引 actix/tungstenite
+  重依赖。SHA1 内联实现（60行公开算法）。
+- **PTY**：host 侧不需要 pty——`ssh -tt` 强制 guest 侧分配即可，
+  字节直过管道。尺寸：连接后首条命令 `stty rows R cols C` 设初始
+  尺寸；resize 走 WS 控制消息（v1 best-effort）。
+- **前端**：xterm.js 5.x + fit addon **vendor 进仓库**（serve 纪律
+  禁止绝对 URL，不能用 CDN）——/static/xterm.js 路由直出。
+- **启动路径**：agent launch = ssh -tt guest 执行 `stty …; exec <launch>`；
+  terminal 条目 exec bash。全部经既有 apply_ssh_options 纪律。
+- 竞品印证：vibe-kanban/Crystal 都是 xterm.js+WS+pty 三段式，
+  区别仅在他们跑 host 我们跑 guest——我们的 ssh 通道即"远程 pty"。
+
+施工清单：sha1.rs / ws.rs（握手+帧）/ term.rs（ssh 会话管理）/
+static xterm vendor / workbench.html terminal 面板 / 测试（WS 握手
+向量用 RFC6455 官方 example，帧 roundtrip 单测）。
