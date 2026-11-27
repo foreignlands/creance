@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.7.23] - 2026-11-26
+
+### macOS 实机审计修复批 + 残留清扫（审计全文：docs/AUDIT-2026-11-26-macos.md）
+
+#### 修复（实机验证：lima 2.3.0 / vz / 宿主带系统代理）
+- **macOS 上 `cargo test` 不编译**：gateprobe 测试引用 cfg'd-out 的
+  `crate::qemu` → 断言块按平台门控。
+- **Lima 注入宿主系统代理进 guest**（实锤三重破坏）：`creance-call`
+  loopback POST 被代理进黑洞；provision 重放烧干 toolchain 预算
+  （单次 boot 5m10s，socat 永远缺席）；宿主代理凭证违规落 guest。
+  lima.yaml `propagateProxyEnv: false` + `env:` 置空十拼写双通道
+  全堵；`creance-call` 加 `--noproxy`。
+- **provision 重放守卫**：toolchain leg 读 `/run/egress-armed` 即在
+  重放时整体跳过——二次 `up` 5m10s → 17s。socat 前移到 node
+  fallback 之前（尾部 extras 行可死于耗尽，缺转发器是静默断线）。
+- **gatewire 条件武装（F-A1 同类）**：单元加
+  `ConditionPathExists=%h/.creance-vsock`——daemon 仅在 `cbridged`
+  推 marker、fallback 清扫并停单元。systemd 的 boot 自触发路径
+  也一并堵死。
+- **存量 guest 代理残留自愈**：provision 加无条件 sed scrub 段，
+  每次重放剥掉 `/etc/environment` 全部 *_proxy 拼写。
+- **`proxy-path` 假 ESCAPE**：无托管路由时报 SKIP（隧道目标按设计
+  不存在），配置了但死仍真 ESCAPE。
+- **`/tmp/vmhome-*` 悬空链接机会性 GC**；setup 预建 environment dir；
+  `compile_error!` 显式收窄 macOS+Linux 二元平台矩阵。
+
+#### 前端
+- workbench 重写：自动明暗主题、live 指示、busy 态、订阅可控
+  字符串全转义；新增测试钉死——UI 每个 /api 路径必须命中真路由、
+  esc() 包裹全部订阅字段、禁绝对 URL fetch。Tauri 壳加托盘菜单
+  与关窗驻留。
+
+#### 验证
+- 198 tests / 0 fail，clippy -D warnings 干净，fmt/probe-inventory 过。
+
 ## [0.7.22] - 2026-11-25
 
 ### 深度自审第三轮：fallback 抢端口修复 + 变异矩阵扩展
