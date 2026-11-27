@@ -55,6 +55,9 @@ fn main() {
         Commands::PersonaList => cmd_persona_list(),
         Commands::MigrateExport { file } => cmd_migrate_export(&file),
         Commands::Approve { action } => cmd_approve(&action),
+        Commands::KeychainSet { entry } => cmd_keychain_set(&entry),
+        Commands::KeychainDelete { entry } => cmd_keychain_delete(&entry),
+        Commands::KeychainMigrate => cmd_keychain_migrate(),
         Commands::PluginList => cmd_plugin_list(cmds::profile()),
         Commands::PluginCall { name, args } => cmd_plugin_call(cmds::profile(), name, args),
         Commands::EscapeTest => cmd_escape_test(),
@@ -203,6 +206,16 @@ enum Commands {
     /// Request phone approval for a sensitive action (Telegram channel
     /// configured in config.json); grants a 10-minute pass on confirm.
     Approve { action: String },
+    /// Store a secret in the OS keychain (entry referenced as
+    /// `keychain:<entry>` in config.json). The secret is read from stdin
+    /// — never argv, which is ps-visible.
+    KeychainSet { entry: String },
+    /// Delete a keychain entry.
+    KeychainDelete { entry: String },
+    /// Move plaintext secrets in config.json (proxy_url credentials,
+    /// approval bot token) into the OS keychain, rewriting the fields as
+    /// `keychain:` references. A backup is written first.
+    KeychainMigrate,
     /// Run the containment probe suite (host checks + in-guest probes).
     EscapeTest,
     /// List registered plugins (profile's plugins.json).

@@ -111,9 +111,12 @@ pub fn diagnose(profile: &str, config_path: &str) -> Vec<Check> {
             out.push(Check {
                 status: Status::Ok,
                 name: "config",
-                detail: format!("valid; proxy {}", cfg.proxy_url),
+                detail: format!("valid; proxy {}", cfg.proxy_url), // 引用形原样展示——不泄露真值
             });
-            match creance_proxy::applied(profile, &cfg.proxy_url, &cfg.proxy_revision) {
+            match cfg
+                .resolved_proxy_url()
+                .and_then(|u| creance_proxy::applied(profile, &u, &cfg.proxy_revision))
+            {
                 Ok(store) => {
                     out.push(Check {
                         status: Status::Ok,

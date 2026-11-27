@@ -404,7 +404,10 @@ impl Gate {
                         std::thread::spawn(move || {
                             if let Some(g) = weak.upgrade() {
                                 let result = config::load(&g.config_path).and_then(|cfg| {
-                                    creance_net::egress::Egress::new(&cfg.proxy_url, &cfg.dns_url)
+                                    cfg.resolved_proxy_url()
+                                        .and_then(|u| {
+                                            creance_net::egress::Egress::new(&u, &cfg.dns_url)
+                                        })
                                         .and_then(|e| {
                                             creance_net::trace::sample_pair(
                                                 &e,

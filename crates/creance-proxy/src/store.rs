@@ -396,8 +396,18 @@ pub fn select_and_apply(profile: &str, config_path: &str, node: &str) -> Result<
     // never leave a half-applied selection behind (FINDING-014).
     let mut config = creance_vm::config::load(config_path)?;
     let previous = std::fs::read(Path::new(&dir(profile)).join("sources.json")).ok();
+    // keychain 引用形的 proxy_url 不得被真值回填覆盖——更新钥匙串
+    // 里的秘密本身，字段保持引用。失败则在任何持久化之前中止
+    // （keychain 已写而 config 回滚的残余 = applied 比对失败 =
+    // 闸保持关闭，安全方向）。
+    let endpoint = store.endpoint();
+    if creance_vm::secret::is_reference(&config.proxy_url) {
+        let entry = config.proxy_url[creance_vm::secret::PREFIX.len()..].to_owned();
+        creance_vm::secret::store(&entry, &endpoint)?;
+    } else {
+        config.proxy_url = endpoint;
+    }
     save(profile, &store)?;
-    config.proxy_url = store.endpoint();
     config.proxy_revision = store.revision.clone();
     if let Err(e) = creance_vm::config::write_private_config(config_path, &config) {
         // Roll the store back so applied() never sees a mismatched pair.
@@ -426,7 +436,8 @@ pub fn select_and_apply(profile: &str, config_path: &str, node: &str) -> Result<
 pub fn start_managed(profile: &str, config_path: &str) -> Result<(), String> {
     let _guard = store_lock(profile)?;
     let config = creance_vm::config::load(config_path)?;
-    let store = applied(profile, &config.proxy_url, &config.proxy_revision)?;
+    let proxy_url = config.resolved_proxy_url()?;
+    let store = applied(profile, &proxy_url, &config.proxy_revision)?;
     // Fast path (Go proxyCommand): same physical binding and a running,
     // matching core means nothing to do.
     let config_yaml = creance_vm::paths::join(&dir(profile), "config.yaml");

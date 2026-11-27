@@ -183,7 +183,8 @@ fn route(ctx: &ServeCtx, method: &str, path: &str, body: &[u8]) -> (u16, &'stati
         }),
         ("POST", "/api/check") => cmd_action(ctx, || {
             let cfg = config::load(&ctx.config_path)?;
-            let egress = creance_net::egress::Egress::new(&cfg.proxy_url, &cfg.dns_url)?;
+            let egress =
+                creance_net::egress::Egress::new(&cfg.resolved_proxy_url()?, &cfg.dns_url)?;
             let response = creance_net::egress::request(
                 &egress,
                 "GET",
@@ -258,7 +259,9 @@ fn status_json(ctx: &ServeCtx) -> serde_json::Value {
         "applied": false,
     });
     if let Ok(cfg) = cfg {
-        let applied = creance_proxy::applied(&ctx.profile, &cfg.proxy_url, &cfg.proxy_revision);
+        let applied = cfg
+            .resolved_proxy_url()
+            .and_then(|u| creance_proxy::applied(&ctx.profile, &u, &cfg.proxy_revision));
         value["applied"] = json!(applied.is_ok());
         value["timezone"] = json!(cfg.timezone);
         value["locale"] = json!(cfg.locale);

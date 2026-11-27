@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.7.25] - 2026-11-27
+
+### 安全根：OS 钥匙串集成（评审项②，L1）
+
+- **`keychain:<entry>` 引用形**：config.json 任何敏感串可写引用，
+  真值存 macOS Keychain / Linux secret-service（keyring 4，纯 Rust
+  zbus 后端，无 dbus C 依赖）。`load` 保持引用形——身份比较、
+  持久化、fingerprint 全在引用上走；只有建 egress、调 Bot API 的
+  使用点经 `secret::resolve` 还原（8 处 proxy_url + 4 处 token
+  使用点全接）。
+- **写入纪律**：`select_and_apply` 对引用形 proxy_url 更新钥匙串
+  本身而非回填明文；失败先中止，残余方向 fail-closed。
+- **命令面**：`keychain-set`（stdin 读秘密，不进 argv/ps）、
+  `keychain-delete`、`keychain-migrate`（自动备份 + 引用改写，
+  只挪带密码 userinfo 的 proxy_url 与非空 bot token）。
+- **校验**：引用形 proxy_url 跳过形状检查（真值在使用点校验）；
+  引用形 token 仍受成对规则约束。
+- **MSRV 守住 1.88**：secret-service 链路的 aes/uuid 钉到兼容版。
+
 ## [0.7.24] - 2026-11-27
 
 ### 评审后修复（v0.7.23 自审两项）

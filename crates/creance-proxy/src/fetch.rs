@@ -50,7 +50,7 @@ fn is_blocked_v4(v4: std::net::Ipv4Addr) -> bool {
 /// redirects are joined against the current URL; anything outside 2xx after
 /// `MAX_REDIRECTS` hops is an error.
 pub fn fetch_subscription(config: &Config, url: &str) -> Result<Vec<u8>, String> {
-    let egress = Egress::new(&config.proxy_url, &config.dns_url)?;
+    let egress = Egress::new(&config.resolved_proxy_url()?, &config.dns_url)?;
     fetch_subscription_through(&egress, url)
 }
 

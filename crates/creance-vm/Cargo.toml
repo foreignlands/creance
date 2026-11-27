@@ -19,6 +19,7 @@ creance-net = { workspace = true }
 chacha20poly1305 = "0.11.0"
 argon2 = "0.6.0"
 base64 = "0.23.1"
+keyring = "4.2.0"
 
 # vFAT seed images — built by the Linux QEMU backend only (qemu/seed.rs);
 # a plain dependency would draw an unused-dependency lint on every macOS build.

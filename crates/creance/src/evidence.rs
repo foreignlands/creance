@@ -43,7 +43,7 @@ pub fn observe(cfg: &Config) -> Result<Location, String> {
 /// Like [`observe`] but also reports whether the second independent
 /// source corroborated the country (F-038's narrowing).
 pub fn observe_full(cfg: &Config) -> Result<(Location, bool), String> {
-    let egress = creance_net::egress::Egress::new(&cfg.proxy_url, &cfg.dns_url)?;
+    let egress = creance_net::egress::Egress::new(&cfg.resolved_proxy_url()?, &cfg.dns_url)?;
     let (sample, corroborated) =
         creance_net::trace::sample_pair(&egress, Instant::now() + TRACE_BUDGET)?;
     Ok((sample_to_location(sample), corroborated))

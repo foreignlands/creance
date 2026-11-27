@@ -35,14 +35,15 @@ pub fn request_approval(profile: &str, cfg: &Config, action: &str) -> Result<(),
             "审批通道未配置（config.json 需 approval_bot_token + approval_chat_id）".to_owned(),
         );
     }
-    let eg = Egress::new(&cfg.proxy_url, &cfg.dns_url)?;
+    let eg = Egress::new(&cfg.resolved_proxy_url()?, &cfg.dns_url)?;
+    let token = cfg.resolved_approval_bot_token()?;
     let nonce = &creance_vm::token()[..12];
     let text = format!(
         "creance 审批请求：{action}\n回执码：{nonce}\n在本对话直接回复该回执码即批准（10 分钟有效）"
     );
     api(
         &eg,
-        &cfg.approval_bot_token,
+        &token,
         "sendMessage",
         serde_json::json!({"chat_id": cfg.approval_chat_id, "text": text})
             .to_string()
@@ -54,12 +55,7 @@ pub fn request_approval(profile: &str, cfg: &Config, action: &str) -> Result<(),
     while Instant::now() < deadline {
         let url_body =
             serde_json::json!({"timeout": 25, "offset": offset, "allowed_updates": ["message"]});
-        let resp = api(
-            &eg,
-            &cfg.approval_bot_token,
-            "getUpdates",
-            url_body.to_string().as_bytes(),
-        );
+        let resp = api(&eg, &token, "getUpdates", url_body.to_string().as_bytes());
         let Ok(resp) = resp else { continue };
         let v: serde_json::Value = serde_json::from_str(&resp).unwrap_or_default();
         let Some(updates) = v["result"].as_array() else {

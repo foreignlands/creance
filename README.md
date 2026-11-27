@@ -67,9 +67,18 @@ existing `~/.claude-cage` profiles keep working).
 | 代理 | `proxy-import` `proxy-select` `proxy-start` `proxy-stop` `proxy-status` `proxy-refresh` |
 | 身份/迁移 | `identity-reset` `persona-save` `persona-use` `persona-list` `bundle-export` `bundle-import` `migrate-export` |
 | 使用面 | `claude` `oauth` `serve` `approve` |
+| 秘密 | `keychain-set` `keychain-delete` `keychain-migrate` |
 | 验收/运维 | `escape-test` `gate-open` `gate-close` `version` |
 
 完整参数走 `creance <cmd> --help`。
+
+**秘密存储（keychain 引用）**：config.json 里任何敏感串可写成
+`keychain:<entry>` 引用，真值存 OS 钥匙串（macOS Keychain / Linux
+secret-service，经 zbus——headless 需 dbus 会话 + keyring 守护）。
+`echo <secret> | creance keychain-set <entry>` 写入（stdin，不进
+argv/ps）；`creance keychain-migrate` 一键把 proxy_url 凭证与
+approval bot token 挪进钥匙串并改写为引用（自动备份）。引用形字段
+不参与真值比较——apply 回写只更新钥匙串、字段不落明文。
 
 ## Desktop shell
 

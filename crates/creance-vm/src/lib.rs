@@ -20,6 +20,7 @@ pub mod provision;
 #[cfg(target_os = "linux")]
 pub mod qemu;
 pub mod running;
+pub mod secret;
 
 // 平台矩阵是二元的：macOS（Lima/vz）与 Linux（QEMU/KVM）。其余 cfg 分支
 // 一律按 `not(macos)` → Linux 后端书写——第三个系统在这里就地编译失败，

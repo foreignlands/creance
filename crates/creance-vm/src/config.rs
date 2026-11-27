@@ -103,7 +103,11 @@ pub fn load(path: &str) -> Result<Config, String> {
 impl Config {
     /// The full validation of the isolation boundary.
     pub fn validate(&self) -> Result<(), String> {
-        creance_net::egress::validate_proxy_url(&self.proxy_url)?;
+        // A `keychain:` reference is opaque by design — the shape check
+        // runs when the resolved value is used, not here.
+        if !crate::secret::is_reference(&self.proxy_url) {
+            creance_net::egress::validate_proxy_url(&self.proxy_url)?;
+        }
         creance_net::egress::validate_dns_url(&self.dns_url)?;
         validate_timezone(&self.timezone)?;
         if !is_locale(&self.locale) {
@@ -114,6 +118,18 @@ impl Config {
         }
         validate_approval(&self.approval_bot_token, &self.approval_chat_id)?;
         self.exit_policy.validate()
+    }
+
+    /// The proxy endpoint with any `keychain:` reference resolved — use
+    /// sites that OPEN connections need this; comparisons and persistence
+    /// keep using the raw (reference-form) field.
+    pub fn resolved_proxy_url(&self) -> Result<String, String> {
+        crate::secret::resolve(&self.proxy_url)
+    }
+
+    /// The approval bot token with any `keychain:` reference resolved.
+    pub fn resolved_approval_bot_token(&self) -> Result<String, String> {
+        crate::secret::resolve(&self.approval_bot_token)
     }
 
     /// The identity of this configuration as far as running environments are
@@ -158,6 +174,9 @@ fn validate_approval(token: &str, chat: &str) -> Result<(), String> {
     }
     if token.is_empty() || chat.is_empty() {
         return Err("approval_bot_token 与 approval_chat_id 须成对配置".to_owned());
+    }
+    if crate::secret::is_reference(token) {
+        return Ok(());
     }
     let mut parts = token.splitn(2, ':');
     let id_ok = parts
@@ -362,5 +381,25 @@ mod tests {
             load(path.to_str().unwrap()).unwrap().fingerprint()
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn keychain_reference_forms_validate() {
+        // A reference-shaped proxy_url skips the shape check (opaque by
+        // design); a reference-shaped token pairs fine with a chat id.
+        let mut c = default_config();
+        c.proxy_url = "keychain:proxy_url".to_owned();
+        c.approval_bot_token = "keychain:approval_bot_token".to_owned();
+        c.approval_chat_id = "123456".to_owned();
+        assert!(c.validate().is_ok(), "{:?}", c.validate());
+        // pairing rule still applies to references
+        let mut unpaired = c.clone();
+        unpaired.approval_chat_id = String::new();
+        assert!(unpaired.validate().is_err());
+        // malformed reference spellings fall back to the ordinary rules —
+        // `keychain:` alone is not a reference and fails proxy validation
+        let mut bad = default_config();
+        bad.proxy_url = "keychain:".to_owned();
+        assert!(bad.validate().is_err());
     }
 }

@@ -47,7 +47,10 @@ pub(crate) fn cmd_check() -> i32 {
         Ok(c) => c,
         Err(e) => return fail(e),
     };
-    let egress = match Egress::new(&cfg.proxy_url, &cfg.dns_url) {
+    let egress = match cfg
+        .resolved_proxy_url()
+        .and_then(|u| Egress::new(&u, &cfg.dns_url))
+    {
         Ok(e) => e,
         Err(e) => return fail(e),
     };

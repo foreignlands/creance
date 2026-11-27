@@ -27,7 +27,10 @@ pub(crate) fn cmd_proxy_status() -> i32 {
     };
     println!("endpoint: {}", store.endpoint());
     println!("sources: {} ({} nodes)", store.sources.len(), store.count());
-    match creance_proxy::applied(&profile, &cfg.proxy_url, &cfg.proxy_revision) {
+    match cfg
+        .resolved_proxy_url()
+        .and_then(|u| creance_proxy::applied(&profile, &u, &cfg.proxy_revision))
+    {
         Ok(applied) => {
             let name = applied
                 .find(&applied.selected)

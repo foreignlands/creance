@@ -228,3 +228,98 @@ pub(crate) fn cmd_persona_list() -> i32 {
     }
     0
 }
+
+/// keychain set：秘密从 stdin 读一行——argv 是 ps 可见的，永不走命令行。
+pub(crate) fn cmd_keychain_set(entry: &str) -> i32 {
+    let mut buf = String::new();
+    if std::io::stdin().read_line(&mut buf).is_err() {
+        return fail("stdin 读取失败".to_owned());
+    }
+    let secret = buf.trim_end_matches(['\n', '\r']);
+    if secret.is_empty() {
+        return fail("秘密为空——从 stdin 传入一行".to_owned());
+    }
+    match creance_vm::secret::store(entry, secret) {
+        Ok(()) => {
+            println!("已写入钥匙串：keychain:{entry}");
+            0
+        }
+        Err(e) => fail(e),
+    }
+}
+
+pub(crate) fn cmd_keychain_delete(entry: &str) -> i32 {
+    match creance_vm::secret::delete(entry) {
+        Ok(()) => {
+            println!("已删除：keychain:{entry}");
+            0
+        }
+        Err(e) => fail(e),
+    }
+}
+
+/// 把 config.json 里的明文秘密搬进钥匙串：proxy_url 带密码的 userinfo、
+/// approval_bot_token。先写备份再改写——迁移失败时原文件可手工恢复。
+pub(crate) fn cmd_keychain_migrate() -> i32 {
+    let path = config::config_path();
+    let mut cfg = match config::load(&path) {
+        Ok(c) => c,
+        Err(e) => return fail(e),
+    };
+    let mut moved: Vec<String> = Vec::new();
+    // proxy_url：只有带密码 userinfo（scheme://user:pass@host）才值得挪——
+    // 本机回环端点（socks5://127.0.0.1:…）不是秘密。
+    if !creance_vm::secret::is_reference(&cfg.proxy_url) && proxy_url_has_password(&cfg.proxy_url) {
+        if let Err(e) = creance_vm::secret::store("proxy_url", &cfg.proxy_url) {
+            return fail(e);
+        }
+        cfg.proxy_url = "keychain:proxy_url".to_owned();
+        moved.push("proxy_url".to_owned());
+    }
+    if !cfg.approval_bot_token.is_empty()
+        && !creance_vm::secret::is_reference(&cfg.approval_bot_token)
+    {
+        if let Err(e) = creance_vm::secret::store("approval_bot_token", &cfg.approval_bot_token) {
+            return fail(e);
+        }
+        cfg.approval_bot_token = "keychain:approval_bot_token".to_owned();
+        moved.push("approval_bot_token".to_owned());
+    }
+    if moved.is_empty() {
+        println!("无需迁移：未发现明文秘密（或已是 keychain 引用）");
+        return 0;
+    }
+    let backup = format!("{path}.pre-keychain-bak");
+    if let Ok(bytes) = std::fs::read(&path) {
+        if let Err(e) = creance_vm::write_private_atomic(&backup, &bytes) {
+            return fail(format!("备份写入失败，未迁移：{e}"));
+        }
+    }
+    match config::write_private_config(&path, &cfg) {
+        Ok(()) => {
+            println!("已迁移：{}（备份 {}）", moved.join(", "), backup);
+            0
+        }
+        Err(e) => fail(format!("配置改写失败：{e}")),
+    }
+}
+
+/// scheme://user:pass@host 且 pass 非空。
+fn proxy_url_has_password(url: &str) -> bool {
+    let Some(rest) = url.split("://").nth(1) else {
+        return false;
+    };
+    let Some(authority) = rest.split('/').next() else {
+        return false;
+    };
+    let Some(userinfo) = authority
+        .split('@')
+        .next()
+        .filter(|_| authority.contains('@'))
+    else {
+        return false;
+    };
+    userinfo
+        .split_once(':')
+        .is_some_and(|(_, pass)| !pass.is_empty())
+}
