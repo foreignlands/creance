@@ -168,3 +168,30 @@ vibe-kanban 编排十个 agent，就是把攻击面乘十。
 施工清单：sha1.rs / ws.rs（握手+帧）/ term.rs（ssh 会话管理）/
 static xterm vendor / workbench.html terminal 面板 / 测试（WS 握手
 向量用 RFC6455 官方 example，帧 roundtrip 单测）。
+
+## 0.8.8 desktop 通道设计决议（2026-11-27 深夜，压缩前固化）
+
+**关键资产发现**：desktop 通道不需要新基础设施——`creance-oauth`
+guest 脚本已实现按需 Xvnc+noVNC+浏览器 的完整生命周期（cmds/vm.rs
+cmd_oauth 是 CLI 形态）。desktop 化 = 把这个通道泛化+serve 托管化：
+
+1. serve.rs 新端点 `/api/desktop/open`：spawn 常驻 ssh -L 转发
+   （host 随机 loopback 端口 → guest 127.0.0.1:6080）+ guest_script
+   `creance-oauth start` → 返回端口。serve 进程级单例（重复 open
+   复用）。`/api/desktop/close` 对称销毁。
+2. workbench desktop 面板：iframe 指向 `127.0.0.1:<port>/vnc.html`
+   （noVNC 自带 web 客户端，零额外 vendor）。
+3. desktop agent launch = ssh 在 guest X 会话里启动应用
+   （DISPLAY 变量用 creance-oauth 同一值——读 provision 里该脚本
+   确认）；浏览器 agent 特化为默认启动 chromium。
+4. 安全纪律：转发端口仅 loopback；open 幂等；close 必须杀 ssh
+   子进程+guest 侧 creance-oauth stop；serve 退出时全部回收。
+5. antigravity 安装核实（首保对象）：官方 Linux .deb 存在——
+   安装路径 /usr/share/antigravity 或 /opt；启动命令 antigravity；
+   0.8.8 在 guest 里实测后就位注册表 install 字段。
+   需联网核查：是否 Electron+是否需要 --no-sandbox（root/容器
+   场景常见）——guest 是普通用户非 root，预期不需要。
+
+施工顺序：读 provision 里 creance-oauth 脚本→serve desktop 端点
+→iframe 面板→真实 guest 验证浏览器经桌面通道→antigravity guest
+实测→注册表补全。
