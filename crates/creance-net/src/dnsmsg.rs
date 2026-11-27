@@ -296,7 +296,7 @@ mod tests {
         buf[2] = 0x80; // response
         buf[4] = 0;
         buf[5] = 1; // qdcount 1
-                    // A name that points at itself.
+        // A name that points at itself.
         buf.push(0xc0);
         buf.push(12);
         buf.extend_from_slice(&[0, 1, 0, 1]);

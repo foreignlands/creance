@@ -26,10 +26,10 @@ pub(crate) fn cmd_plugin_call(profile: String, name: String, args: Vec<String>) 
             if let Some(s) = v.get("stdout").and_then(|x| x.as_str()) {
                 print!("{s}");
             }
-            if let Some(s) = v.get("stderr").and_then(|x| x.as_str()) {
-                if !s.is_empty() {
-                    eprint!("{s}");
-                }
+            if let Some(s) = v.get("stderr").and_then(|x| x.as_str())
+                && !s.is_empty()
+            {
+                eprint!("{s}");
             }
             v.get("exit").and_then(|x| x.as_i64()).unwrap_or(1) as i32
         }

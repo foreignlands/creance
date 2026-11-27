@@ -149,11 +149,7 @@ pub(crate) fn cmd_proxy_refresh() -> i32 {
         }
     }
     println!("refreshed {refreshed} source(s)");
-    if refreshed > 0 {
-        0
-    } else {
-        2
-    }
+    if refreshed > 0 { 0 } else { 2 }
 }
 
 /// The managed-core port of this profile (store); the default when no

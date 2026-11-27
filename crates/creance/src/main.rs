@@ -13,13 +13,17 @@ use creance_vm::config;
 /// The default trace check target: a plain endpoint that reports the egress IP.
 mod cmds;
 use cmds::*;
+#[allow(unsafe_code)]
 fn main() {
     for name in [
         "AGENT_VM_UNSAFE_OPEN_NETWORK",
         "AGENT_VM_UNSAFE_WRITABLE_GIT",
         "AGENT_VM_UNSAFE_DISABLE_SECURITY_PROMPTS",
     ] {
-        std::env::remove_var(name);
+        // Sound: first thing in main, before any thread exists —
+        // env mutation cannot race. (Edition 2024 made env access
+        // unsafe because of the multi-threaded case.)
+        unsafe { std::env::remove_var(name) };
     }
     let cli = Cli::parse();
     std::process::exit(match cli.command {

@@ -6,8 +6,8 @@
 
 #![allow(unsafe_code)] // libc AF_VSOCK plumbing — audited, fd lifetime audited
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 
 // linux/vm_sockets.h — AF_VSOCK is not exported by libc's linux API.
@@ -76,10 +76,21 @@ impl VsockBridge {
 
     pub fn stop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
-        // Wake the accept poll immediately.
-        unsafe { libc::shutdown(self.listener_fd, libc::SHUT_RDWR) };
+        // Wake the accept poll immediately. fd ownership discipline
+        // (F-R33-2): the accept loop NEVER closes the listener — stop()
+        // does, exactly once, after the join. Without the -1 sentinel a
+        // second stop() (Drop after an explicit stop) would shutdown() a
+        // closed fd number — one the allocator may already have reused
+        // for an innocent socket.
+        if self.listener_fd >= 0 {
+            unsafe { libc::shutdown(self.listener_fd, libc::SHUT_RDWR) };
+        }
         if let Some(h) = self.handle.take() {
             let _ = h.join();
+        }
+        if self.listener_fd >= 0 {
+            unsafe { libc::close(self.listener_fd) };
+            self.listener_fd = -1;
         }
     }
 }
@@ -130,13 +141,12 @@ fn accept_loop(listener: i32, port: u16, stop: Arc<AtomicBool>) {
         let flag = stop.clone();
         std::thread::spawn(move || splice(conn, up_fd, flag));
     }
-    unsafe { libc::close(listener) };
 }
 
 /// Bidirectional copy between the vsock conn and the upstream TCP fd.
 /// Polls with a quarter-second deadline so the stop flag lands promptly;
 /// the guest sees the same hard cut a dead ssh channel produced.
-fn splice(a: i32, b: i32, stop: Arc<AtomicBool>) {
+pub(crate) fn splice(a: i32, b: i32, stop: Arc<AtomicBool>) {
     let mut buf = [0u8; 65536];
     let mut fds = [
         libc::pollfd {
@@ -161,6 +171,7 @@ fn splice(a: i32, b: i32, stop: Arc<AtomicBool>) {
         if n == 0 {
             continue;
         }
+        let mut dead = false;
         for (i, fd) in fds.iter().enumerate() {
             let (from, to) = if i == 0 { (a, b) } else { (b, a) };
             if fd.revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) == 0 {
@@ -168,12 +179,15 @@ fn splice(a: i32, b: i32, stop: Arc<AtomicBool>) {
             }
             let r = unsafe { libc::read(from, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
             if r <= 0 {
-                // This connection is over — THIS splice dies. It must
-                // never touch the shared stop flag: one guest stream
-                // closing is not the bridge closing (F-A2 — a single
-                // finished connection otherwise killed the accept loop
-                // and every live splice, permanently: the watchdog saw
-                // Some(bridge) and never restarted it).
+                // This connection is over — THIS splice dies (F-R33-1:
+                // the break must reach the OUTER loop — an EOF fd stays
+                // poll-ready forever, and breaking only the fds loop
+                // left one permanently spinning thread per finished
+                // connection). It must never touch the shared stop flag:
+                // one guest stream closing is not the bridge closing
+                // (F-A2). Hard-cut shape: the same semantics a dead ssh
+                // channel produced.
+                dead = true;
                 break;
             }
             let mut off = 0usize;
@@ -186,10 +200,19 @@ fn splice(a: i32, b: i32, stop: Arc<AtomicBool>) {
                     )
                 };
                 if w <= 0 {
+                    // The write end is gone — continuing to read would
+                    // silently drop every byte (F-R33-3).
+                    dead = true;
                     break;
                 }
                 off += w as usize;
             }
+            if dead {
+                break;
+            }
+        }
+        if dead {
+            break;
         }
     }
     unsafe {

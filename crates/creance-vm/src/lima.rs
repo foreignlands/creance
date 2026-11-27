@@ -7,7 +7,7 @@
 //! to `limactl create`, which owns the instance directory; instance naming
 //! stays compatible with the Go build.
 
-use crate::provision::{guest_bootstrap, UBUNTU_RELEASE};
+use crate::provision::{UBUNTU_RELEASE, guest_bootstrap};
 use serde_yaml::{Mapping, Value as Yaml};
 
 use crate::vm::SetupOptions;
@@ -284,10 +284,12 @@ mod tests {
         let images = v["images"].as_sequence().unwrap();
         // Ubuntu cloud images spell the arch "arm64"; guests are arm64-only.
         let image_arch = "arm64";
-        assert!(images[0]["location"]
-            .as_str()
-            .unwrap()
-            .contains(&format!("ubuntu-24.04-server-cloudimg-{image_arch}")));
+        assert!(
+            images[0]["location"]
+                .as_str()
+                .unwrap()
+                .contains(&format!("ubuntu-24.04-server-cloudimg-{image_arch}"))
+        );
         let mounts = v["mounts"].as_sequence().unwrap();
         assert_eq!(mounts[0]["location"], "/Users/me/project");
         assert_eq!(mounts[0]["writable"], Yaml::Bool(true));

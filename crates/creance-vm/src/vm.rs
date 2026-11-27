@@ -152,10 +152,10 @@ pub fn environment_dir(profile: &str) -> String {
         struct Record {
             directory: String,
         }
-        if let Ok(record) = serde_json::from_str::<Record>(&bytes) {
-            if Path::new(&record.directory).is_absolute() {
-                return record.directory;
-            }
+        if let Ok(record) = serde_json::from_str::<Record>(&bytes)
+            && Path::new(&record.directory).is_absolute()
+        {
+            return record.directory;
         }
     }
     // Workbench-era records name the workspace directly.
@@ -690,18 +690,23 @@ mod tests {
     fn env_strips_proxies_and_credentials() {
         // The test harness does not control the outer env; verify by
         // constructing the filter against injected values.
-        std::env::set_var("HTTP_PROXY", "http://corp:3128");
-        std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-x");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("HTTP_PROXY", "http://corp:3128") };
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-x") };
         let env = sanitized_env(&[]);
         assert!(!env.iter().any(|(k, _)| k == "HTTP_PROXY"));
         assert!(!env.iter().any(|(k, _)| k == "ANTHROPIC_API_KEY"));
-        std::env::remove_var("HTTP_PROXY");
-        std::env::remove_var("ANTHROPIC_API_KEY");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("HTTP_PROXY") };
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("ANTHROPIC_API_KEY") };
         // Extra values pass through.
         let env = sanitized_env(&[("LIMA_HOME", "/tmp/lima".to_owned())]);
-        assert!(env
-            .iter()
-            .any(|(k, v)| k == "LIMA_HOME" && v == "/tmp/lima"));
+        assert!(
+            env.iter()
+                .any(|(k, v)| k == "LIMA_HOME" && v == "/tmp/lima")
+        );
     }
 
     #[test]

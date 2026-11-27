@@ -192,11 +192,11 @@ pub fn alive(path: &str) -> bool {
 /// ours — start time included — then removes the file either way. A stale
 /// or forged file never signals a victim (FINDING-021).
 pub fn stop(path: &str) {
-    if let Some(entry) = load(path) {
-        if entry_alive(&entry) {
-            unsafe {
-                libc::kill(entry.pid, libc::SIGTERM);
-            }
+    if let Some(entry) = load(path)
+        && entry_alive(&entry)
+    {
+        unsafe {
+            libc::kill(entry.pid, libc::SIGTERM);
         }
     }
     let _ = std::fs::remove_file(path);

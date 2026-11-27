@@ -204,15 +204,19 @@ mod tests {
             "guest 防火墙未生效（直连可达）"
         );
         // First line disarmed → the dedicated fw reason (not the generic).
-        assert!(egress_verdict("tcp-blocked\nicmp-blocked\nfw-down\n")
-            .unwrap_err()
-            .contains("第一道防线"));
+        assert!(
+            egress_verdict("tcp-blocked\nicmp-blocked\nfw-down\n")
+                .unwrap_err()
+                .contains("第一道防线")
+        );
         // Missing/garbled evidence → fw evidence absent takes priority;
         // fw-armed alone (tcp/icmp lines missing) → generic refusal.
         assert!(egress_verdict("").unwrap_err().contains("第一道防线"));
-        assert!(egress_verdict("garbage")
-            .unwrap_err()
-            .contains("第一道防线"));
+        assert!(
+            egress_verdict("garbage")
+                .unwrap_err()
+                .contains("第一道防线")
+        );
         assert!(egress_verdict("fw-armed").unwrap_err().contains("正向证据"));
         // ICMP tool absent is not a failure; ICMP open is.
         assert!(egress_verdict("tcp-blocked\nicmp-unknown\nfw-armed\n").is_ok());

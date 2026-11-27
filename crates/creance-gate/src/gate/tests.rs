@@ -504,11 +504,11 @@ fn gate_rejects_missing_auth_and_bad_hosts() {
     // Valid command with the right token goes through.
     let body = r#"{"action":"check"}"#;
     let got = raw_no_auth(&format!(
-            "POST /control HTTP/1.1\r\nHost: gate\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\n\r\n{}",
-            record.token,
-            body.len(),
-            body
-        ));
+        "POST /control HTTP/1.1\r\nHost: gate\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\n\r\n{}",
+        record.token,
+        body.len(),
+        body
+    ));
     assert!(got.starts_with("200"));
     fs::remove_dir_all(&profile).unwrap();
 }
@@ -907,9 +907,11 @@ fn watchdog_fuse_source_pins() {
         !fuse.contains("bool"),
         "fuse softener in watchdog region: bool"
     );
-    assert_eq!(prod.matches("let mut").count(), 29, "{prod}");
-    assert_eq!(prod.matches("= true;").count(), 3, "{prod}");
-    assert_eq!(prod.matches("= false;").count(), 3, "{prod}");
+    assert_eq!(prod.matches("let mut").count(), 30, "{prod}");
+    // splice 的 dead 旗占两枚 `= true;`（F-R33-1/3 修复）——原 3 + 2。
+    assert_eq!(prod.matches("= true;").count(), 5, "{prod}");
+    // `let mut dead = false;` 占一枚（F-R33-1/3）。
+    assert_eq!(prod.matches("= false;").count(), 4, "{prod}");
     for needle in ["mem::take", "u32::from"] {
         assert!(!prod.contains(needle), "fuse softener in prod: {needle}");
     }
@@ -917,6 +919,31 @@ fn watchdog_fuse_source_pins() {
         prod.matches("core_down_ticks = 0;").count(),
         2,
         "success reset + post-fuse reset both required (the `= 0u32;` declaration doesn't match)"
+    );
+    // F-R33-1/3: splice EOF/write-death must reach the OUTER loop —
+    // a break that only exits the fds loop leaves one permanently
+    // spinning thread per finished connection (EOF fds are forever
+    // poll-ready). The dead-flag shape is the pin's whole point.
+    assert_eq!(
+        prod.matches("dead = true;").count(),
+        2,
+        "EOF arm + write-death arm must both raise the dead flag"
+    );
+    assert_eq!(
+        prod.matches("if dead {").count(),
+        2,
+        "dead flag must break both the fds loop and the outer loop"
+    );
+    // F-R33-2: the accept loop never closes the listener; stop() owns
+    // the close exactly once behind the -1 sentinel — a second stop
+    // must never shutdown() a reused fd number.
+    assert!(
+        prod.contains("self.listener_fd = -1;"),
+        "listener close must be sentinel-guarded"
+    );
+    assert!(
+        prod.matches("if self.listener_fd >= 0 {").count() >= 2,
+        "shutdown and close both behind the sentinel"
     );
     assert!(prod.contains("let open = inner.state == GateState::Open"));
     // `let core_up = !open || probe` — the `||` sits on the next
@@ -1088,11 +1115,11 @@ fn call_raw(record: &GateRecord, body: &str) -> Result<(String, serde_json::Valu
     use std::os::unix::net::UnixStream;
     let mut stream = UnixStream::connect(&record.socket).map_err(|e| e.to_string())?;
     let request = format!(
-            "POST /control HTTP/1.1\r\nHost: gate\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            record.token,
-            body.len(),
-            body
-        );
+        "POST /control HTTP/1.1\r\nHost: gate\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        record.token,
+        body.len(),
+        body
+    );
     stream
         .write_all(request.as_bytes())
         .map_err(|e| e.to_string())?;
@@ -1217,4 +1244,83 @@ fn evidence_verdict_convicts_country_drift_only() {
     };
     assert!(super::evidence_verdict(Some(&bare), &sample("CN", "1.1.1.1")).is_none());
     assert!(super::evidence_verdict(None, &sample("CN", "1.1.1.1")).is_none());
+}
+
+// ---- F-R33 regression tests: splice EOF/death behavior ----
+
+use super::vsock::splice;
+use std::sync::Arc as StdArc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering as AtomicOrdering};
+
+#[allow(unsafe_code)]
+fn splice_test_pair() -> (i32, i32) {
+    let mut fds = [0i32; 2];
+    let rc = unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr()) };
+    assert_eq!(rc, 0);
+    (fds[0], fds[1])
+}
+
+/// F-R33-1 regression: a splice whose peer closes must EXIT — not
+/// spin on the forever-poll-ready EOF fd.
+#[test]
+#[allow(unsafe_code)]
+fn splice_exits_when_peer_eof() {
+    let (a, b) = splice_test_pair();
+    let stop = StdArc::new(AtomicBool::new(false));
+    let flag = stop.clone();
+    let done = StdArc::new(AtomicUsize::new(0));
+    let done2 = done.clone();
+    let h = std::thread::spawn(move || {
+        splice(a, b, flag);
+        done2.fetch_add(1, AtomicOrdering::SeqCst);
+    });
+    // EOF on both ends: shutdown the splice's own fds
+    unsafe {
+        libc::shutdown(a, libc::SHUT_RDWR);
+        libc::shutdown(b, libc::SHUT_RDWR);
+    }
+    let start = std::time::Instant::now();
+    while done.load(AtomicOrdering::SeqCst) == 0
+        && start.elapsed() < std::time::Duration::from_secs(3)
+    {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(
+        done.load(AtomicOrdering::SeqCst),
+        1,
+        "splice must exit on EOF — a spinning remnant is the F-R33-1 bug"
+    );
+    stop.store(true, AtomicOrdering::SeqCst);
+    let _ = h.join();
+}
+
+/// Data integrity: bytes written into one end arrive at the other.
+#[test]
+#[allow(unsafe_code)]
+fn splice_copies_bidirectionally() {
+    let (a, z) = splice_test_pair();
+    let (b, y) = splice_test_pair();
+    let stop = StdArc::new(AtomicBool::new(false));
+    let flag = stop.clone();
+    let h = std::thread::spawn(move || splice(a, b, flag));
+    let msg = b"hello-splice";
+    let w = unsafe { libc::write(z, msg.as_ptr() as *const libc::c_void, msg.len()) };
+    assert_eq!(w, msg.len() as isize);
+    let mut buf = [0u8; 64];
+    let mut got = 0isize;
+    for _ in 0..50 {
+        got = unsafe { libc::read(y, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+        if got > 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(got > 0, "splice must forward bytes");
+    assert_eq!(&buf[..got as usize], msg);
+    stop.store(true, AtomicOrdering::SeqCst);
+    let _ = h.join();
+    unsafe {
+        libc::close(z);
+        libc::close(y);
+    }
 }

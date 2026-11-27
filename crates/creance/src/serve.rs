@@ -221,7 +221,7 @@ fn json_action(
                 json!({"error": format!("invalid body: {e}")})
                     .to_string()
                     .into_bytes(),
-            )
+            );
         }
     };
     let (status, reply) = action(ctx, &value);
@@ -275,20 +275,22 @@ fn status_json(ctx: &ServeCtx) -> serde_json::Value {
 
 fn nodes_json(ctx: &ServeCtx) -> serde_json::Value {
     let store = creance_proxy::load(&ctx.profile).unwrap_or_default();
-    json!(store
-        .sources
-        .iter()
-        .flat_map(|s| s
-            .nodes
+    json!(
+        store
+            .sources
             .iter()
-            .map(|n| json!({
-                "id": n.id,
-                "name": n.name,
-                "type": n.node_type,
-                "source": s.name,
-            }))
-            .collect::<Vec<_>>())
-        .collect::<Vec<_>>())
+            .flat_map(|s| s
+                .nodes
+                .iter()
+                .map(|n| json!({
+                    "id": n.id,
+                    "name": n.name,
+                    "type": n.node_type,
+                    "source": s.name,
+                }))
+                .collect::<Vec<_>>())
+            .collect::<Vec<_>>()
+    )
 }
 
 fn reason(status: u16) -> &'static str {

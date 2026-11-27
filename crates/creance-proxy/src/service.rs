@@ -8,7 +8,7 @@
 
 #![allow(unsafe_code)] // FFI to libc: kill/getuid/getifaddrs — audited, no unchecked input
 use crate::runtime::{bind_interface, bound_interface};
-use crate::{dir, socket, write_private, Store, GROUP};
+use crate::{GROUP, Store, dir, socket, write_private};
 use sha2::Digest;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpListener};
@@ -450,8 +450,16 @@ fn launch_supervised(profile: &str, relay_bin: &str, config_path: &str) -> Resul
         xml_escape(&dir(profile)),
         creance_vm::config::CONFIG_ENV,
         xml_escape(config_path),
-        xml_escape(&Path::new(&dir(profile)).join("launchd-stdout.log").to_string_lossy()),
-        xml_escape(&Path::new(&dir(profile)).join("launchd-stderr.log").to_string_lossy()),
+        xml_escape(
+            &Path::new(&dir(profile))
+                .join("launchd-stdout.log")
+                .to_string_lossy()
+        ),
+        xml_escape(
+            &Path::new(&dir(profile))
+                .join("launchd-stderr.log")
+                .to_string_lossy()
+        ),
     );
     write_private(&service_path(profile), plist.as_bytes())?;
     let domain = format!("gui/{}", uid());
@@ -667,12 +675,11 @@ fn xml_escape(s: &str) -> String {
 /// already has identical content (sha256; size is only a cheap pre-filter).
 fn copy_executable_if_changed(src: &str, dst: &str) -> Result<(), String> {
     let src_bytes = std::fs::read(src).map_err(|e| e.to_string())?;
-    if let Ok(dst_bytes) = std::fs::read(dst) {
-        if dst_bytes.len() == src_bytes.len()
-            && sha2::Sha256::digest(&dst_bytes) == sha2::Sha256::digest(&src_bytes)
-        {
-            return Ok(());
-        }
+    if let Ok(dst_bytes) = std::fs::read(dst)
+        && dst_bytes.len() == src_bytes.len()
+        && sha2::Sha256::digest(&dst_bytes) == sha2::Sha256::digest(&src_bytes)
+    {
+        return Ok(());
     }
     std::fs::write(dst, &src_bytes).map_err(|e| e.to_string())?;
     #[cfg(unix)]
@@ -727,10 +734,10 @@ fn physical_interface_linux() -> Result<String, String> {
         .cloned()
         .collect();
     candidates.sort();
-    if let Some(default) = default {
-        if candidates.iter().any(|c| c == &default) {
-            return Ok(default);
-        }
+    if let Some(default) = default
+        && candidates.iter().any(|c| c == &default)
+    {
+        return Ok(default);
     }
     candidates.into_iter().next().ok_or_else(|| {
         "未找到可用的物理 IPv4 网卡；creance 外网保持关闭，请连接网络后重试".to_owned()
@@ -793,39 +800,42 @@ fn usable_interfaces() -> Result<std::collections::HashSet<String>, String> {
     unsafe { collect_interfaces() }.map_err(|e| format!("无法枚举网络接口：{e}"))
 }
 
+// getifaddrs is the only portable interface enumerator; the walk is
+// bounded by the kernel list and freed on every path.
+#[allow(unsafe_code)]
 unsafe fn collect_interfaces() -> Result<std::collections::HashSet<String>, String> {
-    use std::ffi::CStr;
-    use std::net::Ipv4Addr;
-    let mut out = std::collections::HashSet::new();
-    let mut head: *mut libc::ifaddrs = std::ptr::null_mut();
-    if libc::getifaddrs(&mut head) != 0 {
-        return Err(std::io::Error::last_os_error().to_string());
-    }
-    let mut cursor = head;
-    while !cursor.is_null() {
-        let ifa = &*cursor;
-        let flags = ifa.ifa_flags as u32;
-        if flags & libc::IFF_UP as u32 != 0 && flags & libc::IFF_LOOPBACK as u32 == 0 {
-            // `ifa_addr` is the interface's own address on every unix — the
-            // `ifa_ifu` union is broadcast/point-to-point peer, not this.
-            let addr_ptr = ifa.ifa_addr;
-            // sa_family_t is u8 on macOS and u16 on Linux — compare widened.
-            if !addr_ptr.is_null()
-                && unsafe { (*addr_ptr).sa_family as libc::c_int } == libc::AF_INET
-            {
-                let sin = addr_ptr as *const libc::sockaddr_in;
-                let octets = unsafe { (*sin).sin_addr.s_addr.to_ne_bytes() };
-                let ip = Ipv4Addr::from(octets);
-                if !ip.is_loopback() && !ip.is_link_local() && !ip.is_unspecified() {
-                    let name = CStr::from_ptr(ifa.ifa_name).to_string_lossy().into_owned();
-                    out.insert(name);
+    unsafe {
+        use std::ffi::CStr;
+        use std::net::Ipv4Addr;
+        let mut out = std::collections::HashSet::new();
+        let mut head: *mut libc::ifaddrs = std::ptr::null_mut();
+        if libc::getifaddrs(&mut head) != 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        let mut cursor = head;
+        while !cursor.is_null() {
+            let ifa = &*cursor;
+            let flags = ifa.ifa_flags as u32;
+            if flags & libc::IFF_UP as u32 != 0 && flags & libc::IFF_LOOPBACK as u32 == 0 {
+                // `ifa_addr` is the interface's own address on every unix — the
+                // `ifa_ifu` union is broadcast/point-to-point peer, not this.
+                let addr_ptr = ifa.ifa_addr;
+                // sa_family_t is u8 on macOS and u16 on Linux — compare widened.
+                if !addr_ptr.is_null() && (*addr_ptr).sa_family as libc::c_int == libc::AF_INET {
+                    let sin = addr_ptr as *const libc::sockaddr_in;
+                    let octets = (*sin).sin_addr.s_addr.to_ne_bytes();
+                    let ip = Ipv4Addr::from(octets);
+                    if !ip.is_loopback() && !ip.is_link_local() && !ip.is_unspecified() {
+                        let name = CStr::from_ptr(ifa.ifa_name).to_string_lossy().into_owned();
+                        out.insert(name);
+                    }
                 }
             }
+            cursor = ifa.ifa_next;
         }
-        cursor = ifa.ifa_next;
+        libc::freeifaddrs(head);
+        Ok(out)
     }
-    libc::freeifaddrs(head);
-    Ok(out)
 }
 
 /// macOS also exposes packet tunnels, bridges, VM links, AWDL and other
@@ -1004,8 +1014,7 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn default_route_picks_lowest_metric() {
-        let table =
-            "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n\
+        let table = "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n\
                      enp3s0\t00000000\t010A0A0A\t0003\t0\t0\t100\t00000000\t0\t0\t0\n\
                      wg0\t00000000\t00000000\t0001\t0\t0\t50\t00000000\t0\t0\t0\n\
                      enp3s0\t010A0A0A\t00000000\t0001\t0\t0\t0\tFFFFFFFF\t0\t0\t0\n";

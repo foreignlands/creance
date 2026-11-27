@@ -290,10 +290,10 @@ pub(crate) fn cmd_keychain_migrate() -> i32 {
         return 0;
     }
     let backup = format!("{path}.pre-keychain-bak");
-    if let Ok(bytes) = std::fs::read(&path) {
-        if let Err(e) = creance_vm::write_private_atomic(&backup, &bytes) {
-            return fail(format!("备份写入失败，未迁移：{e}"));
-        }
+    if let Ok(bytes) = std::fs::read(&path)
+        && let Err(e) = creance_vm::write_private_atomic(&backup, &bytes)
+    {
+        return fail(format!("备份写入失败，未迁移：{e}"));
     }
     match config::write_private_config(&path, &cfg) {
         Ok(()) => {

@@ -46,10 +46,10 @@ pub fn sample_pair(egress: &Egress, deadline: Instant) -> Result<(ExitSample, bo
     // Second source: corroborates on agreement, convicts on disagreement,
     // says nothing on failure.
     let mut corroborated = false;
-    if let Ok(second) = egress::request(egress, "GET", IPINFO_URL, None, &[], deadline) {
-        if second.status == 200 {
-            corroborated = corroborate(&sample, &String::from_utf8_lossy(&second.body))?;
-        }
+    if let Ok(second) = egress::request(egress, "GET", IPINFO_URL, None, &[], deadline)
+        && second.status == 200
+    {
+        corroborated = corroborate(&sample, &String::from_utf8_lossy(&second.body))?;
     }
     Ok((sample, corroborated))
 }

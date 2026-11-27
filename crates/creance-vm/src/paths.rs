@@ -36,11 +36,7 @@ pub fn join(dir: &str, p: &str) -> String {
             }
         }
     }
-    if out.is_empty() {
-        "/".to_owned()
-    } else {
-        out
-    }
+    if out.is_empty() { "/".to_owned() } else { out }
 }
 
 /// Go's `filepath.Clean`: lexical normalization keeping the root.

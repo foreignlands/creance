@@ -15,11 +15,7 @@ pub struct Limit(pub usize);
 
 /// `UNIX_PATH_MAX` as Lima spells it per platform.
 fn unix_path_max() -> usize {
-    if cfg!(target_os = "macos") {
-        104
-    } else {
-        108
-    }
+    if cfg!(target_os = "macos") { 104 } else { 108 }
 }
 
 /// The longest socket filename Lima creates: `ssh.sock` + a 16-char suffix.

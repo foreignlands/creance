@@ -207,11 +207,11 @@ pub fn import(profile_dir: &str, password: &str, bytes: &[u8]) -> Result<usize, 
             .and_then(|s| base64::engine::general_purpose::STANDARD.decode(s).ok())
             .ok_or_else(|| format!("{name} 内容损坏"))?;
         let path = crate::paths::join(profile_dir, name);
-        if let Some(parent) = std::path::Path::new(&path).parent() {
-            if !parent.exists() {
-                crate::private::ensure_private_dir(&parent.to_string_lossy())
-                    .map_err(|e| format!("{name} 父目录创建失败：{e}"))?;
-            }
+        if let Some(parent) = std::path::Path::new(&path).parent()
+            && !parent.exists()
+        {
+            crate::private::ensure_private_dir(&parent.to_string_lossy())
+                .map_err(|e| format!("{name} 父目录创建失败：{e}"))?;
         }
         crate::write_private_atomic(&path, &raw)?;
         written += 1;

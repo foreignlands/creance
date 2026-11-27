@@ -72,7 +72,11 @@ fn post(port: u16, path: &str, body: &str) -> (String, String) {
 fn workbench_end_to_end() {
     // The loopback stub servers speak plaintext http; the https-only
     // subscription policy (FINDING-009) has its own unit coverage.
-    std::env::set_var("CREANCE_ALLOW_HTTP_SUB", "1");
+    // Test binary runs its cases on one thread; no env race.
+    #[allow(unsafe_code)]
+    unsafe {
+        std::env::set_var("CREANCE_ALLOW_HTTP_SUB", "1")
+    };
     let (profile, config_path) = util::fresh_profile();
     // Point the early /api/check at a port nothing can hold: a running
     // environment on this machine (limactl's forwarder) sits on the

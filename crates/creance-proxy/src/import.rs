@@ -5,7 +5,7 @@
 //! routes, or file paths. Protocol parameters are interpreted by the bundled
 //! core, never here.
 
-use crate::{Node, NodeIssue, MAX_IMPORT};
+use crate::{MAX_IMPORT, Node, NodeIssue};
 use serde_json::{Map, Value};
 use serde_yaml::Value as YamlValue;
 use sha2::{Digest, Sha256};
@@ -424,11 +424,11 @@ pub(super) fn normalize_import_keys(
                 found = Some(key.clone());
             }
         }
-        if let Some(found) = found {
-            if found != *canonical {
-                let value = map.remove(&found).expect("key just listed");
-                map.insert((*canonical).to_owned(), value);
-            }
+        if let Some(found) = found
+            && found != *canonical
+        {
+            let value = map.remove(&found).expect("key just listed");
+            map.insert((*canonical).to_owned(), value);
         }
     }
     Ok(())
@@ -511,10 +511,10 @@ pub(super) fn normalize_websocket(map: &mut Map<String, Value>) -> Result<(), St
         let Some(path) = path.as_str().map(str::to_owned) else {
             return Err("WebSocket 字段 ws-path 无效，未忽略该字段".to_owned());
         };
-        if let Some(current) = opts.get("path") {
-            if current.as_str() != Some(path.as_str()) {
-                return Err("WebSocket 字段 ws-path 与 ws-opts.path 冲突".to_owned());
-            }
+        if let Some(current) = opts.get("path")
+            && current.as_str() != Some(path.as_str())
+        {
+            return Err("WebSocket 字段 ws-path 与 ws-opts.path 冲突".to_owned());
         }
         opts.insert("path".to_owned(), Value::String(path));
         map.remove("ws-path");
@@ -527,10 +527,10 @@ pub(super) fn normalize_websocket(map: &mut Map<String, Value>) -> Result<(), St
             // equal values overwrite harmlessly, differing values conflict,
             // and modern-only headers are KEPT, never dropped.
             for (k, v) in modern {
-                if let Some(prev) = merged.get(&k) {
-                    if prev != &v {
-                        return Err("WebSocket 字段 ws-headers 与 ws-opts.headers 冲突".to_owned());
-                    }
+                if let Some(prev) = merged.get(&k)
+                    && prev != &v
+                {
+                    return Err("WebSocket 字段 ws-headers 与 ws-opts.headers 冲突".to_owned());
                 }
                 merged.insert(k, v);
             }
@@ -555,10 +555,10 @@ fn web_socket_headers(raw: &Value) -> Result<Map<String, Value>, String> {
             return Err("WebSocket 请求头无效，未忽略该字段".to_owned());
         }
         let canonical = canonical_header_key(key);
-        if let Some(prev) = headers.get(&canonical) {
-            if prev.as_str() != Some(value) {
-                return Err("WebSocket 请求头存在大小写不同的冲突写法".to_owned());
-            }
+        if let Some(prev) = headers.get(&canonical)
+            && prev.as_str() != Some(value)
+        {
+            return Err("WebSocket 请求头存在大小写不同的冲突写法".to_owned());
         }
         headers.insert(canonical, Value::String(value.to_owned()));
     }

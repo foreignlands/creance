@@ -6,7 +6,7 @@
 //! server domains over bootstrap DoH only. Guest DNS stays behind the cage
 //! egress.
 
-use crate::{Store, GROUP};
+use crate::{GROUP, Store};
 use serde_json::Value;
 use serde_yaml::{Mapping, Value as Yaml};
 
@@ -136,10 +136,10 @@ pub fn bind_interface(data: &[u8], name: &str) -> Result<Vec<u8>, String> {
     // Older imports may carry a node-level binding, which overrides the global.
     if let Some(Yaml::Sequence(nodes)) = root.get_mut("proxies") {
         for node in nodes.iter_mut() {
-            if let Yaml::Mapping(node) = node {
-                if node.contains_key("interface-name") {
-                    node.insert("interface-name".into(), Yaml::from(name));
-                }
+            if let Yaml::Mapping(node) = node
+                && node.contains_key("interface-name")
+            {
+                node.insert("interface-name".into(), Yaml::from(name));
             }
         }
     }
@@ -162,7 +162,7 @@ pub fn bound_interface(path: &str) -> Result<String, String> {
 mod tests {
     use super::*;
 
-    use crate::{token, Node, Source, Store};
+    use crate::{Node, Source, Store, token};
 
     fn store() -> Store {
         let mut config = serde_json::Map::new();
@@ -233,10 +233,12 @@ mod tests {
         assert_eq!(proxies[0]["udp"], Yaml::Bool(false));
         // The control socket is namespaced by profile hash, and the
         // controller demands the store's auth as its secret (F-042).
-        assert!(v["external-controller-unix"]
-            .as_str()
-            .unwrap()
-            .starts_with("/tmp/managed-core-"));
+        assert!(
+            v["external-controller-unix"]
+                .as_str()
+                .unwrap()
+                .starts_with("/tmp/managed-core-")
+        );
         assert_eq!(v["secret"], Yaml::String(s.auth.clone()));
     }
 
@@ -285,12 +287,16 @@ mod tests {
         let v = parse(&bound);
         assert_eq!(v["interface-name"], "en0");
         // Node-level bindings are left alone when absent; overridden when present.
-        assert!(v["proxies"].as_sequence().unwrap()[0]
-            .get("interface-name")
-            .is_none());
-        assert!(bind_interface(&raw, "")
-            .unwrap_err()
-            .contains("缺少物理网卡"));
+        assert!(
+            v["proxies"].as_sequence().unwrap()[0]
+                .get("interface-name")
+                .is_none()
+        );
+        assert!(
+            bind_interface(&raw, "")
+                .unwrap_err()
+                .contains("缺少物理网卡")
+        );
     }
 
     #[test]

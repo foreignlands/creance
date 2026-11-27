@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.8.0] - 2026-11-22
+
+### 0.8 冻结版：R33 边界层自审修复 + edition 2024
+
+**R33 自审（通读发现，变异矩阵三轮漏网）**：
+
+- **F-R33-1（严重）**：vsock splice 的 EOF 只跳出 fds 内层循环
+  ——EOF fd 永远 poll-ready，每条正常结束的连接留下一个 100% CPU
+  自旋线程。修复：dead 旗贯通外层循环；回归测试
+  `splice_exits_when_peer_eof`（socketpair 级，3s 窗口）+ 变异验证
+  （去外层 break → 测试转红）。
+- **F-R33-2（严重）**：accept_loop 退出时关闭 listener，stop()/Drop
+  的 shutdown 打在可能被内核复用的 fd 号上——经典 fd-reuse 攻击面。
+  修复：close 所有权唯一归 stop()，-1 哨兵守卫，accept_loop 不再
+  碰 listener。
+- **F-R33-3（中）**：写端死亡后读端继续读-丢循环，静默吞字节。
+  修复：写失败同样立 dead 旗。
+- 三枚修复全部入钉（dead 旗计数/shape、哨兵 verbatim），
+  `splice` 升 pub(crate) 供兄弟测试模块直测。
+
+**edition 2024 迁移**（0.8 规格项，MSRV 1.88 兼容）：
+
+- `cargo fix --edition` + 21 处 collapsible_if 改 let-chains；
+- env 突变三处（main 启动期单线程/fetch 测试同值写入/workbench
+  测试）加安全性论证注释 + scoped allow；
+- getifaddrs 枚举器 unsafe 结构清理（嵌套冗余块消除）。
+
+**验证边界诚实声明**：vsock 修复经 socketpair 级单元测试 + 变异
+注入验证；实机端到端 echo 复验需新 provision 实例，建议 Mac 侧
+重建时顺带确认。
+
 ## [0.7.28] - 2026-11-27
 
 ### B 类 L1：浏览器指纹 persona 化（path-c 混合层）

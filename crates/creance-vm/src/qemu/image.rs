@@ -185,8 +185,10 @@ mod tests {
 
     #[test]
     fn paths_live_under_the_qemu_layout() {
-        assert!(base_image_path("/state", "amd64")
-            .ends_with("state/images/ubuntu-24.04-server-cloudimg-amd64.img"));
+        assert!(
+            base_image_path("/state", "amd64")
+                .ends_with("state/images/ubuntu-24.04-server-cloudimg-amd64.img")
+        );
         assert!(overlay_path("/root/ws-0123abcd").ends_with("ws-0123abcd/disk.qcow2"));
     }
 }

@@ -115,10 +115,10 @@ impl Gate {
                     return;
                 }
                 let mut inner = lock_or_recover(&watchdog.inner);
-                if let (Some(opened), lease) = (inner.opened_at, inner.lease) {
-                    if opened.elapsed() > lease {
-                        inner.close("检测租期到期，等待重新检查");
-                    }
+                if let (Some(opened), lease) = (inner.opened_at, inner.lease)
+                    && opened.elapsed() > lease
+                {
+                    inner.close("检测租期到期，等待重新检查");
                 }
                 // 0.4: the VM's wire follows the gate. Closed gate → the ssh -R
                 // tunnel must be down; Open/Checking → it must be up. Healing is
@@ -469,35 +469,37 @@ impl Gate {
         // TCP bridge accept loop — same protocol, same auth, different
         // transport (the guest reaches it over ssh -R).
         let server = Arc::downgrade(&gate);
-        std::thread::spawn(move || loop {
-            let Some(server) = server.upgrade() else {
-                break;
-            };
-            if server.shutdown.load(Ordering::Relaxed) {
-                break;
-            }
-            let accepted = {
-                let guard = lock_or_recover(&server.tcp_listener);
-                match guard.as_ref() {
-                    Some(listener) => listener.accept().map(|(s, _)| s),
-                    None => Err(std::io::Error::other("gate closed")),
+        std::thread::spawn(move || {
+            loop {
+                let Some(server) = server.upgrade() else {
+                    break;
+                };
+                if server.shutdown.load(Ordering::Relaxed) {
+                    break;
                 }
-            };
-            match accepted {
-                Ok(stream) => {
-                    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-                    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
-                    let server = server.clone();
-                    std::thread::spawn(move || server.handle(stream, true));
-                }
-                Err(_) => {
-                    if server.shutdown.load(Ordering::Relaxed) {
-                        break;
+                let accepted = {
+                    let guard = lock_or_recover(&server.tcp_listener);
+                    match guard.as_ref() {
+                        Some(listener) => listener.accept().map(|(s, _)| s),
+                        None => Err(std::io::Error::other("gate closed")),
                     }
-                    std::thread::sleep(Duration::from_millis(50));
+                };
+                match accepted {
+                    Ok(stream) => {
+                        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                        let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+                        let server = server.clone();
+                        std::thread::spawn(move || server.handle(stream, true));
+                    }
+                    Err(_) => {
+                        if server.shutdown.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
                 }
+                drop(server);
             }
-            drop(server);
         });
         Ok(GateHandle {
             gate,

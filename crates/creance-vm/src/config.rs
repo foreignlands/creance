@@ -59,10 +59,10 @@ pub fn default_config() -> Config {
 /// Resolves the config path this process operates on.
 pub fn config_path() -> String {
     for var in [CONFIG_ENV_NEW, CONFIG_ENV] {
-        if let Ok(p) = std::env::var(var) {
-            if !p.is_empty() {
-                return p;
-            }
+        if let Ok(p) = std::env::var(var)
+            && !p.is_empty()
+        {
+            return p;
         }
     }
     let home = crate::paths::home();

@@ -3,8 +3,8 @@
 //!
 //! These run fully offline: nothing leaves 127.0.0.1.
 
-use creance_net::egress::{request, Egress};
-use creance_net::testsupport::{dead_addr, MixedProxy, TargetServer, TARGET_BODY};
+use creance_net::egress::{Egress, request};
+use creance_net::testsupport::{MixedProxy, TARGET_BODY, TargetServer, dead_addr};
 use std::time::{Duration, Instant};
 
 fn egress_with(proxy_url: &str) -> Egress {

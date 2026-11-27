@@ -578,9 +578,11 @@ mod tests {
         assert!(prefixes.len() > 1000);
         // 1.3.0.0/16 contains 1.3.255.255.
         let covered: Ipv4Addr = "1.3.255.255".parse().unwrap();
-        assert!(prefixes
-            .iter()
-            .any(|(net, bits)| masked(covered, *bits) == *net));
+        assert!(
+            prefixes
+                .iter()
+                .any(|(net, bits)| masked(covered, *bits) == *net)
+        );
     }
 
     #[test]

@@ -156,15 +156,14 @@ pub(crate) fn cmd_gate(open: bool) -> i32 {
         // 时区跟随（0.7.x）：实测出口落地后，把该国的规范时区写进 guest
         // ~/.creance-tz——OAuth 通道启动浏览器时优先采用。best-effort：
         // 写不进去不否定这次观测本身。
-        if cfg.timezone == "auto" {
-            if let Some(zone) = creance_vm::exit_policy::canonical_timezone(&location.country_code)
-            {
-                let _ = creance_vm::vm::guest_script(
-                    &profile,
-                    &instance,
-                    &format!("printf '%s\\n' '{zone}' > \"${{HOME:-/tmp}}/.creance-tz"),
-                );
-            }
+        if cfg.timezone == "auto"
+            && let Some(zone) = creance_vm::exit_policy::canonical_timezone(&location.country_code)
+        {
+            let _ = creance_vm::vm::guest_script(
+                &profile,
+                &instance,
+                &format!("printf '%s\\n' '{zone}' > \"${{HOME:-/tmp}}/.creance-tz"),
+            );
         }
         gate::open(
             &instance_dir,
@@ -360,20 +359,19 @@ pub(crate) fn cmd_stop(keep_proxy: bool) -> i32 {
 /// token 逐次轮换不进 provision，只能走这条信道。
 fn sync_guest_gate(profile: &str, instance: &str, instance_dir: &str) {
     for _ in 0..40 {
-        if let Ok(client) = gate::GateClient::open(instance_dir) {
-            if client.record.tcp_port != 0
-                && creance_vm::vm::guest_script(
-                    profile,
-                    instance,
-                    &format!(
-                        "umask 077; printf '%s\\n%s\\n' '{}' '{}' > \"$HOME/.creance-gate\"",
-                        client.record.tcp_port, client.record.token
-                    ),
-                )
-                .is_ok()
-            {
-                return;
-            }
+        if let Ok(client) = gate::GateClient::open(instance_dir)
+            && client.record.tcp_port != 0
+            && creance_vm::vm::guest_script(
+                profile,
+                instance,
+                &format!(
+                    "umask 077; printf '%s\\n%s\\n' '{}' '{}' > \"$HOME/.creance-gate\"",
+                    client.record.tcp_port, client.record.token
+                ),
+            )
+            .is_ok()
+        {
+            return;
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
@@ -469,7 +467,9 @@ pub(crate) fn cmd_up() -> i32 {
             Err(e) => return fail(e),
         }
         sync_guest_gate(&profile, &instance, &instance_dir);
-        println!("Environment is up. The guest's only route out is the managed core (`creance escape-test` proves it).");
+        println!(
+            "Environment is up. The guest's only route out is the managed core (`creance escape-test` proves it)."
+        );
     }
     code
 }

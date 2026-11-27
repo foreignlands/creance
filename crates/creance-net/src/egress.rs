@@ -292,13 +292,13 @@ impl Egress {
             .map(|pw| (self.upstream.username().to_owned(), pw.to_owned()));
         // RFC 1929 carries each credential in one length byte: refuse
         // over-long values instead of truncating them into a broken frame.
-        if let Some((user, pass)) = &auth {
-            if user.len() > 255 || pass.len() > 255 {
-                return Err(
-                    "SOCKS5 代理凭据过长（用户名与密码各限 255 字节）；请检查代理；请求不会改为直连。"
-                        .to_owned(),
-                );
-            }
+        if let Some((user, pass)) = &auth
+            && (user.len() > 255 || pass.len() > 255)
+        {
+            return Err(
+                "SOCKS5 代理凭据过长（用户名与密码各限 255 字节）；请检查代理；请求不会改为直连。"
+                    .to_owned(),
+            );
         }
         let mut greeting = vec![0x05u8];
         match &auth {
@@ -337,7 +337,7 @@ impl Egress {
             _ => {
                 return Err(
                     "SOCKS5 代理拒绝了全部认证方式；请检查代理；请求不会改为直连。".to_owned(),
-                )
+                );
             }
         }
         let mut req = vec![0x05u8, 0x01, 0x00];
@@ -641,7 +641,7 @@ fn tls_wrap(inner: Box<dyn RW>, host: &str) -> Result<Box<TlsStream>, String> {
             Err(e) => {
                 return Err(format!(
                     "验证 HTTPS 代理的加密连接失败（{e}）；请检查代理；请求不会改为直连。"
-                ))
+                ));
             }
         }
     }
@@ -986,8 +986,8 @@ mod tests {
     /// credentials must be refused before any frame is written).
     fn auth_demanding_socks5() -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
         use std::net::TcpListener;
-        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap().to_string();
         let got_frame = Arc::new(AtomicUsize::new(0));

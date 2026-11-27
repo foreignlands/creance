@@ -2,7 +2,7 @@
 //! hostnames handed to the proxy unresolved, the 8 MiB import cap enforced,
 //! and a bounded redirect chain.
 
-use creance_net::egress::{request_bounded, Egress};
+use creance_net::egress::{Egress, request_bounded};
 use creance_vm::config::Config;
 use std::time::{Duration, Instant};
 
@@ -123,7 +123,12 @@ mod tests {
     // These integration tests ride plaintext loopback servers; the https
     // policy itself is covered by the direct unit tests below.
     fn allow_http_for_tests() {
-        std::env::set_var(ALLOW_HTTP_ENV, "1");
+        // Tests only ever write the same "1" value, so concurrent
+        // writers cannot observe a torn or differing value.
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var(ALLOW_HTTP_ENV, "1")
+        };
     }
 
     #[test]

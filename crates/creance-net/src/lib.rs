@@ -13,4 +13,4 @@ pub mod testsupport;
 pub mod trace;
 pub mod wire;
 
-pub use egress::{validate_dns_url, validate_proxy_url, Egress};
+pub use egress::{Egress, validate_dns_url, validate_proxy_url};

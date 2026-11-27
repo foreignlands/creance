@@ -258,10 +258,10 @@ pub fn host_probes(profile: &str, config_path: &str) -> Vec<Probe> {
                 }
                 for f in ["config.json", "guest-profile.json", "sources.json"] {
                     let p = creance_vm::paths::join(profile, f);
-                    if let Ok(m) = std::fs::metadata(&p) {
-                        if m.permissions().mode() & 0o077 != 0 {
-                            loose.push(format!("{f} 权限非 0600"));
-                        }
+                    if let Ok(m) = std::fs::metadata(&p)
+                        && m.permissions().mode() & 0o077 != 0
+                    {
+                        loose.push(format!("{f} 权限非 0600"));
                     }
                 }
                 if loose.is_empty() {
@@ -320,12 +320,11 @@ fn scan_unknown_tokens(profile: &str) -> Result<Vec<(String, String)>, String> {
     if let Ok(entries) = std::fs::read_dir(&lima) {
         for entry in entries.flatten() {
             let record = entry.path().join("cage-gate.json");
-            if let Ok(text) = std::fs::read_to_string(&record) {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-                    if let Some(token) = v["token"].as_str() {
-                        expected.insert(token.to_owned());
-                    }
-                }
+            if let Ok(text) = std::fs::read_to_string(&record)
+                && let Ok(v) = serde_json::from_str::<serde_json::Value>(&text)
+                && let Some(token) = v["token"].as_str()
+            {
+                expected.insert(token.to_owned());
             }
         }
     }
