@@ -657,15 +657,21 @@ impl Gate {
                 Err(e) => (403, error_json(&e)),
             };
         }
-        if let Err(e) = creance_proxy::applied(
-            Path::new(&self.config_path)
-                .parent()
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_default()
-                .as_str(),
-            &config.proxy_url,
-            &config.proxy_revision,
-        ) {
+        // F-BOOTSTRAP（0.9.0 实测发现）：close 是安全方向的幂等动作——
+        // 首次使用还没 applied 节点时连 close 都被复检挡住，造成
+        // "首次 select 必 409"死锁。close 跳过 applied 复检（关闸
+        // 永远合法），其余动作维持原纪律。
+        if command.action != "close"
+            && let Err(e) = creance_proxy::applied(
+                Path::new(&self.config_path)
+                    .parent()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+                    .as_str(),
+                &config.proxy_url,
+                &config.proxy_revision,
+            )
+        {
             lock_or_recover(&self.inner).close(&format!("代理节点未应用：{e}"));
             return (409, error_json(&format!("代理节点未应用：{e}")));
         }

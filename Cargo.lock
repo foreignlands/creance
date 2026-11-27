@@ -529,7 +529,7 @@ dependencies = [
 
 [[package]]
 name = "creance"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -546,7 +546,7 @@ dependencies = [
 
 [[package]]
 name = "creance-gate"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "creance-net",
  "creance-proxy",
@@ -560,7 +560,7 @@ dependencies = [
 
 [[package]]
 name = "creance-net"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "rustls",
  "rustls-pki-types",
@@ -571,7 +571,7 @@ dependencies = [
 
 [[package]]
 name = "creance-proxy"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "base64 0.22.1",
  "creance-net",
@@ -587,7 +587,7 @@ dependencies = [
 
 [[package]]
 name = "creance-vm"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "argon2",
  "base64 0.23.1",

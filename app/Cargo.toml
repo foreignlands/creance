@@ -1,6 +1,6 @@
 [package]
 name = "creance-app"
-version = "0.9.0"
+version = "0.9.1"
 edition = "2021"
 description = "creance desktop shell (Tauri) — thin shell over `creance serve`"
 build = "build.rs"
