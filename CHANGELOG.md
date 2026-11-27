@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.8] - 2026-11-27
+
+### desktop 通道（产品化轮第四期）
+
+- guest 桌面串流泛化：既有 creance-oauth Xvnc/openbox/noVNC 栈
+  serve 托管化——/api/desktop/open 起 ssh -L 转发+X 栈（幂等复用），
+  close 对称销毁（子进程 kill+wait 收割，无僵尸）。
+- 工作台 desktop 面板：noVNC iframe 直接键鼠交互，desktop/web 类
+  agent 点击即开桌面；desktop 类随后在 X 会话里 setsid 启动应用。
+- 浏览器 agent 特化：creance-oauth 自带浏览器启动，零额外逻辑。
+- 基础设施零新增——OAuth 通道资产完整复用，老 guest 无需重装。
+
 ## [0.8.7] - 2026-11-27
 
 ### 首期向导（产品化轮第三期）

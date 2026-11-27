@@ -234,6 +234,13 @@
     <div class="nodes" id="node-list"><div class="empty">暂无节点 — 先在上方导入订阅</div></div>
   </div>
 
+  <div class="card full" id="desk-card" style="display:none">
+    <h2 id="desk-title">桌面</h2>
+    <div class="hint">guest 内桌面流——直接键鼠交互。应用窗口在 guest 的隔离桌面里运行。</div>
+    <iframe id="desk-frame" style="width:100%;height:560px;border:1px solid var(--line);border-radius:9px;background:#222"></iframe>
+    <div class="actions"><button class="ghost" onclick="closeDesk()">关闭桌面通道</button></div>
+  </div>
+
   <div class="card full" id="term-card" style="display:none">
     <h2 id="term-title">终端</h2>
     <div id="term-box" style="height:380px;background:#000;border-radius:9px;padding:6px"></div>
@@ -441,7 +448,11 @@ $('agent-list').addEventListener('click', async e => {
     } else {
       $('ast-' + a.id).textContent = '已装';
       $('ast-' + a.id).classList.add('inst');
-      openTerm(a);
+      if (a.kind === 'cli') {
+        openTerm(a);
+      } else {
+        openDesk(a);
+      }
     }
   } catch (e2) {
     log(a.name + ': ' + e2.message, true);
@@ -472,6 +483,29 @@ function openTerm(a) {
   termWs.onerror = () => log(a.name + ' 终端连接失败——环境在运行吗？（creance up）', true);
   termObj.onData(d => { if (termWs?.readyState === 1) termWs.send(d); });
   $('term-card').scrollIntoView({behavior:'smooth'});
+}
+async function openDesk(a) {
+  try {
+    log('正在打开桌面通道（guest X 桌面经 noVNC 串流）…');
+    const r = await j('/api/desktop/open', {});
+    $('desk-card').style.display = '';
+    $('desk-title').textContent = (a ? a.name : '桌面') + ' · guest 桌面';
+    $('desk-frame').src = `http://127.0.0.1:${r.port}/vnc.html?autoconnect=true&resize=scale`;
+    log('桌面通道已开——' + (a ? a.name + ' 在桌面中' : ''));
+    $('desk-card').scrollIntoView({behavior:'smooth'});
+    // desktop/web 类 agent：通道开了之后在 X 会话里启动应用
+    if (a && a.kind === 'desktop' && a.id !== 'browser') {
+      try { await j('/api/agents/launch-desktop', {id: a.id}); log(a.name + ' 已在 guest 桌面启动'); }
+      catch (e) { log(a.name + ' 启动失败: ' + e.message, true); }
+    }
+  } catch (e) {
+    log('桌面通道失败: ' + e.message + ' → 确认环境已启动（creance up）', true);
+  }
+}
+async function closeDesk() {
+  $('desk-frame').src = 'about:blank';
+  $('desk-card').style.display = 'none';
+  try { await j('/api/desktop/close', {}); log('桌面通道已关闭'); } catch (_) {}
 }
 function closeTerm() {
   if (termWs) { try { termWs.close(); } catch (_) {} termWs = null; }

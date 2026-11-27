@@ -188,6 +188,83 @@ fn guest_exec(ctx: &ServeCtx, script: &str) -> Result<std::process::Output, Stri
         .map_err(|e| format!("guest 执行失败：{e}"))
 }
 
+/// desktop 通道（0.8.8）：serve 进程级单例——ssh -L 转发到 guest
+/// noVNC + creance-oauth 的 Xvnc/openbox 栈。open 幂等（已开则复用
+/// 端口）；close 杀转发+guest stop；serve 退出即子进程孤死（ssh 本身
+/// 随父退出，无清理债务）。
+static DESKTOP: std::sync::Mutex<Option<(u16, std::process::Child)>> = std::sync::Mutex::new(None);
+
+fn desktop_port() -> Option<u16> {
+    DESKTOP.lock().ok()?.as_ref().map(|(p, _)| *p)
+}
+
+fn desktop_open(ctx: &ServeCtx) -> Result<u16, String> {
+    // 已开且转发进程活着→直接复用
+    if let Ok(mut guard) = DESKTOP.lock()
+        && let Some((port, child)) = guard.as_mut()
+    {
+        // try_wait 顺带收割僵尸——活着则复用，死了则清空重开
+        match child.try_wait() {
+            Ok(None) => return Ok(*port),
+            _ => {
+                *guard = None;
+            }
+        }
+    }
+    let instance = running_instance(&ctx.profile)?;
+    let target = creance_vm::vm::ssh_target(&ctx.profile, &instance)?;
+    let local_port = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .and_then(|l| l.local_addr())
+        .map_err(|e| format!("无法分配本地端口：{e}"))?
+        .port();
+    let mut fwd = std::process::Command::new("ssh");
+    creance_vm::vm::apply_ssh_options(&mut fwd, &target);
+    let mut child = fwd
+        .arg("-o")
+        .arg("StrictHostKeyChecking=yes")
+        .arg("-o")
+        .arg("ExitOnForwardFailure=yes")
+        .arg("-N")
+        .arg("-L")
+        .arg(format!("127.0.0.1:{local_port}:127.0.0.1:6080"))
+        .arg("127.0.0.1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("ssh 转发失败：{e}"))?;
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    if let Ok(Some(_)) = child.try_wait() {
+        return Err("ssh 转发立即退出——环境在运行吗？".to_owned());
+    }
+    // guest 侧 X 栈拉起（幂等——已开直接返回）
+    creance_vm::vm::guest_script(
+        &ctx.profile,
+        &instance,
+        "sh /usr/local/bin/creance-oauth start",
+    )?;
+    if let Ok(mut guard) = DESKTOP.lock() {
+        *guard = Some((local_port, child));
+    }
+    Ok(local_port)
+}
+
+fn desktop_close(ctx: &ServeCtx) {
+    if let Ok(mut guard) = DESKTOP.lock()
+        && let Some((_, mut child)) = guard.take()
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    if let Ok(instance) = running_instance(&ctx.profile) {
+        let _ = creance_vm::vm::guest_script(
+            &ctx.profile,
+            &instance,
+            "sh /usr/local/bin/creance-oauth stop",
+        );
+    }
+}
+
 pub(crate) fn running_instance(profile: &str) -> Result<String, String> {
     // 实例名是确定性派生；ssh_target 在实例未运行时自己拒绝，
     // 错误文案在那里统一。
@@ -305,6 +382,43 @@ fn route(ctx: &ServeCtx, method: &str, path: &str, body: &[u8]) -> (u16, &'stati
                 Err(e) => (409, json!({"error": e})),
             }
         }),
+        ("POST", "/api/desktop/open") => {
+            json_action(ctx, body, |ctx, _v| match desktop_open(ctx) {
+                Ok(port) => (200, json!({"ok": true, "port": port})),
+                Err(e) => (409, json!({"error": e})),
+            })
+        }
+        ("POST", "/api/agents/launch-desktop") => json_action(ctx, body, |ctx, v| {
+            let id = v["id"].as_str().unwrap_or_default();
+            let Some(agent) = crate::agents::find(id) else {
+                return (404, json!({"error": "unknown agent"}));
+            };
+            // launch 模板是注册表常量；setsid 脱离 ssh 会话存活，DISPLAY 与
+            // creance-oauth 栈同值
+            let script = format!(
+                "setsid env DISPLAY=:99 {} >/dev/null 2>&1 & echo launched",
+                agent.launch
+            );
+            match guest_exec(ctx, &script) {
+                Ok(out) if out.status.success() => (200, json!({"ok": true})),
+                Ok(_) => (409, json!({"error": "启动失败——应用已安装吗？"})),
+                Err(e) => (409, json!({"error": e})),
+            }
+        }),
+        ("POST", "/api/desktop/close") => json_action(ctx, body, |ctx, _v| {
+            desktop_close(ctx);
+            (200, json!({"ok": true}))
+        }),
+        ("GET", "/api/desktop/status") => {
+            let port = desktop_port();
+            (
+                200,
+                "application/json",
+                json!({"open": port.is_some(), "port": port})
+                    .to_string()
+                    .into_bytes(),
+            )
+        }
         ("GET", "/api/agents") => (
             200,
             "application/json",
