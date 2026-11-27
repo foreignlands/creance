@@ -59,6 +59,12 @@ creance escape-test           # 验收隔离
 `CREANCE_CONFIG` selects a profile (legacy `CLAUDE_CAGE_CONFIG` honored;
 existing `~/.claude-cage` profiles keep working).
 
+## 威胁模型
+
+[docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) — creance 防谁、不防谁：
+A 类（guest 内恶意代码的反逃逸纵深，已闭环）与 B 类（平台反自动化
+检测，0.8 立项中）严格分离；任何安全功能立项前必须归属其一。
+
 ## Command surface
 
 | 分组 | 命令 |
