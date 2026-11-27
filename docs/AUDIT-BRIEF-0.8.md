@@ -57,3 +57,23 @@ v0.6.18..main` 全量，核心新增面：
 - [ ] edition 2024 迁移决议（MSRV 1.88 兼容，待拍板）
 - [ ] 特性冻结声明（0.8 起只修不增）
 - [ ] 审计配额确认（子会话 probe）
+
+## 执行进度（2026-11-22，主模型独立化自审——外部配额不可用）
+
+**R33 边界层：已完成（v0.8.0）**。通读+变异矩阵抓三枚真 bug
+（F-R33-1 splice EOF 自旋/F-R33-2 listener fd 双关/F-R33-3 写死
+读吞），全部修复+socketpair 回归测试+变异验证+钉武装。
+残余记档：gatebridge 孤儿清扫缺口（小）、实机 echo 复验待新
+provision 实例。
+
+**R34 凭证层：已完成（v0.8.1）**。secret/store/identity/bundle/
+approve 全通读。修三枚：F-R34-4 bundle 主密码支持 keychain 引用、
+F-R34-6 persona 快照目录 0700、F-R34-3 原子性注释纠偏。approve/
+bundle 密码学无发现。
+
+**R35 产品层：进行中**。已扫 apply.rs/serve.rs/approve 面——
+F-R35-1（apply 缺批条）已修入 v0.8.1。待扫：diagnose.rs、
+escape.rs、evidence.rs、cmds/vm.rs、workbench.html JS、qemu/
+lima 驱动面。serve.rs 加固记档项：Host 头校验（DNS rebinding 对
+GET 信息泄露面，低危）。
+
