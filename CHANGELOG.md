@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.8.1] - 2026-11-22
+
+### R34 凭证层自审修复
+
+- **F-R34-4**：bundle 主密码支持 `keychain:` 引用——环境变量值经
+  `secret::resolve` 还原。/proc/<pid>/environ 对同 uid 进程可读，
+  主密码不再必须明文驻留环境。
+- **F-R34-6**：persona 快照目录改 `ensure_private_dir`（0700）——
+  快照持有明文身份副本，目录此前继承 umask；对既有目录同样
+  纠正（每次 persona-save 重设）。
+- **F-R34-3**：persona-use 原子性注释纠偏——多文件写入非事务的
+  实话写清（幂等覆盖，重跑收敛）。
+- approve 通道通读无发现：chat 过滤+随机 nonce+限时批条+0600
+  结构正确；bundle 密码学（argon2id OWASP 下限+XChaCha20-Poly1305）
+  参数正确。
+
+### R35 产品层自审（首批）
+
+- **F-R35-1**：apply 覆盖整套身份+config 却不要求批条——与
+  identity-reset/persona-use 同级的身份变更，审批纪律不一致。
+  已补 require_grant("apply")。
+
 ## [0.8.0] - 2026-11-22
 
 ### 0.8 冻结版：R33 边界层自审修复 + edition 2024

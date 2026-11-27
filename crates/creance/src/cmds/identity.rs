@@ -30,8 +30,13 @@ pub(crate) fn cmd_identity_reset(memory: u32, cpus: u32) -> i32 {
 
 pub(crate) fn bundle_password() -> Result<String, String> {
     match std::env::var("CREANCE_BUNDLE_PASSWORD") {
-        Ok(p) if !p.is_empty() => Ok(p),
-        _ => Err("主密码从环境变量 CREANCE_BUNDLE_PASSWORD 读取（未设置或为空）".to_owned()),
+        // F-R34-4: 环境变量值本身可写 keychain: 引用——/proc/<pid>/environ
+        // 对同 uid 进程可读，主密码应走与其他秘密相同的钥匙串通道。
+        Ok(p) if !p.is_empty() => creance_vm::secret::resolve(&p),
+        _ => Err(
+            "主密码从环境变量 CREANCE_BUNDLE_PASSWORD 读取（未设置或为空；可写 keychain: 引用）"
+                .to_owned(),
+        ),
     }
 }
 
@@ -96,7 +101,7 @@ pub(crate) fn cmd_persona_save(name: &str) -> i32 {
     if let Err(e) = require_grant(&profile, &format!("persona-use-{name}")) {
         return fail(e);
     }
-    if let Err(e) = std::fs::create_dir_all(&dir) {
+    if let Err(e) = creance_vm::private::ensure_private_dir(&dir) {
         return fail(format!("persona 目录创建失败：{e}"));
     }
     let mut saved = 0usize;
@@ -134,9 +139,10 @@ pub(crate) fn cmd_persona_use(name: &str) -> i32 {
             "persona {name} 不存在（`creance persona-list` 查看）"
         ));
     }
-    // 原子语义：先验全部源文件可读可写回，再动手——中途失败不留下半换
-    // 状态。身份文件逐一覆盖写回（目标已存在是常态，bundle 导入才是
-    // 拒绝覆盖的场景）。
+    // 两段式：先验全部源文件可读（最常见的失败面）再动手。逐文件
+    // write_private_atomic 保证单文件原子；多文件间不是事务——写盘
+    // 级失败仍可能半换，此时报错信息会指明卡在哪个文件，重新执行
+    // persona-use 即可收敛（幂等覆盖）。
     let mut staged = Vec::new();
     for f in creance_vm::bundle::FILES {
         let src = creance_vm::paths::join(&dir, f);
@@ -335,6 +341,11 @@ pub(crate) fn cmd_apply(file: &str) -> i32 {
     let inst = instance();
     if creance_vm::vm::instance_running(&prof, &inst) {
         return fail(format!("实例 {inst} 仍在运行，先 `creance stop` 再 apply"));
+    }
+    // F-R35-1: apply 覆盖整套身份+config——与 identity-reset/persona-use
+    // 同级的身份变更，审批纪律必须一致（配置了审批通道时）。
+    if let Err(e) = require_grant(&prof, "apply") {
+        return fail(e);
     }
     match creance::apply::apply(&prof, &decl) {
         Ok(notes) => {
