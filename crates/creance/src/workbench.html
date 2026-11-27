@@ -127,7 +127,7 @@
   <div class="card">
     <h2>状态</h2>
     <div class="row"><span class="k">实例</span><span class="v mono" id="st-instance">—</span></div>
-    <div class="row"><span class="k">代理应用</span><span class="v" id="st-applied">—</span></div>
+    <div class="row"><span class="k">出口配置</span><span class="v" id="st-applied">—</span></div>
     <div class="row"><span class="k">核心运行</span><span class="v" id="st-core">—</span></div>
     <div class="row"><span class="k">路由</span><span class="v" id="st-route">—</span></div>
     <div class="row"><span class="k">节点数</span><span class="v" id="st-nodes">—</span></div>
@@ -214,7 +214,7 @@ async function refresh() {
     $('live').classList.remove('off');
     $('live').textContent = 'serve 在线';
     $('st-instance').textContent = s.instance || '—';
-    $('st-applied').innerHTML = s.applied ? dot('ok','已应用') : dot('warn','未应用');
+    $('st-applied').innerHTML = s.applied ? dot('ok','已选择') : dot('warn','未选择');
     $('st-core').innerHTML = s.core_running ? dot('ok','运行中') : dot('none','已停止');
     $('st-route').textContent = (s.route || []).join(' → ') || '—';
     $('st-nodes').textContent = s.nodes;
@@ -235,10 +235,21 @@ function busy(btn, on) {
   document.querySelectorAll('button').forEach(b => b.disabled = on);
   if (btn) btn.classList.toggle('busy', on);
 }
-async function selectNode(id) {
+async function selectNode(id, name) {
   busy(null, true);
-  try { await j('/api/proxy/select', {node: id}); log('已应用节点 ' + id); }
-  catch (e) { log('应用失败: ' + e.message, true); }
+  try {
+    await j('/api/proxy/select', {node: id});
+    log('已选择节点「' + (name || id) + '」');
+    try {
+      const st = await j('/api/status');
+      if (!st.core_running) {
+        log('→ 下一步：点击「启动核心」让出口生效；之后可用「出口检查」验证连通');
+      } else {
+        log('→ 核心运行中，新出口已生效；可用「出口检查」验证连通');
+      }
+    } catch (_) {}
+  }
+  catch (e) { log('应用失败: ' + e.message + ' → 若提示配置问题，检查 config 中的代理与 DNS 设置', true); }
   busy(null, false);
   refresh();
 }
@@ -330,7 +341,7 @@ async function act(btn, path, okMsg, errMsg) {
 }
 $('node-list').addEventListener('click', e => {
   const row = e.target.closest('.node');
-  if (row) selectNode(row.dataset.id);
+  if (row) selectNode(row.dataset.id, row.querySelector('.n')?.textContent);
 });
 refresh(); setInterval(refresh, 5000);
 </script>

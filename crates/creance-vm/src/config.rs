@@ -96,6 +96,18 @@ pub fn load(path: &str) -> Result<Config, String> {
     let mut config: Config =
         serde_json::from_str(&text).map_err(|_| "invalid cage JSON configuration".to_owned())?;
     config.exit_policy = config.exit_policy.normalized();
+    // 首次配置友好（0.8.3 实测发现）：缺省字段用语义默认值补齐而
+    // 非报错死路——空 timezone=auto（跟随出口，本就是设计语义），
+    // 空 locale/language 用中立默认。用户显式写错仍然报错。
+    if config.timezone.is_empty() {
+        config.timezone = "auto".to_owned();
+    }
+    if config.locale.is_empty() {
+        config.locale = "en_US.UTF-8".to_owned();
+    }
+    if config.browser_language.is_empty() {
+        config.browser_language = "en-US".to_owned();
+    }
     config.validate()?;
     Ok(config)
 }
