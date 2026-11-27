@@ -1247,11 +1247,18 @@ fn evidence_verdict_convicts_country_drift_only() {
 }
 
 // ---- F-R33 regression tests: splice EOF/death behavior ----
+// Linux-only: `vsock::splice` does not exist in the non-Linux stub
+// (same class as the 0.7.22 gateprobe break — a shared test target
+// dies on macOS if it names a cfg'd-out path).
 
+#[cfg(target_os = "linux")]
 use super::vsock::splice;
+#[cfg(target_os = "linux")]
 use std::sync::Arc as StdArc;
+#[cfg(target_os = "linux")]
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering as AtomicOrdering};
 
+#[cfg(target_os = "linux")]
 #[allow(unsafe_code)]
 fn splice_test_pair() -> (i32, i32) {
     let mut fds = [0i32; 2];
@@ -1262,6 +1269,7 @@ fn splice_test_pair() -> (i32, i32) {
 
 /// F-R33-1 regression: a splice whose peer closes must EXIT — not
 /// spin on the forever-poll-ready EOF fd.
+#[cfg(target_os = "linux")]
 #[test]
 #[allow(unsafe_code)]
 fn splice_exits_when_peer_eof() {
@@ -1295,6 +1303,7 @@ fn splice_exits_when_peer_eof() {
 }
 
 /// Data integrity: bytes written into one end arrive at the other.
+#[cfg(target_os = "linux")]
 #[test]
 #[allow(unsafe_code)]
 fn splice_copies_bidirectionally() {

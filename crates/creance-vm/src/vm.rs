@@ -493,11 +493,11 @@ pub fn ssh_target(profile: &str, instance: &str) -> Result<SshTarget, String> {
         let text = String::from_utf8_lossy(&out.stdout).into_owned();
         let mut port = None;
         for line in text.lines() {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-                if v["name"] == instance {
-                    port = v["sshLocalPort"].as_u64().map(|p| p as u16);
-                    break;
-                }
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line)
+                && v["name"] == instance
+            {
+                port = v["sshLocalPort"].as_u64().map(|p| p as u16);
+                break;
             }
         }
         let Some(port) = port else {
@@ -613,10 +613,10 @@ pub fn instance_running(profile: &str, instance: &str) -> bool {
         };
         let text = String::from_utf8_lossy(&out.stdout).into_owned();
         for line in text.lines() {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-                if v["name"] == instance {
-                    return v["status"] == "Running";
-                }
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line)
+                && v["name"] == instance
+            {
+                return v["status"] == "Running";
             }
         }
         false
