@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.7.24] - 2026-11-27
+
+### 评审后修复（v0.7.23 自审两项）
+
+#### 修复
+- **toolchain 重放守卫去排序依赖**：守卫从借用 `/run/egress-armed`
+  （tmpfs，生效依赖 egress-lock 与 Lima provision 重放之间未声明的
+  boot 顺序）改为独立持久 stamp `/var/lib/creance-toolchain-done`——
+  语义精确：下载只在封锁前首启可能成功，该 leg 跑完一次后所有重放
+  按设计无望、跳过；首启中断不写 stamp、合法重试。
+- **workbench 路由测试去副作用化**：`workbench_calls_only_real_routes`
+  不再真执行 `route()`（POST 臂是真 mutation——close_gates/select/
+  spawn，此前仅靠"处理器先读 config 而失败"偶然安全），改为路由表
+  逐字静态比对——match 路由下强度等价、零副作用。
+
 ## [0.7.23] - 2026-11-26
 
 ### macOS 实机审计修复批 + 残留清扫（审计全文：docs/AUDIT-2026-11-26-macos.md）

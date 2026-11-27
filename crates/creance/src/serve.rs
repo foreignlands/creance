@@ -350,16 +350,16 @@ mod tests {
     fn workbench_calls_only_real_routes() {
         // Every /api path the embedded UI calls must resolve through the
         // router — a dead endpoint is a silent broken button (the old
-        // /api/proxy/refresh-x call was exactly that). Exercise the real
-        // dispatcher: any (method, path) the UI uses must not fall to
-        // the 404 arm.
-        let ctx = ServeCtx {
-            profile: std::env::temp_dir()
-                .join(format!("creance-serve-test-{}", std::process::id()))
-                .to_string_lossy()
-                .into_owned(),
-            config_path: "/nonexistent".into(),
-        };
+        // /api/proxy/refresh-x call was exactly that). The pin is STATIC:
+        // each UI path must appear verbatim in a router match arm. The
+        // first cut of this test executed `route()` live — but POST arms
+        // are real mutations (close_gates, select_and_apply, service
+        // spawns), and the test was only safe because every handler
+        // happened to fail fast on the bogus config. A handler that ever
+        // acts before reading config would mutate real host state from a
+        // test run; the router is a plain match, so a verbatim source pin
+        // is exactly as strong and has zero side effects.
+        let source = include_str!("serve.rs");
         let mut paths: Vec<&str> = Vec::new();
         for needle in ["'/api/", "\"/api/"] {
             for m in WORKBENCH_HTML.match_indices(needle) {
@@ -374,7 +374,7 @@ mod tests {
         for path in paths {
             let hit = ["GET", "POST"]
                 .iter()
-                .any(|m| route(&ctx, m, path, b"{}").0 != 404);
+                .any(|m| source.contains(&format!("(\"{m}\", \"{path}\")")));
             assert!(hit, "UI calls {path} but the router does not serve it");
         }
         // All fetches must stay loopback-relative — an absolute URL in

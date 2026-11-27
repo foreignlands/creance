@@ -257,15 +257,22 @@ APT_OPTS="-o Acquire::http::Timeout=20 -o Acquire::Retries=1"
 # diagnosable after the lockdown makes the guest unreachable.
 TLLOG=/var/log/creance-toolchain.log
 : >"$TLLOG" 2>/dev/null || true
-# Replay guard (Mac M-A3): Lima re-runs this WHOLE script on every
-# `limactl start`, and post-lockdown every network step below can only
-# stall its own deadline against the dead wire — burning the full budget
-# (minutes added to every boot) while the tail installs never land. The
-# armed stamp exists exactly on such replays: boot one writes it only at
-# the lockdown apply BELOW this leg, so the guard never fires on the one
-# run that can actually download. cloud-init runs once either way.
-if [ -f /run/egress-armed ]; then
-  echo "toolchain skipped: egress armed (provision replay)" >> "$TLLOG" 2>/dev/null || true
+# Replay guard (Mac M-A3 + 0.7.24 review): Lima re-runs this WHOLE
+# script on every `limactl start`, and post-lockdown every network step
+# below can only stall its own deadline against the dead wire — burning
+# the full budget (minutes added to every boot) while the tail installs
+# never land. The stamp is PERSISTENT (/var/lib, not tmpfs): borrowing
+# the volatile firewall boot stamp depended on the lockdown unit
+# starting before the provision replay at every boot — an ordering
+# nothing declares. The
+# semantics here are exact instead: downloads can only ever succeed on
+# the pre-lockdown first boot, so once this leg has run to completion
+# one single time, every later replay is hopeless BY DESIGN and skipped.
+# An interrupted first boot (power loss mid-leg) writes no stamp and
+# legitimately retries — the wire is still open until the lockdown leg
+# below replays. cloud-init runs once either way.
+if [ -f /var/lib/creance-toolchain-done ]; then
+  echo "toolchain skipped: first-boot leg completed (provision replay)" >> "$TLLOG" 2>/dev/null || true
 else
 timeout "$TOOLCHAIN_BUDGET" sh -c '
   echo "toolchain start $(date -u +%FT%TZ)" >> /var/log/creance-toolchain.log
@@ -339,6 +346,9 @@ timeout "$TOOLCHAIN_BUDGET" sh -c '
   apt-get install '"$APT_OPTS"' -y -qq git socat xz-utils >> /var/log/creance-toolchain.log 2>&1 || true
   echo "toolchain end node=$(/usr/local/bin/node -v 2>/dev/null || command -v node || echo missing) claude=$(command -v claude || echo missing)" >> /var/log/creance-toolchain.log
 ' || true
+  # The leg ran to completion exactly once — even a partial outcome is
+  # final, because no later boot can download anything post-lockdown.
+  touch /var/lib/creance-toolchain-done 2>/dev/null || true
 fi
 
 # 0.3b TOPOLOGY LOCKDOWN — runtime apply, LAST and unskippable: the
@@ -515,15 +525,30 @@ mod tests {
         // adds an occurrence and fails this regardless of spelling.
         // `egress-armed` alone (no /run/ prefix) catches an alternate
         // spelling of the SAME path (/run/./egress-armed, /run//…).
-        // M-A3 added ONE read of the stamp — the toolchain replay guard
-        // (`[ -f /run/egress-armed ]`, a test, never a write). The count
-        // is 2: the unit's write plus that read; any third occurrence
-        // (a forged write, a smuggled line) still fails here.
-        assert_eq!(s.matches("/run/egress-armed").count(), 2, "{s}");
-        assert_eq!(s.matches("egress-armed").count(), 2, "{s}");
+        // 0.7.24: the toolchain replay guard moved off the tmpfs stamp
+        // (its effectiveness depended on undeclared boot ordering) onto
+        // the persistent /var/lib/creance-toolchain-done — the count is
+        // back to 1: the unit's write alone.
+        assert_eq!(s.matches("/run/egress-armed").count(), 1, "{s}");
+        assert_eq!(s.matches("egress-armed").count(), 1, "{s}");
         assert!(
-            s.contains("[ -f /run/egress-armed ]"),
+            s.contains("[ -f /var/lib/creance-toolchain-done ]"),
             "the toolchain leg skips on provision replays (M-A3)"
+        );
+        assert_eq!(
+            s.matches("creance-toolchain-done").count(),
+            2,
+            "guard read + completion write — no third spelling, {s}"
+        );
+        assert!(
+            s.contains("touch /var/lib/creance-toolchain-done"),
+            "the stamp lands only after the leg completes"
+        );
+        let guard_pos = s.find("[ -f /var/lib/creance-toolchain-done ]").unwrap();
+        let touch_pos = s.find("touch /var/lib/creance-toolchain-done").unwrap();
+        assert!(
+            guard_pos < touch_pos,
+            "guard must precede the completion write, {s}"
         );
         // M-A6: pre-fix guests carry the injected proxy spellings in
         // /etc/environment; the scrub must run unconditionally — i.e.
@@ -535,7 +560,7 @@ mod tests {
             "{s}"
         );
         let scrub = s.find("/etc/environment").unwrap();
-        let guard = s.find("[ -f /run/egress-armed ]").unwrap();
+        let guard = s.find("[ -f /var/lib/creance-toolchain-done ]").unwrap();
         assert!(scrub < guard, "scrub must precede the toolchain leg, {s}");
         // F-095+F-097/NC-UNIT+ESPsp+STAMPq: exactly one ExecStartPost
         // under ANY spelling — systemd accepts `=` flanked by blanks
