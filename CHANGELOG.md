@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.8.5] - 2026-11-27
+
+### 工作台骨架 + agent 注册表 + 终端通道（产品化轮第二期）
+
+- **声明式 agent 注册表**（agents.rs）：cli/desktop/web 三型，
+  接入点是数据不是逐 agent 工程。首期内置：claude-code/codex/
+  opencode/gemini-cli/aider/goose（开源可自动安装）+ antigravity
+  （desktop 首保）+ kiro（核实中）+ 浏览器/终端。懒安装：
+  点图标=装（guest 内执行），再点=开。
+- **左侧栏工作台 IA**：agents 面板+系统导航，状态徽标
+  （安装中/已装），点击行为=检测→安装→启动。
+- **终端通道**：浏览器 xterm.js ↔ 手写 RFC6455 WebSocket（std-only
+  无依赖，SHA1 内联）↔ ssh -tt ↔ guest shell。设计决议见
+  docs/PRODUCT-DEEP-0.8：host 无需 pty，guest 侧 -tt 强制分配；
+  xterm.js 5.3 vendor 入仓（serve 禁 CDN）；跨站 WS 的 Origin
+  检查（浏览器 WS 不受同源策略限制，必须服务端校验）；WS 断开
+  =ssh 子进程必杀不留孤儿。
+- guest 执行唯一通道=ssh+apply_ssh_options 全纪律，永不在 host
+  执行 agent 命令。
+
 ## [0.8.4] - 2026-11-27
 
 ### 测试代理实测修复（v0.8.3 首轮 UI 测试）

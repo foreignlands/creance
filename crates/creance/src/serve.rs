@@ -21,6 +21,9 @@ const CHECK_URL: &str = "https://1.1.1.1/cdn-cgi/trace";
 const CHECK_BUDGET: Duration = Duration::from_secs(25);
 /// The UI, embedded at build time.
 const WORKBENCH_HTML: &str = include_str!("workbench.html");
+const XTERM_JS: &str = include_str!("static/xterm.js");
+const XTERM_CSS: &str = include_str!("static/xterm.css");
+const XTERM_FIT: &str = include_str!("static/xterm-addon-fit.js");
 
 /// Serves the workbench on `127.0.0.1:port` until the process is stopped.
 pub fn serve(profile: &str, config_path: &str, port: u16) -> Result<(), String> {
@@ -57,6 +60,9 @@ struct ServeCtx {
 fn handle(mut stream: std::net::TcpStream, port: u16, ctx: ServeCtx) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
+    // WS 终端通道升级时需要原始 TcpStream（read_header_block 之后
+    // 只剩 PrefacedReader）。升级请求不携带管道化字节，克隆是安全的。
+    let ws_clone = stream.try_clone().ok();
     let (head, mut stream) = match creance_net::wire::read_header_block(&mut stream, 16 << 10) {
         Ok((h, r)) if !h.is_empty() => (h, r),
         _ => return,
@@ -94,6 +100,49 @@ fn handle(mut stream: std::net::TcpStream, port: u16, ctx: ServeCtx) {
         if origin != allowed {
             return reply(&mut stream, 403, "cross-origin mutation refused");
         }
+    }
+    // WebSocket 终端通道：升级握手在 route 之前接管连接。
+    // 浏览器 WebSocket() 不能设自定义头——参数全走 query：
+    // /api/term?agent=<id>&cols=<n>&rows=<n>
+    if path.starts_with("/api/term") && method == "GET" {
+        // CSRF：跨站 WebSocket 不受同源策略限制，浏览器会带 Origin——
+        // 非本工作台来源的升级请求一律拒。无 Origin=curl/CLI 放行
+        // （与 POST 突变同纪律）。
+        let foreign = fields.iter().any(|(k, v)| {
+            k.eq_ignore_ascii_case("origin")
+                && !v.is_empty()
+                && v != &format!("http://127.0.0.1:{port}")
+        });
+        if foreign {
+            return;
+        }
+        if let Some(key) = crate::term::handshake_key(&fields) {
+            let qs = path.split_once('?').map(|(_, q)| q).unwrap_or("");
+            let get = |name: &str| {
+                qs.split('&').find_map(|p| {
+                    p.split_once('=')
+                        .filter(|(k, _)| *k == name)
+                        .map(|(_, v)| v.to_owned())
+                })
+            };
+            if let Some(agent) = get("agent").and_then(|id| crate::agents::find(&id)) {
+                let num = |name: &str, def: u16, max: u16| {
+                    get(name)
+                        .and_then(|v| v.parse().ok())
+                        .filter(|&n: &u16| n > 0 && n <= max)
+                        .unwrap_or(def)
+                };
+                let params = crate::term::TermParams {
+                    launch: agent.launch.to_owned(),
+                    cols: num("cols", 80, 500),
+                    rows: num("rows", 24, 200),
+                };
+                if let Some(raw) = ws_clone {
+                    let _ = crate::term::run(raw, &key, &ctx.profile, params);
+                }
+            }
+        }
+        return;
     }
     let (status, content_type, payload) = route(&ctx, &method, &path, &body);
     let _ = stream.write_all(
@@ -135,7 +184,7 @@ fn guest_exec(ctx: &ServeCtx, script: &str) -> Result<std::process::Output, Stri
         .map_err(|e| format!("guest 执行失败：{e}"))
 }
 
-fn running_instance(profile: &str) -> Result<String, String> {
+pub(crate) fn running_instance(profile: &str) -> Result<String, String> {
     // 实例名是确定性派生；ssh_target 在实例未运行时自己拒绝，
     // 错误文案在那里统一。
     Ok(creance_vm::vm::instance_name(
@@ -204,6 +253,13 @@ fn route(ctx: &ServeCtx, method: &str, path: &str, body: &[u8]) -> (u16, &'stati
             "text/html; charset=utf-8",
             WORKBENCH_HTML.as_bytes().to_vec(),
         ),
+        ("GET", "/static/xterm.js") => {
+            (200, "application/javascript", XTERM_JS.as_bytes().to_vec())
+        }
+        ("GET", "/static/xterm.css") => (200, "text/css", XTERM_CSS.as_bytes().to_vec()),
+        ("GET", "/static/xterm-addon-fit.js") => {
+            (200, "application/javascript", XTERM_FIT.as_bytes().to_vec())
+        }
         ("GET", "/api/status") => (
             200,
             "application/json",

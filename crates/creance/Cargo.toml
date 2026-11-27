@@ -18,6 +18,7 @@ serde_yaml = { workspace = true }
 clap = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
+base64 = "0.22"
 
 [[bin]]
 name = "creance"

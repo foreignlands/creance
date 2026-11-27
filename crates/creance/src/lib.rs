@@ -8,6 +8,8 @@ pub mod diagnose;
 pub mod escape;
 pub mod evidence;
 pub mod serve;
+pub mod term;
+pub mod ws;
 
 pub use creance_net;
 pub use creance_proxy;

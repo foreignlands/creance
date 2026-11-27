@@ -133,6 +133,9 @@
   .maincol { flex:1; min-width:0; }
   @media (max-width:860px) { .shell { flex-direction:column; } .sidebar { width:100%; position:static; } }
 </style>
+<link rel="stylesheet" href="/static/xterm.css">
+<script src="/static/xterm.js"></script>
+<script src="/static/xterm-addon-fit.js"></script>
 </head>
 <body>
 <header>
@@ -204,6 +207,12 @@
   <div class="card full">
     <h2>节点 · 点击应用为出口</h2>
     <div class="nodes" id="node-list"><div class="empty">暂无节点 — 先在上方导入订阅</div></div>
+  </div>
+
+  <div class="card full" id="term-card" style="display:none">
+    <h2 id="term-title">终端</h2>
+    <div id="term-box" style="height:380px;background:#000;border-radius:9px;padding:6px"></div>
+    <div class="actions"><button class="ghost" onclick="closeTerm()">关闭终端</button></div>
   </div>
 
   <div class="card full">
@@ -406,8 +415,7 @@ $('agent-list').addEventListener('click', async e => {
     } else {
       $('ast-' + a.id).textContent = '已装';
       $('ast-' + a.id).classList.add('inst');
-      // 启动通道：终端内嵌是 0.8.5 下半期；先诚实引导
-      log('→ ' + a.name + ' 已安装；终端内嵌通道建设中（0.8.5 下半期）——当前可 ssh 进 guest 直接运行');
+      openTerm(a);
     }
   } catch (e2) {
     log(a.name + ': ' + e2.message, true);
@@ -415,6 +423,36 @@ $('agent-list').addEventListener('click', async e => {
   }
   row.classList.remove('busy');
 });
+let termObj = null, termWs = null, fitObj = null;
+function openTerm(a) {
+  closeTerm();
+  $('term-card').style.display = '';
+  $('term-title').textContent = a.name + ' · guest 内终端';
+  termObj = new Terminal({cursorBlink:true, fontSize:13, theme:{background:'#000000'}});
+  fitObj = new FitAddon.FitAddon();
+  termObj.loadAddon(fitObj);
+  termObj.open($('term-box'));
+  fitObj.fit();
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const dims = fitObj.proposeDimensions() || {cols:80, rows:24};
+  termWs = new WebSocket(`${proto}://${location.host}/api/term?agent=${encodeURIComponent(a.id)}&cols=${dims.cols}&rows=${dims.rows}`);
+  termWs.binaryType = 'arraybuffer';
+  termWs.onopen = () => log(a.name + ' 终端已连接（guest 内）');
+  termWs.onmessage = e => {
+    if (e.data instanceof ArrayBuffer) termObj.write(new Uint8Array(e.data));
+    else termObj.write(e.data);
+  };
+  termWs.onclose = () => { log(a.name + ' 终端已断开'); termObj?.write('\r\n[连接已关闭]\r\n'); };
+  termWs.onerror = () => log(a.name + ' 终端连接失败——环境在运行吗？（creance up）', true);
+  termObj.onData(d => { if (termWs?.readyState === 1) termWs.send(d); });
+  $('term-card').scrollIntoView({behavior:'smooth'});
+}
+function closeTerm() {
+  if (termWs) { try { termWs.close(); } catch (_) {} termWs = null; }
+  if (termObj) { termObj.dispose(); termObj = null; }
+  $('term-card').style.display = 'none';
+}
+window.addEventListener('resize', () => { if (fitObj && termObj) fitObj.fit(); });
 refreshAgents();
 refresh(); setInterval(refresh, 5000);
 </script>
