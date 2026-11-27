@@ -96,7 +96,9 @@ pub const REGISTRY: &[AgentEntry] = &[
         kind: "web",
         // web/desktop 类检测的是串流基础设施而非应用二进制——
         // 缺基础设施=老 provision，错误文案指向重建环境而非手工安装
-        detect: "test -x /usr/local/bin/creance-oauth",
+        // -f 而非 -x：调用永远经 `sh <script>` 不需要执行位
+        // （0.8.9 实测：旧 provision chmod 漏了它，-x 误杀所有老 guest）
+        detect: "test -f /usr/local/bin/creance-oauth",
         install: "",
         launch: "chromium",
         note: "内置浏览器通道——OAuth 授权与网页访问",

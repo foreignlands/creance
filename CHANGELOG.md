@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.9.0] - 2026-11-27
+
+### desktop 通道端到端实证（里程碑）
+
+全新 provision guest 上测试代理验证通过：点「浏览器」→ workbench
+内嵌 iframe 真实显示 guest 桌面（Chrome for Testing）→ 键鼠交互
+传入 guest → 关闭后 host/guest 双侧零残留。
+
+- provision 修复：creance-oauth/creance-browser 补执行位（chmod
+  行遗漏，新 provision 生效）。
+- detect 修复：test -f 而非 -x——调用永远经 sh 解释执行不需要
+  执行位，旧 provision guest 因此全兼容无需重建。
+- 验证纪律说明：底层串流能力（Xvnc/noVNC/键鼠转发）与 UI 主路径
+  分开验证，两层均绿。
+
 ## [0.8.9] - 2026-11-27
 
 ### desktop 通道实测修复（测试代理驱动）

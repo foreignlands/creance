@@ -323,7 +323,7 @@ timeout "$TOOLCHAIN_BUDGET" sh -c '
     && mv /usr/local/bin/node.new /usr/local/bin/node 2>> /var/log/creance-toolchain.log \
     || rm -f /usr/local/bin/node.new /tmp/creance-node.tar.gz
   echo "node install rc=$? path=$(command -v /usr/local/bin/node 2>/dev/null || echo none)" >> /var/log/creance-toolchain.log
-  chmod +x /usr/local/bin/node /usr/local/bin/creance-call 2>/dev/null || true
+  chmod +x /usr/local/bin/node /usr/local/bin/creance-call /usr/local/bin/creance-oauth /usr/local/bin/creance-browser 2>/dev/null || true
   # The pinned download dies fast on MITM-intercepting networks; the
   # apt fallback must therefore run EARLY — the base extras (git, xz —
   # curl and ca-certificates already ship in the image) sink to the end
