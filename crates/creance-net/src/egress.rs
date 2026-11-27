@@ -778,8 +778,19 @@ pub fn request_direct(
     let host = u.host_str().ok_or("request URL has no host")?.to_owned();
     let default_port = if https { 443 } else { 80 };
     let port = u.port().unwrap_or(default_port);
-    let stream =
-        tcp_connect(&join_addr(&host, port), deadline).map_err(|e| format!("主机直连失败：{e}"))?;
+    let stream = tcp_connect(&join_addr(&host, port), deadline).map_err(|e| {
+        // 文案即引导：底层 io 错误翻译成用户可行动的判词
+        let msg = e.to_string();
+        if msg.contains("lookup address") || msg.contains("Name or service") {
+            "无法解析订阅地址——请检查 URL 是否拼写正确、本机网络是否通畅".to_owned()
+        } else if msg.contains("refused") {
+            "目标拒绝连接——请检查订阅链接是否有效".to_owned()
+        } else if msg.contains("timed out") || msg.contains("timeout") {
+            "连接超时——请检查本机网络或稍后重试".to_owned()
+        } else {
+            format!("主机直连失败：{msg}")
+        }
+    })?;
     let tunnel = Tunnel(stream);
     tunnel.set_deadline(deadline);
     let channel = Channel(TunnelKind::Plain(tunnel));
