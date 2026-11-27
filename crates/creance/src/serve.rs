@@ -108,6 +108,59 @@ fn handle(mut stream: std::net::TcpStream, port: u16, ctx: ServeCtx) {
     let _ = stream.write_all(&payload);
 }
 
+/// 扫描本机常见 Clash 系配置（0.8.3 迁移引导）：Verge/Mihomo/Clash
+/// 的 profiles 目录，返回可导入的 YAML 路径清单。只读不拷贝——
+/// 用户在 UI 确认后才经 import-paste 路径入库。
+fn scan_local_configs() -> Vec<serde_json::Value> {
+    let mut out = Vec::new();
+    let Some(home) = std::env::var_os("HOME") else {
+        return out;
+    };
+    let home = std::path::Path::new(&home);
+    let candidates: Vec<std::path::PathBuf> = [
+        ".config/clash-verge/profiles",
+        ".config/clash-verge-rev/profiles",
+        ".config/mihomo/profiles",
+        ".config/clash/profiles",
+        ".config/clash",
+        "Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/profiles",
+        "Library/Application Support/clash-verge/profiles",
+    ]
+    .iter()
+    .map(|c| home.join(c))
+    .collect();
+    for dir in candidates {
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for ent in rd.flatten() {
+            let path = ent.path();
+            let is_yaml = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e == "yaml" || e == "yml");
+            if !is_yaml {
+                continue;
+            }
+            // 小文件头嗅探：必须含 proxies 或订阅链接特征，避免扫进无关 yaml
+            let Ok(head) =
+                std::fs::read(&path).map(|b| b.iter().take(4096).copied().collect::<Vec<u8>>())
+            else {
+                continue;
+            };
+            let text = String::from_utf8_lossy(&head);
+            if !(text.contains("proxies:") || text.contains("proxy-providers")) {
+                continue;
+            }
+            out.push(json!({
+                "path": path.display().to_string(),
+                "size": ent.metadata().map(|m| m.len()).unwrap_or(0),
+            }));
+        }
+    }
+    out
+}
+
 fn route(ctx: &ServeCtx, method: &str, path: &str, body: &[u8]) -> (u16, &'static str, Vec<u8>) {
     match (method, path) {
         ("GET", "/") => (
@@ -135,7 +188,12 @@ fn route(ctx: &ServeCtx, method: &str, path: &str, body: &[u8]) -> (u16, &'stati
                 Ok(c) => c,
                 Err(e) => return (409, json!({"error": e})),
             };
-            let data = match creance_proxy::fetch::fetch_subscription(&cfg, url) {
+            let host_download = v["host_download"].as_bool().unwrap_or(false);
+            let data = match if host_download {
+                creance_proxy::fetch::fetch_subscription_host(url)
+            } else {
+                creance_proxy::fetch::fetch_subscription(&cfg, url)
+            } {
                 Ok(d) => d,
                 Err(e) => return (502, json!({"error": e})),
             };
@@ -151,6 +209,63 @@ fn route(ctx: &ServeCtx, method: &str, path: &str, body: &[u8]) -> (u16, &'stati
                 Err(e) => (409, json!({"error": e})),
             }
         }),
+        ("POST", "/api/proxy/import-paste") => json_action(ctx, body, |ctx, v| {
+            let name = v["name"].as_str().unwrap_or_default();
+            let content = v["content"].as_str().unwrap_or_default();
+            if name.is_empty() || content.is_empty() {
+                return (400, json!({"error": "name and content required"}));
+            }
+            if content.len() > creance_proxy::MAX_IMPORT {
+                return (400, json!({"error": "配置超过 8 MiB 上限"}));
+            }
+            let saved = creance_proxy::with_store_lock(&ctx.profile, || {
+                let mut store = creance_proxy::load(&ctx.profile)?;
+                store.import(name, "", content.as_bytes(), "", 0, "workbench-paste")?;
+                let count = store.count();
+                creance_proxy::save(&ctx.profile, &store)?;
+                Ok(count)
+            });
+            match saved {
+                Ok(count) => (200, json!({"ok": true, "nodes": count})),
+                Err(e) => (409, json!({"error": e})),
+            }
+        }),
+        ("POST", "/api/proxy/import-local") => json_action(ctx, body, |ctx, v| {
+            let path = v["path"].as_str().unwrap_or_default();
+            let name = v["name"].as_str().unwrap_or_default();
+            if path.is_empty() || name.is_empty() {
+                return (400, json!({"error": "path and name required"}));
+            }
+            // 只允许导入 scan-local 刚扫描出的路径——这个端点不是通用文件读取器。
+            let allowed = scan_local_configs();
+            if !allowed.iter().any(|f| f["path"].as_str() == Some(path)) {
+                return (403, json!({"error": "路径不在本机配置扫描结果内"}));
+            }
+            let data = match std::fs::read(path) {
+                Ok(d) if d.len() <= creance_proxy::MAX_IMPORT => d,
+                Ok(_) => return (400, json!({"error": "配置超过 8 MiB 上限"})),
+                Err(e) => return (409, json!({"error": format!("读取失败：{e}")})),
+            };
+            let saved = creance_proxy::with_store_lock(&ctx.profile, || {
+                let mut store = creance_proxy::load(&ctx.profile)?;
+                store.import(name, "", &data, "", 0, "workbench-local")?;
+                let count = store.count();
+                creance_proxy::save(&ctx.profile, &store)?;
+                Ok(count)
+            });
+            match saved {
+                Ok(count) => (200, json!({"ok": true, "nodes": count})),
+                Err(e) => (409, json!({"error": e})),
+            }
+        }),
+        ("GET", "/api/proxy/scan-local") => {
+            let found = scan_local_configs();
+            (
+                200,
+                "application/json",
+                json!({"found": found}).to_string().into_bytes(),
+            )
+        }
         ("POST", "/api/proxy/select") => json_action(ctx, body, |ctx, v| {
             let node = v["node"].as_str().unwrap_or_default();
             // F-043/F-047: revoke first, fatally — the CLI's transactional

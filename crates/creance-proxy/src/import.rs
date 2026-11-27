@@ -119,23 +119,51 @@ pub fn parse_nodes(data: &[u8], source_id: &str) -> Result<(Vec<Node>, Vec<NodeI
     // event stream — a 1 MiB bomb burns minutes of CPU before the parser's
     // own recursion limit rejects it. One linear pass refuses it instantly.
     precheck_depth(data)?;
-    let yaml: serde_yaml::Value = serde_yaml::from_slice(data).map_err(|_| {
+    // 分享链接路径：逐行独立解析，坏行记为 share_issues（索引即行号），
+    // 绝不静默吞掉——与 YAML 路径的单节点失败纪律一致。
+    let mut share_issues: Vec<NodeIssue> = Vec::new();
+    let share_maps: Option<Vec<serde_yaml::Value>> =
+        crate::sharelink::decode_share_list(data).map(|lines| {
+            let mut out = Vec::new();
+            for (i, l) in lines.iter().enumerate() {
+                match crate::sharelink::parse_share_link(l) {
+                    Ok(m) => out.push(
+                        serde_yaml::to_value(Value::Object(m)).unwrap_or(serde_yaml::Value::Null),
+                    ),
+                    Err(e) => share_issues.push(NodeIssue {
+                        index: i + 1,
+                        reason: if e.len() > 80 { e[..80].to_owned() } else { e },
+                        ..Default::default()
+                    }),
+                }
+            }
+            out
+        });
+    let yaml: serde_yaml::Value = serde_yaml::from_slice(data).unwrap_or(serde_yaml::Value::Null);
+    if share_maps.is_none() && yaml.is_null() {
         // FINDING-002: serde_yaml rejects whole documents over a single
         // integer wider than 64 bits (Go's yaml.v3 falls back to float64);
         // point the user at the actual cause instead of the generic text.
         if contains_overflow_integer(data) {
-            "订阅包含超出 64 位范围的整数（如端口或端口范围写成超大数字），请修正后重试".to_owned()
-        } else {
-            "无法读取 YAML，请导入 Clash/Mihomo 节点订阅或配置；暂不支持 Base64 列表或分享链接"
-                .to_owned()
+            return Err(
+                "订阅包含超出 64 位范围的整数（如端口或端口范围写成超大数字），请修正后重试"
+                    .to_owned(),
+            );
         }
-    })?;
-    let mut proxies: Vec<serde_yaml::Value> = yaml
-        .get("proxies")
-        .and_then(YamlValue::as_sequence)
-        .or_else(|| yaml.get("payload").and_then(YamlValue::as_sequence))
-        .cloned()
-        .unwrap_or_default();
+        return Err(
+            "无法识别订阅格式：既不是 Clash/Mihomo YAML 也不是分享链接列表，请检查内容完整"
+                .to_owned(),
+        );
+    }
+    let mut proxies: Vec<serde_yaml::Value> = match share_maps {
+        Some(v) => v,
+        None => yaml
+            .get("proxies")
+            .and_then(YamlValue::as_sequence)
+            .or_else(|| yaml.get("payload").and_then(YamlValue::as_sequence))
+            .cloned()
+            .unwrap_or_default(),
+    };
     if proxies.is_empty() || proxies.len() > 3000 {
         return Err(
             "配置需要包含 1–3000 个 proxies 节点；仅含远程 provider 的配置请改为导入节点订阅链接"
@@ -314,11 +342,12 @@ pub fn parse_nodes(data: &[u8], source_id: &str) -> Result<(Vec<Node>, Vec<NodeI
             out.push(by_id[node.id.as_str()].clone());
         }
     }
-    let skipped: Vec<NodeIssue> = entries
+    let mut skipped: Vec<NodeIssue> = entries
         .iter()
         .filter(|(_, issue)| !issue.reason.is_empty())
         .map(|(_, issue)| issue.clone())
         .collect();
+    skipped.extend(share_issues);
     if out.is_empty() {
         let details: Vec<String> = skipped
             .iter()

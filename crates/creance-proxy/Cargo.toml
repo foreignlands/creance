@@ -17,6 +17,7 @@ hex = { workspace = true }
 libc = { workspace = true }
 creance-net = { workspace = true }
 creance-vm = { workspace = true }
+base64 = "0.22"
 
 [lints]
 workspace = true

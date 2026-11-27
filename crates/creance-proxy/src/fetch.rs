@@ -55,20 +55,32 @@ pub fn fetch_subscription(config: &Config, url: &str) -> Result<Vec<u8>, String>
 }
 
 pub fn fetch_subscription_through(egress: &Egress, url: &str) -> Result<Vec<u8>, String> {
+    fetch_loop(url, |u, deadline| {
+        request_bounded(egress, "GET", u, None, &[], deadline, crate::MAX_IMPORT)
+    })
+}
+
+/// 主机直连下载订阅（0.8.3 引导）：首次配置尚无可用代理时，用户明示
+/// 勾选后不经代理直连下载订阅文本。下载的是配置数据而非环境流量，
+/// 不构成 fail-closed 缺口；SSRF 防护与重定向纪律与代理路径完全相同
+/// （直连路径的 SSRF 风险反而更高——本机解析+本机拨号，内网目标
+/// 必须同样拒绝）。
+pub fn fetch_subscription_host(url: &str) -> Result<Vec<u8>, String> {
+    fetch_loop(url, |u, deadline| {
+        creance_net::egress::request_direct("GET", u, deadline, crate::MAX_IMPORT)
+    })
+}
+
+fn fetch_loop(
+    url: &str,
+    fetch: impl Fn(&str, Instant) -> Result<creance_net::egress::HttpResponse, String>,
+) -> Result<Vec<u8>, String> {
     let deadline = Instant::now() + FETCH_TIMEOUT;
     let mut current = url.to_owned();
     for _ in 0..=MAX_REDIRECTS {
         let next_url = url::Url::parse(&current).map_err(|e| e.to_string())?;
         validate_fetch_url(&next_url, http_allowed())?;
-        let response = request_bounded(
-            egress,
-            "GET",
-            &current,
-            None,
-            &[],
-            deadline,
-            crate::MAX_IMPORT,
-        )?;
+        let response = fetch(&current, deadline)?;
         match response.status {
             200..=299 => return Ok(response.body),
             301 | 302 | 303 | 307 | 308 => {

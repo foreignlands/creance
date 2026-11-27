@@ -100,6 +100,19 @@
   .full { grid-column:1/-1; }
   .err { color:var(--bad); font-size:12px; margin-top:8px; min-height:16px; white-space:pre-wrap; }
   .hint { color:var(--faint); font-size:11.5px; margin-top:6px; }
+  textarea { background:var(--bg); color:var(--text); border:1px solid var(--line-strong);
+    border-radius:9px; padding:8px 12px; font:12px/1.5 var(--mono);
+    width:100%; outline:none; resize:vertical; transition:border-color .12s, box-shadow .12s; }
+  textarea:focus { border-color:var(--accent);
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent); }
+  label.ck { display:flex; align-items:center; gap:7px; margin-top:12px; font-size:12.5px;
+    color:var(--text); cursor:pointer; }
+  label.ck input { width:auto; }
+  .scan-item { display:flex; align-items:center; gap:10px; padding:8px 10px; margin-top:8px;
+    border:1px solid var(--line); border-radius:9px; }
+  .scan-item .p { font:11.5px var(--mono); color:var(--dim); overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap; flex:1; }
+  .scan-item input { width:130px; flex:none; }
   @media (max-width:760px) { .grid { grid-template-columns:1fr; } }
 </style>
 </head>
@@ -129,13 +142,37 @@
   </div>
 
   <div class="card">
-    <h2>导入订阅</h2>
+    <h2>导入 · 订阅链接</h2>
     <label for="sub-name">来源名称</label>
     <input id="sub-name" placeholder="我的订阅" autocomplete="off">
-    <label for="sub-url">订阅 URL（经代理拉取，无直连回退）</label>
-    <input id="sub-url" placeholder="https://example.com/sub.yaml" autocomplete="off" spellcheck="false">
+    <label for="sub-url">订阅 URL</label>
+    <input id="sub-url" placeholder="https://example.com/sub" autocomplete="off" spellcheck="false">
+    <label class="ck"><input type="checkbox" id="sub-hostdl"> 通过主机网络下载（首次配置尚无可用代理时勾选）</label>
+    <div class="hint" id="hostdl-hint">勾选后本次下载直连本机网络，仅用于获取订阅文本；下载完成即恢复代理约束。</div>
     <div class="actions"><button id="btn-import" onclick="importSub(this)">导入</button></div>
     <div class="err" id="import-err"></div>
+  </div>
+
+  <div class="card">
+    <h2>导入 · 粘贴或文件</h2>
+    <label for="paste-name">来源名称</label>
+    <input id="paste-name" placeholder="手动节点" autocomplete="off">
+    <label for="paste-content">粘贴 Clash YAML 或分享链接（ss://、vmess://、vless://、trojan://、hysteria2://，每行一条）</label>
+    <textarea id="paste-content" rows="4" placeholder="vless://… 或 proxies: 开头 YAML" spellcheck="false"></textarea>
+    <div class="actions">
+      <button id="btn-paste" onclick="importPaste(this)">导入粘贴内容</button>
+      <button class="ghost" onclick="document.getElementById('file-pick').click()">选择文件…</button>
+      <input type="file" id="file-pick" accept=".yaml,.yml,.txt" style="display:none">
+    </div>
+    <div class="err" id="paste-err"></div>
+  </div>
+
+  <div class="card full">
+    <h2>迁移 · 本机已有配置</h2>
+    <div class="hint">自动检测本机 Clash Verge / Mihomo / Clash 的配置文件，一键迁移。</div>
+    <div class="actions"><button class="ghost" id="btn-scan" onclick="scanLocal(this)">扫描本机配置</button></div>
+    <div id="scan-list"></div>
+    <div class="err" id="scan-err"></div>
   </div>
 
   <div class="card full">
@@ -205,16 +242,78 @@ async function selectNode(id) {
   busy(null, false);
   refresh();
 }
+function advise(e, el, hostdl) {
+  // 文案即引导：错误后给出下一步动作而非死路
+  let msg = e.message;
+  if (/代理|proxy|SOCKS/i.test(msg) && !hostdl) {
+    msg += '\n→ 还没有可用代理？勾选「通过主机网络下载」重试；已有订阅则在节点列表先选一个节点。';
+  } else if (/无法识别订阅格式|YAML/i.test(msg)) {
+    msg += '\n→ 确认链接复制完整；或在右侧用「粘贴或文件」直接导入内容。';
+  } else if (/超时|timeout|连接/i.test(msg) && !hostdl) {
+    msg += '\n→ 若是首次配置无代理可用，勾选「通过主机网络下载」。';
+  }
+  el.textContent = msg;
+}
 async function importSub(btn) {
   $('import-err').textContent = '';
   const name = $('sub-name').value.trim(), url = $('sub-url').value.trim();
+  const hostdl = $('sub-hostdl').checked;
   if (!name || !url) { $('import-err').textContent = '名称与 URL 均不能为空'; return; }
   busy(btn, true);
   try {
-    const r = await j('/api/proxy/import', {name, url});
-    log(`导入成功，共 ${r.nodes} 个节点`);
+    const r = await j('/api/proxy/import', {name, url, host_download: hostdl});
+    log(`导入成功，共 ${r.nodes} 个节点 — 在下方点击一个节点即可应用`);
     $('sub-url').value = '';
-  } catch (e) { $('import-err').textContent = e.message; log('导入失败: ' + e.message, true); }
+  } catch (e) { advise(e, $('import-err'), hostdl); log('导入失败: ' + e.message, true); }
+  busy(btn, false);
+  refresh();
+}
+async function importPaste(btn) {
+  $('paste-err').textContent = '';
+  const name = $('paste-name').value.trim(), content = $('paste-content').value.trim();
+  if (!name || !content) { $('paste-err').textContent = '名称与内容均不能为空'; return; }
+  busy(btn, true);
+  try {
+    const r = await j('/api/proxy/import-paste', {name, content});
+    log(`导入成功，共 ${r.nodes} 个节点`);
+    $('paste-content').value = '';
+  } catch (e) { $('paste-err').textContent = e.message + '\n→ 支持 Clash YAML（proxies: 开头）或分享链接每行一条。'; log('导入失败: ' + e.message, true); }
+  busy(btn, false);
+  refresh();
+}
+$('file-pick').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  if (f.size > 8 * 1024 * 1024) { $('paste-err').textContent = '文件超过 8 MiB 上限'; return; }
+  $('paste-content').value = await f.text();
+  if (!$('paste-name').value.trim()) $('paste-name').value = f.name.replace(/\.(yaml|yml|txt)$/i, '');
+  e.target.value = '';
+});
+async function scanLocal(btn) {
+  $('scan-err').textContent = '';
+  busy(btn, true);
+  try {
+    const r = await j('/api/proxy/scan-local');
+    const list = $('scan-list');
+    if (!r.found.length) {
+      list.innerHTML = '<div class="hint">未发现本机 Clash 系配置 — 如果你用的订阅在其他客户端里，可以直接粘贴分享链接到上方。</div>';
+    } else {
+      list.innerHTML = r.found.map((f, i) =>
+        `<div class="scan-item"><span class="p" title="${esc(f.path)}">${esc(f.path)}</span>
+         <input id="scan-name-${i}" placeholder="来源名称" value="迁移配置">
+         <button class="ghost" onclick="importLocal(this, '${esc(f.path)}', ${i})">导入</button></div>`).join('');
+    }
+  } catch (e) { $('scan-err').textContent = e.message; }
+  busy(btn, false);
+}
+async function importLocal(btn, path, i) {
+  const name = $('scan-name-' + i).value.trim() || '迁移配置';
+  busy(btn, true);
+  try {
+    const r = await j('/api/proxy/import-local', {path, name});
+    log(`迁移成功，共 ${r.nodes} 个节点`);
+    $('scan-list').innerHTML = '';
+  } catch (e) { $('scan-err').textContent = e.message; log('迁移失败: ' + e.message, true); }
   busy(btn, false);
   refresh();
 }

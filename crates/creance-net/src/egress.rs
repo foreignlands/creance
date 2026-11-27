@@ -689,16 +689,7 @@ pub fn request_bounded(
     let default_port = if https { 443 } else { 80 };
     let port = u.port().unwrap_or(default_port);
     let channel = egress.dial_deadline(&join_addr(&host, port), deadline)?;
-    let Channel(mut kind) = channel;
-    if https {
-        let inner: Box<dyn RW> = match kind {
-            TunnelKind::Plain(t) => Box::new(t),
-            // An HTTPS proxy's TLS layer already ends at the target; stack one more.
-            TunnelKind::Tls(s) => Box::new(*s),
-        };
-        kind = TunnelKind::Tls(tls_wrap(inner, &host)?);
-    }
-    let mut channel = Channel(kind);
+    let mut channel = tls_layer(channel, https, &host)?;
     let path = if u.path().is_empty() {
         "/".to_owned()
     } else {
@@ -740,6 +731,85 @@ pub fn request_bounded(
     // FINDING-017: 1xx/204/304 responses have no body by definition — a
     // peer that legitimately keeps the tunnel open must not stall us until
     // the deadline (Go's net/http ends the body by status code).
+    if (100..200).contains(&status) || status == 204 || status == 304 {
+        return Ok(HttpResponse {
+            status,
+            headers,
+            body: Vec::new(),
+        });
+    }
+    let http_body = read_body(&mut body_stream, &headers, max_body)?;
+    Ok(HttpResponse {
+        status,
+        headers,
+        body: http_body,
+    })
+}
+
+fn tls_layer(channel: Channel, https: bool, host: &str) -> Result<Channel, String> {
+    let Channel(mut kind) = channel;
+    if https {
+        let inner: Box<dyn RW> = match kind {
+            TunnelKind::Plain(t) => Box::new(t),
+            // An HTTPS proxy's TLS layer already ends at the target; stack one more.
+            TunnelKind::Tls(s) => Box::new(*s),
+        };
+        kind = TunnelKind::Tls(tls_wrap(inner, host)?);
+    }
+    Ok(Channel(kind))
+}
+
+/// 主机直连请求（0.8.3 订阅引导）：不经任何代理，本机解析 DNS 并直连
+/// 目标。只用于「首次配置还没有可用代理时下载订阅文本」这一引导路径——
+/// 下载的是订阅数据本身，不是环境流量，不构成 fail-closed 缺口；
+/// 调用方必须在 UI 明示勾选。复用 request_bounded 的响应纪律。
+pub fn request_direct(
+    method: &str,
+    url: &str,
+    deadline: Instant,
+    max_body: usize,
+) -> Result<HttpResponse, String> {
+    let u = url::Url::parse(url).map_err(|_| format!("invalid request URL {url}"))?;
+    let https = match u.scheme() {
+        "https" => true,
+        "http" => false,
+        other => return Err(format!("unsupported request scheme {other}")),
+    };
+    let host = u.host_str().ok_or("request URL has no host")?.to_owned();
+    let default_port = if https { 443 } else { 80 };
+    let port = u.port().unwrap_or(default_port);
+    let stream =
+        tcp_connect(&join_addr(&host, port), deadline).map_err(|e| format!("主机直连失败：{e}"))?;
+    let tunnel = Tunnel(stream);
+    tunnel.set_deadline(deadline);
+    let channel = Channel(TunnelKind::Plain(tunnel));
+    let mut channel = tls_layer(channel, https, &host)?;
+    let path = if u.path().is_empty() {
+        "/".to_owned()
+    } else {
+        let mut p = u.path().to_owned();
+        if let Some(q) = u.query() {
+            p.push('?');
+            p.push_str(q);
+        }
+        p
+    };
+    let host_header = if port == default_port {
+        host.clone()
+    } else {
+        join_addr(&host, port)
+    };
+    let req = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {host_header}\r\nConnection: close\r\nUser-Agent: curl/8.5.0\r\n\r\n"
+    );
+    channel.set_deadline(deadline);
+    channel
+        .write_all(req.as_bytes())
+        .map_err(|e| e.to_string())?;
+    let (head, mut body_stream) =
+        crate::wire::read_header_block(&mut channel, MAX_HEADER).map_err(|e| e.to_string())?;
+    let status = parse_status(&head).ok_or("invalid HTTP response")?;
+    let headers = parse_headers(&head);
     if (100..200).contains(&status) || status == 204 || status == 304 {
         return Ok(HttpResponse {
             status,
