@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.7.26] - 2026-11-27
+
+### 配置即数据（评审项③）：声明式重建
+
+- **`Profile::derive(seed)`**：身份种子确定性派生 hostname/username
+  （sha256 计数器流，可见字段不可反推种子）；session token 保持随机
+  ——它是可吊销实例凭证不是身份，重建就该轮换。
+- **`creance apply --file persona.json`**：声明文件（identity_seed +
+  config + sources）一键重建到「setup 即可用」——换机/重装从
+  "打包带走"变成"声明重建"。seed 允许 keychain 引用（推荐）或明文
+  （警告）；弱种子（<16）拒绝；运行中实例拒绝；apply 纯落盘不碰网络。
+- **`Store::declare_source`**：订阅登记不抓取——nodes 待 proxy-refresh。
+- 实机冒烟：派生身份/确定性/config 落盘/订阅登记全绿。
+- 记档残余：machine-id 仍随机于重建（seed 派生注入 provision 是更深
+  手术，hostname/username 才是可见身份面）。
+
 ## [0.7.25] - 2026-11-27
 
 ### 安全根：OS 钥匙串集成（评审项②，L1）

@@ -58,6 +58,7 @@ fn main() {
         Commands::KeychainSet { entry } => cmd_keychain_set(&entry),
         Commands::KeychainDelete { entry } => cmd_keychain_delete(&entry),
         Commands::KeychainMigrate => cmd_keychain_migrate(),
+        Commands::Apply { file } => cmd_apply(&file),
         Commands::PluginList => cmd_plugin_list(cmds::profile()),
         Commands::PluginCall { name, args } => cmd_plugin_call(cmds::profile(), name, args),
         Commands::EscapeTest => cmd_escape_test(),
@@ -212,6 +213,15 @@ enum Commands {
     KeychainSet { entry: String },
     /// Delete a keychain entry.
     KeychainDelete { entry: String },
+    /// Apply a persona declaration file: deterministic identity from the
+    /// seed + config + subscription sources written to the profile — a
+    /// blank machine rebuilds to "setup-ready" in one step. The instance
+    /// must be stopped.
+    Apply {
+        /// Declaration JSON path.
+        #[arg(long)]
+        file: String,
+    },
     /// Move plaintext secrets in config.json (proxy_url credentials,
     /// approval bot token) into the OS keychain, rewriting the fields as
     /// `keychain:` references. A backup is written first.

@@ -239,6 +239,36 @@ impl Store {
     /// Imports or refreshes one source. A refresh must retain every hop of
     /// the saved route; losing the current exit or a transit hop aborts the
     /// import and keeps the old configuration.
+    /// Registers a subscription source WITHOUT fetching it (声明式重建)：
+    /// the declaration is pure disk state — nodes appear after the next
+    /// `proxy-refresh`. Name collisions update the URL in place.
+    pub fn declare_source(&mut self, name: &str, url: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() || name.len() > 100 {
+            return Err("请填写 1–100 字节的来源名称".to_owned());
+        }
+        if !url.starts_with("https://") && !url.starts_with("http://") {
+            return Err("订阅 url 须为 http(s)".to_owned());
+        }
+        if let Some(existing) = self.sources.iter_mut().find(|s| s.name == name) {
+            existing.url = url.to_owned();
+            return Ok(());
+        }
+        self.sources.push(Source {
+            id: token()[..16].to_owned(),
+            name: name.to_owned(),
+            url: url.to_owned(),
+            interval_hours: 0,
+            updated_at: String::new(),
+            attempted_at: String::new(),
+            error: String::new(),
+            usage: "declared".to_owned(),
+            nodes: Vec::new(),
+            skipped: Vec::new(),
+        });
+        Ok(())
+    }
+
     pub fn import(
         &mut self,
         name: &str,

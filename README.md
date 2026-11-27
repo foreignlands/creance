@@ -68,9 +68,17 @@ existing `~/.claude-cage` profiles keep working).
 | 身份/迁移 | `identity-reset` `persona-save` `persona-use` `persona-list` `bundle-export` `bundle-import` `migrate-export` |
 | 使用面 | `claude` `oauth` `serve` `approve` |
 | 秘密 | `keychain-set` `keychain-delete` `keychain-migrate` |
+| 声明 | `apply` |
 | 验收/运维 | `escape-test` `gate-open` `gate-close` `version` |
 
 完整参数走 `creance <cmd> --help`。
+
+**声明式重建（apply）**：一个 JSON 声明文件完整描述一套 persona——
+`identity_seed`（可 keychain 引用）、`config`、`sources`——
+`creance apply --file persona.json` 在空白机器上从零重建到「setup
+即可用」：hostname/username 由种子确定性派生（同种子跨机同身份，
+session token 每次轮换）、config 全量落盘、订阅登记待 refresh。
+运行中实例拒绝。seed 是根秘密，只用于派生、绝不持久化。
 
 **秘密存储（keychain 引用）**：config.json 里任何敏感串可写成
 `keychain:<entry>` 引用，真值存 OS 钥匙串（macOS Keychain / Linux

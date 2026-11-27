@@ -323,3 +323,27 @@ fn proxy_url_has_password(url: &str) -> bool {
         .split_once(':')
         .is_some_and(|(_, pass)| !pass.is_empty())
 }
+
+/// apply：声明式重建。运行中的实例拒绝——重建覆写身份，运行中覆写
+/// 会让 guest 与宿主记录错位（与 identity-reset 同一纪律）。
+pub(crate) fn cmd_apply(file: &str) -> i32 {
+    let decl = match creance::apply::load_declaration(file) {
+        Ok(d) => d,
+        Err(e) => return fail(e),
+    };
+    let prof = profile();
+    let inst = instance();
+    if creance_vm::vm::instance_running(&prof, &inst) {
+        return fail(format!("实例 {inst} 仍在运行，先 `creance stop` 再 apply"));
+    }
+    match creance::apply::apply(&prof, &decl) {
+        Ok(notes) => {
+            for n in &notes {
+                println!("{n}");
+            }
+            println!("重建就绪：creance setup && creance up");
+            0
+        }
+        Err(e) => fail(e),
+    }
+}

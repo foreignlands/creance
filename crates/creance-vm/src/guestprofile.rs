@@ -47,6 +47,39 @@ impl Profile {
         }
     }
 
+    /// Deterministic derivation from an identity seed (配置即数据 ③)：
+    /// same seed → same hostname/username, on any machine. The session
+    /// token stays random — it is a revocable per-instance credential,
+    /// not part of the identity; a rebuild SHOULD rotate it.
+    ///
+    /// Derivation is sha256 in counter mode over the seed — no invariant
+    /// beyond determinism is needed (the picks are cosmetic), but the
+    /// stream must not correlate the visible fields back to the seed:
+    /// hostname/username are guest-visible, the seed is a root secret.
+    pub fn derive(seed: &str) -> Profile {
+        use sha2::Digest;
+        let stream = |counter: u32| -> [u8; 32] {
+            let mut h = sha2::Sha256::new();
+            h.update(b"creance-identity-v1\x00");
+            h.update(seed.as_bytes());
+            h.update(counter.to_be_bytes());
+            h.finalize().into()
+        };
+        const BASES: &[&str] = &[
+            "thinkpad", "ideapad", "inspiron", "vivobook", "latitude", "pavilion", "zenbook",
+            "yoga", "swift", "nitro",
+        ];
+        let pick = stream(0);
+        let base = BASES[(pick[0] as usize) % BASES.len()];
+        let suffix: String = pick[1..5].iter().map(|b| format!("{b:02x}")).collect();
+        Profile {
+            version: 1,
+            hostname: format!("{base}-{}", &suffix[..4]),
+            username: format!("dev{suffix}"),
+            session_token: crate::token(),
+        }
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.version != 1 {
             return Err("客机配置版本无效".to_owned());
@@ -186,5 +219,31 @@ mod tests {
         p = Profile::generate();
         p.session_token = "short".to_owned();
         assert!(p.validate().is_err());
+    }
+
+    mod seed_tests {
+        use super::*;
+
+        #[test]
+        fn derive_is_deterministic_per_seed() {
+            let a = Profile::derive("deadbeefcafe");
+            let b = Profile::derive("deadbeefcafe");
+            assert_eq!(a.hostname, b.hostname);
+            assert_eq!(a.username, b.username);
+            // …but the session token rotates even for the same seed
+            assert_ne!(a.session_token, b.session_token);
+        }
+
+        #[test]
+        fn distinct_seeds_distinct_identities_and_valid() {
+            let a = Profile::derive("seed-alpha");
+            let b = Profile::derive("seed-beta");
+            assert_ne!(a.username, b.username);
+            assert!(a.validate().is_ok(), "{:?}", a.validate());
+            assert!(b.validate().is_ok(), "{:?}", b.validate());
+            // visible fields must not leak the seed
+            assert!(!a.hostname.contains("seed"));
+            assert!(!a.username.contains("alpha"));
+        }
     }
 }
