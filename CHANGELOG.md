@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.7.28] - 2026-11-27
+
+### B 类 L1：浏览器指纹 persona 化（path-c 混合层）
+
+- **`DeviceProfile::derive`**：设备画像（WebGL vendor/renderer、
+  hardwareConcurrency、deviceMemory、屏幕）从 username 确定性派生
+  ——一个 persona 永远应答同一台可信消费级笔记本；派生池为真实
+  ANGLE 设备串（UHD 620/Iris Xe/Radeon/GTX 1650 等），llvmpipe/
+  SwiftShader 这类 VM 名片永不出现。
+- **指纹注入扩展**（provision 落地 `/usr/local/share/creance-fp`）：
+  MV3 MAIN world document_start——isolated world 够不到页面
+  navigator，必须 MAIN；覆盖 WebGL 37445/37446 应答、
+  hardwareConcurrency/deviceMemory、screen 尺寸；设备 JSON 在
+  provision 渲染时注入。OAuth 通道浏览器 `--load-extension` 挂载。
+- **字体补齐**：fonts-liberation 随 socat 行进 guest——稀疏字体集
+  是 VM 强信号。
+- **诚实边界重申**：JS 层钩子覆盖浅中层指纹采集，深度对抗
+  （toString 竞速、ordering 探针）不承诺——README 边界声明已述。
+- 变异钉全副武装：扩展腿/挂载旗/world=MAIN/run_at/钩子常量/
+  替换残留/VM 名片/字体——任一去能即红。
+
 ## [0.7.27] - 2026-11-27
 
 ### B 类 L3：出口 IP 信誉探针 + 诚实边界

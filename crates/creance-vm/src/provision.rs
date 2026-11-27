@@ -50,6 +50,11 @@ pub fn guest_bootstrap(
     nat_allows: &[&str],
 ) -> String {
     let rules_v4 = rules_v4_text(nat_allows);
+    // B 类 L1：浏览器指纹注入扩展——设备画像从 username（本身是种子
+    // 派生、跨重建稳定）派生；JS 模板在 format! 之外拼装，绕开
+    // 大括号转义地狱。
+    let device = crate::deviceprofile::DeviceProfile::derive(username);
+    let inject_js = crate::deviceprofile::INJECT_JS.replace("__DEVICEJSON__", &device.json());
     format!(
         r#"#!/bin/sh
 set -e
@@ -98,6 +103,7 @@ case "${{1:-start}}" in
     CREANCE_TZ="$(cat "${{HOME:-/tmp}}/.creance-tz" 2>/dev/null || echo "$SESSION_TZ")"
     setsid env TZ="$CREANCE_TZ" DISPLAY=:99 LANG="$SESSION_LOCALE" \
       /usr/local/bin/creance-browser --no-sandbox --lang="$SESSION_LANGUAGE" \
+      --load-extension=/usr/local/share/creance-fp \
       --start-maximized about:blank >>"$TL" 2>&1 &
     setsid websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5900 >>"$TL" 2>&1 &
     sleep 1
@@ -242,6 +248,17 @@ RestartSec=3
 WantedBy=default.target
 GATEWIREUNIT
 systemctl --global enable creance-gatewire.service
+# B 类 L1：浏览器指纹注入扩展（path-c 诚实范围：JS 层钩子覆盖浅
+# 中层指纹采集，深度对抗不承诺——见 docs/B-CLASS-RESEARCH.md）。
+# manifest 走 MV3 MAIN world document_start——isolated world 的覆盖
+# 影响不到页面 navigator，必须 MAIN。
+mkdir -p /usr/local/share/creance-fp
+cat > /usr/local/share/creance-fp/manifest.json <<'FPMANIFEST'
+{{"manifest_version": 3, "name": "creance-fp", "version": "1.0", "content_scripts": [{{"matches": ["<all_urls>"], "js": ["inject.js"], "run_at": "document_start", "world": "MAIN", "all_frames": true}}]}}
+FPMANIFEST
+cat > /usr/local/share/creance-fp/inject.js <<'FPJS'
+__INJECTJS__
+FPJS
 # Toolchain installs are best-effort (F-031) AND time-bounded (F-054):
 # `|| true` guards against failure, but a network BLACKHOLE neither
 # fails nor succeeds — the provisioner's own timeout then killed the
@@ -317,7 +334,7 @@ timeout "$TOOLCHAIN_BUDGET" sh -c '
   # it. It goes EARLY — the extras line at the tail can die to a spent
   # budget, and a missing socat is a silent wire outage, not a cosmetic
   # gap (live lesson: the extras line never ran, gatewire crash-looped).
-  apt-get install '"$APT_OPTS"' -y -qq socat xz-utils >> /var/log/creance-toolchain.log 2>&1 || true
+  apt-get install '"$APT_OPTS"' -y -qq socat xz-utils fonts-liberation >> /var/log/creance-toolchain.log 2>&1 || true
   [ -x /usr/local/bin/node ] || apt-get install '"$APT_OPTS"' -y -qq nodejs npm >> /var/log/creance-toolchain.log 2>&1 || true
   echo "node fallback rc=$? node=$(command -v node || echo missing)" >> /var/log/creance-toolchain.log
   curl -fsSL -m 120 https://claude.ai/install.sh | bash >> /var/log/creance-toolchain.log 2>&1 || true
@@ -379,6 +396,7 @@ GUEST_HOME=$(getent passwd {username} | cut -d: -f6)
 [ -n "$GUEST_HOME" ] && rm -f "$GUEST_HOME/password" || true
 "#
     )
+    .replace("__INJECTJS__", &inject_js)
 }
 
 #[cfg(test)]
@@ -630,7 +648,7 @@ mod tests {
         // concatenates adjacent quoted segments, so `system""d`,
         // `egress-""lock` and `cat >"…"` only differ on the surface.
         let norm: String = s.chars().filter(|c| *c != '\'' && *c != '"').collect();
-        assert_eq!(norm.matches("cat >").count(), 7, "{s}");
+        assert_eq!(norm.matches("cat >").count(), 9, "{s}");
         // Navigation/side-write verbs are banned outright: a `cd` into
         // the unit dir plus a relative `cat > x` writes a second unit
         // without touching the counts; `tee`/`dd` spellings bypass
@@ -1113,6 +1131,46 @@ mod tests {
         assert!(
             fallback < extras,
             "the node fallback must precede the base extras"
+        );
+    }
+
+    #[test]
+    fn fingerprint_injection_leg_is_present_and_armed() {
+        // B-L1 mutation pins: dropping the extension leg, the load flag,
+        // or downgrading world/run_at must all fail here.
+        let s = script();
+        assert!(
+            s.contains("mkdir -p /usr/local/share/creance-fp"),
+            "extension dir leg"
+        );
+        assert!(
+            s.contains("--load-extension=/usr/local/share/creance-fp"),
+            "the browser start must load the injection extension"
+        );
+        assert!(
+            s.contains("\"world\": \"MAIN\"")
+                || s.contains("\"world\":\"MAIN\"")
+                || s.contains("world"),
+            "manifest pins not found"
+        );
+        let manifest = s.split("FPMANIFEST").nth(1).expect("manifest heredoc");
+        assert!(manifest.contains("document_start"), "{manifest}");
+        assert!(manifest.contains("MAIN"), "{manifest}");
+        assert!(manifest.contains("<all_urls>"), "{manifest}");
+        // the inject payload itself — main-world hooks, no VM tells
+        let js = s.split("FPJS").nth(1).expect("inject heredoc");
+        assert!(js.contains("37446"), "UNMASKED_RENDERER hook, {js}");
+        assert!(js.contains("hardwareConcurrency"), "{js}");
+        assert!(
+            !js.contains("__DEVICEJSON__"),
+            "device json must be substituted"
+        );
+        assert!(!js.contains("llvmpipe"), "{js}");
+        assert!(!js.contains("SwiftShader"), "{js}");
+        // fonts are part of the browser-plausibility surface
+        assert!(
+            s.contains("fonts-liberation"),
+            "fonts must ride the socat line"
         );
     }
 }

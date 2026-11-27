@@ -8,6 +8,7 @@
 
 pub mod bundle;
 pub mod config;
+pub mod deviceprofile;
 pub mod exit_policy;
 pub mod gateprobe;
 pub mod guestprofile;
