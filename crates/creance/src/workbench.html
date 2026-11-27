@@ -131,6 +131,17 @@
   .side-item .st.inst { color:var(--ok); }
   .side-item.busy { opacity:.6; pointer-events:none; }
   .maincol { flex:1; min-width:0; }
+  .wizard-mask { position:fixed; inset:0; background:color-mix(in srgb,var(--bg) 82%,transparent);
+    backdrop-filter:blur(8px); z-index:50; display:flex; align-items:center; justify-content:center; padding:20px; }
+  .wizard { background:var(--card); border:1px solid var(--line); border-radius:16px;
+    padding:26px 28px; width:100%; max-width:520px; box-shadow:0 12px 40px rgba(0,0,0,.12); }
+  .wizard h2 { font-size:17px; font-weight:600; margin-bottom:4px; text-transform:none;
+    letter-spacing:0; color:var(--text); }
+  .wiz-steps { display:flex; gap:6px; margin:14px 0 18px; }
+  .wiz-steps span { flex:1; height:3px; border-radius:2px; background:var(--line); }
+  .wiz-steps span.on { background:var(--accent); }
+  .wiz-sub { color:var(--dim); font-size:12.5px; margin-bottom:8px; }
+  .wiz-actions { display:flex; gap:8px; margin-top:16px; justify-content:flex-end; }
   @media (max-width:860px) { .shell { flex-direction:column; } .sidebar { width:100%; position:static; } }
 </style>
 <link rel="stylesheet" href="/static/xterm.css">
@@ -143,6 +154,20 @@
   <span class="sub">contained workspace</span>
   <span class="live off" id="live">连接中…</span>
 </header>
+
+<div class="wizard-mask" id="wizard" style="display:none">
+  <div class="wizard">
+    <h2 id="wiz-title">欢迎使用 creance</h2>
+    <div class="wiz-sub" id="wiz-sub">三步完成初始配置，之后此向导不再出现。</div>
+    <div class="wiz-steps"><span id="ws1" class="on"></span><span id="ws2"></span><span id="ws3"></span></div>
+    <div id="wiz-body"></div>
+    <div class="err" id="wiz-err"></div>
+    <div class="wiz-actions">
+      <button class="ghost" id="wiz-skip" onclick="closeWizard()">稍后再说</button>
+      <button id="wiz-next" onclick="wizNext()">下一步</button>
+    </div>
+  </div>
+</div>
 
 <div class="shell">
 <nav class="sidebar">
@@ -257,6 +282,7 @@ async function refresh() {
     $('st-nodes').textContent = s.nodes;
     $('st-tz').textContent = `${s.timezone || ''} · ${s.locale || ''}`;
     const nodes = await j('/api/nodes');
+    if (wizardShouldShow(s, nodes) && $('wizard').style.display !== 'flex' && !sessionStorage.getItem('wiz-done')) openWizard();
     $('node-list').innerHTML = nodes.length ? nodes.map(n =>
       `<div class="node ${n.id === s.selected ? 'sel' : ''}" data-id="${esc(n.id)}">
         <span class="n">${esc(n.name)}</span>
@@ -453,6 +479,93 @@ function closeTerm() {
   $('term-card').style.display = 'none';
 }
 window.addEventListener('resize', () => { if (fitObj && termObj) fitObj.fit(); });
+/* 首期向导：无状态驱动——store 无节点=首配，已应用节点=完成永不再现。
+   三屏：①导入订阅（主机下载勾选随行）②选择节点 ③启动核心+出口检查 */
+let wizStep = 0;
+function wizardShouldShow(status, nodes) {
+  return nodes.length === 0 && !status.applied && !sessionStorage.getItem('wiz-dismissed');
+}
+function openWizard() {
+  wizStep = 1;
+  renderWizard();
+  $('wizard').style.display = 'flex';
+}
+function closeWizard() {
+  sessionStorage.setItem('wiz-dismissed', '1');
+  $('wizard').style.display = 'none';
+}
+function renderWizard() {
+  ['ws1','ws2','ws3'].forEach((id, i) => $(id).classList.toggle('on', i < wizStep));
+  $('wiz-err').textContent = '';
+  const b = $('wiz-body');
+  if (wizStep === 1) {
+    $('wiz-title').textContent = '第 1 步 · 导入订阅';
+    $('wiz-sub').textContent = '粘贴你的订阅链接。首次配置还没有代理，勾选主机下载。';
+    b.innerHTML = `<label>订阅 URL</label>
+      <input id="wiz-url" placeholder="https://…" spellcheck="false">
+      <label class="ck"><input type="checkbox" id="wiz-hostdl" checked> 通过主机网络下载（首次配置推荐）</label>
+      <div class="hint">也可以关闭向导，用右侧粘贴/迁移方式导入。</div>`;
+    $('wiz-next').textContent = '导入并继续';
+  } else if (wizStep === 2) {
+    $('wiz-title').textContent = '第 2 步 · 选择出口节点';
+    $('wiz-sub').textContent = '点击一个节点作为出口。';
+    b.innerHTML = '<div class="nodes" id="wiz-nodes" style="max-height:200px"></div>';
+    j('/api/nodes').then(nodes => {
+      $('wiz-nodes').innerHTML = nodes.length ? nodes.map(n =>
+        `<div class="node" data-id="${esc(n.id)}"><span class="n">${esc(n.name)}</span><span class="t">${esc(n.type)}</span></div>`).join('')
+        : '<div class="empty">没有节点——返回上一步导入</div>';
+    });
+    $('wiz-next').textContent = '下一步';
+  } else {
+    $('wiz-title').textContent = '第 3 步 · 启动核心';
+    $('wiz-sub').textContent = '启动代理核心让出口生效，然后验证连通。';
+    b.innerHTML = '<div class="hint">启动后可随时在状态卡做出口检查。向导完成后不再出现。</div>';
+    $('wiz-next').textContent = '启动核心并完成';
+  }
+}
+$('wiz-nodes')?.addEventListener?.('click', () => {});
+document.addEventListener('click', e => {
+  const row = e.target.closest('#wiz-nodes .node');
+  if (!row) return;
+  document.querySelectorAll('#wiz-nodes .node').forEach(n => n.classList.remove('sel'));
+  row.classList.add('sel');
+  row.dataset.chosen = '1';
+});
+async function wizNext() {
+  $('wiz-err').textContent = '';
+  const btn = $('wiz-next');
+  btn.disabled = true;
+  try {
+    if (wizStep === 1) {
+      const url = $('wiz-url').value.trim();
+      if (!url) { $('wiz-err').textContent = '请粘贴订阅链接（或点"稍后再说"用其他方式导入）'; btn.disabled = false; return; }
+      await j('/api/proxy/import', {name: '我的订阅', url, host_download: $('wiz-hostdl').checked});
+      log('向导：订阅导入成功');
+      wizStep = 2;
+      renderWizard();
+    } else if (wizStep === 2) {
+      const chosen = document.querySelector('#wiz-nodes .node.sel');
+      if (!chosen) { $('wiz-err').textContent = '请先点击选择一个节点'; btn.disabled = false; return; }
+      await j('/api/proxy/select', {node: chosen.dataset.id});
+      log('向导：出口节点已选择');
+      wizStep = 3;
+      renderWizard();
+    } else {
+      try {
+        await j('/api/proxy/start', {});
+        log('向导：核心已启动——初始配置完成');
+      } catch (e) {
+        log('向导：核心启动失败（可稍后在状态卡重试）：' + e.message, true);
+      }
+      sessionStorage.setItem('wiz-done', '1');
+      closeWizard();
+      refresh();
+    }
+  } catch (e) {
+    $('wiz-err').textContent = e.message;
+  }
+  btn.disabled = false;
+}
 refreshAgents();
 refresh(); setInterval(refresh, 5000);
 </script>
