@@ -64,6 +64,16 @@ pub(crate) fn cmd_check() -> i32 {
     ) {
         Ok(r) if r.status == 200 => {
             println!("Proxy transport OK. Guest traffic still requires VM acceptance checks.");
+            // B 类 L3：出口 IP 信誉咨询——数据中心标记对平台风控是
+            // 高疑信号。纯 advisory：取不到证据不阻塞任何东西。
+            let deadline = Instant::now() + CHECK_BUDGET;
+            if let Ok((sample, _)) = creance_net::trace::sample_pair(&egress, deadline) {
+                println!("exit: {} ({})", sample.ip, sample.country);
+            }
+            match creance_net::trace::reputation(&egress, deadline) {
+                Ok(rep) => println!("exit reputation: {}", rep.verdict()),
+                Err(_) => println!("exit reputation: 未取得（不影响传输判定）"),
+            }
             0
         }
         Ok(r) => fail(format!("proxy check returned HTTP {}", r.status)),

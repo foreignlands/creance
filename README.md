@@ -59,6 +59,14 @@ creance escape-test           # 验收隔离
 `CREANCE_CONFIG` selects a profile (legacy `CLAUDE_CAGE_CONFIG` honored;
 existing `~/.claude-cage` profiles keep working).
 
+## 诚实边界
+
+creance **不承诺通过最高等级平台风控**。B 类反检测（见
+[docs/B-CLASS-RESEARCH.md](docs/B-CLASS-RESEARCH.md)）是与平台风控的
+持续军备竞赛：我们工程化能闭环的层（出口 IP 信誉观测、浏览器指纹
+persona 一致性），但 IP 信誉本身取决于你的代理质量，行为指纹取决
+于 agent 的使用模式——这两层任何工具都无法替你解决。
+
 ## 威胁模型
 
 [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) — creance 防谁、不防谁：

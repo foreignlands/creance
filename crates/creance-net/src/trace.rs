@@ -161,4 +161,77 @@ mod tests {
         // An unreadable second source degrades silently.
         assert!(!corroborate(&s, "{}").unwrap());
     }
+    #[test]
+    fn reputation_parse_flags_and_verdicts() {
+        let dc = parse_reputation(r#"{"is_datacenter":true,"ip":"1.2.3.4"}"#).unwrap();
+        assert!(dc.datacenter && !dc.tor);
+        assert!(dc.flagged());
+        assert!(dc.verdict().contains("数据中心"));
+        let clean = parse_reputation(r#"{"is_vpn":false,"ip":"5.6.7.8"}"#).unwrap();
+        assert!(!clean.flagged());
+        assert!(clean.verdict().contains("低风险"));
+        let tor = parse_reputation(r#"{"is_tor":true}"#).unwrap();
+        assert!(tor.verdict().contains("Tor"));
+        // garbage convicts nothing — it is a parse error
+        assert!(parse_reputation("not json").is_err());
+    }
+}
+
+/// The reputation endpoint (B-class L3): ipapi.is answers datacenter/vpn/
+/// proxy/tor flags without an API key at interactive volume. Reputation
+/// is ADVISORY — it never convicts: a datacenter flag is a yellow card
+/// the user needs to see, not a gate decision.
+pub const IPAPI_URL: &str = "https://api.ipapi.is/";
+
+/// The exit IP's risk-control reputation as platforms likely see it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Reputation {
+    pub datacenter: bool,
+    pub vpn: bool,
+    pub proxy: bool,
+    pub tor: bool,
+}
+
+impl Reputation {
+    /// Human verdict: the worst applicable flag names itself.
+    pub fn verdict(&self) -> &'static str {
+        if self.tor {
+            "Tor 出口——绝大多数平台直接拒绝"
+        } else if self.datacenter {
+            "数据中心 IP——平台风控高疑"
+        } else if self.vpn || self.proxy {
+            "VPN/代理标记——部分平台加强验证"
+        } else {
+            "住宅/未标记——低风险"
+        }
+    }
+
+    /// Whether any platform-visible risk flag is raised.
+    pub fn flagged(&self) -> bool {
+        self.datacenter || self.vpn || self.proxy || self.tor
+    }
+}
+
+/// Fetches the reputation of the exit's own IP through `egress`. `Err`
+/// means no evidence — advisory data may never block anything.
+pub fn reputation(egress: &Egress, deadline: Instant) -> Result<Reputation, String> {
+    let response = egress::request(egress, "GET", IPAPI_URL, None, &[], deadline)?;
+    if response.status != 200 {
+        return Err(format!("信誉观测返回 HTTP {}", response.status));
+    }
+    parse_reputation(&String::from_utf8_lossy(&response.body))
+}
+
+/// Parses the ipapi.is JSON, pure for tests. Missing flags default to
+/// false — a partial answer degrades to less warning, never to conviction.
+pub fn parse_reputation(body: &str) -> Result<Reputation, String> {
+    let v: serde_json::Value =
+        serde_json::from_str(body).map_err(|e| format!("信誉响应解析失败：{e}"))?;
+    let flag = |key: &str| v[key].as_bool().unwrap_or(false);
+    Ok(Reputation {
+        datacenter: flag("is_datacenter"),
+        vpn: flag("is_vpn"),
+        proxy: flag("is_proxy"),
+        tor: flag("is_tor"),
+    })
 }
