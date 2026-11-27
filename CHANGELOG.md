@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.8.2] - 2026-11-22
+
+### R35 产品层自审（收敛）
+
+- **F-R35-2**：diagnose 原样展示 proxy_url——明文形时 userinfo 密码
+  直接上屏幕/日志。已加 userinfo 掩码（keychain 引用形不受影响）。
+- 通读无发现面：evidence（F-038 边界诚实声明在案）、escape probes
+  （auth=token() hex shell-safe、expected_user 校验字符集）、qemu
+  参数构造（args 数组无 shell 串）、hwid 派生（OEM 池/UUIDv4/MAC
+  去相关钉在案）、serve.rs（loopback+CSRF origin+strict CL）。
+- 记档项：serve.rs Host 头校验（DNS rebinding 对 GET 的低危信息
+  泄露面）；type1 version==serial 的指纹一致性微调（边缘）。
+
+R35 结论：0.7.x 新增未审计面已全部通读，R18-R32 外部审计覆盖的
+legacy 面不再重复。三轮自审（R33/R34/R35）累计修复 7 枚真 bug，
+全部入钉或回归测试。
+
 ## [0.8.1] - 2026-11-22
 
 ### R34 凭证层自审修复

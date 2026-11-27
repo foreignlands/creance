@@ -111,7 +111,9 @@ pub fn diagnose(profile: &str, config_path: &str) -> Vec<Check> {
             out.push(Check {
                 status: Status::Ok,
                 name: "config",
-                detail: format!("valid; proxy {}", cfg.proxy_url), // 引用形原样展示——不泄露真值
+                // F-R35-2: 明文形的 userinfo 密码不得上屏幕/日志——
+                // 掩码 userinfo；keychain 引用形原样展示（本就无真值）。
+                detail: format!("valid; proxy {}", mask_userinfo(&cfg.proxy_url)),
             });
             match cfg
                 .resolved_proxy_url()
@@ -213,6 +215,22 @@ pub fn diagnose(profile: &str, config_path: &str) -> Vec<Check> {
         });
     }
     out
+}
+
+/// Masks the password (and username) in a proxy URL's userinfo for display.
+/// Non-URL values pass through trimmed at the scheme separator.
+fn mask_userinfo(url: &str) -> String {
+    if creance_vm::secret::is_reference(url) {
+        return url.to_owned();
+    }
+    // scheme://[userinfo@]host… — mask everything between // and @.
+    if let Some(sep) = url.find("://") {
+        let rest = &url[sep + 3..];
+        if let Some(at) = rest.find('@') {
+            return format!("{}://***:***{}", &url[..sep], &rest[at..]);
+        }
+    }
+    url.to_owned()
 }
 
 fn which(program: &str) -> Option<String> {

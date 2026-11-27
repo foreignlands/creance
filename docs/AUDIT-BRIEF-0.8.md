@@ -71,9 +71,10 @@ approve 全通读。修三枚：F-R34-4 bundle 主密码支持 keychain 引用�
 F-R34-6 persona 快照目录 0700、F-R34-3 原子性注释纠偏。approve/
 bundle 密码学无发现。
 
-**R35 产品层：进行中**。已扫 apply.rs/serve.rs/approve 面——
-F-R35-1（apply 缺批条）已修入 v0.8.1。待扫：diagnose.rs、
-escape.rs、evidence.rs、cmds/vm.rs、workbench.html JS、qemu/
-lima 驱动面。serve.rs 加固记档项：Host 头校验（DNS rebinding 对
-GET 信息泄露面，低危）。
+**R35 产品层：已完成（v0.8.2）**。apply/serve/approve/evidence/
+escape/qemu/hwid/diagnose 面全通读。修两枚：F-R35-1（apply 缺批条，
+v0.8.1）、F-R35-2（diagnose 泄露 userinfo 密码，v0.8.2）。记档项：
+serve Host 头校验（低危 rebinding）、type1 version==serial 微调。
+三轮自审累计 7 枚真 bug 全部修复入钉。0.8 审计程序收敛——剩余
+形式缺口是外部独立判词（配额恢复后可选补跑），不再阻塞。
 
