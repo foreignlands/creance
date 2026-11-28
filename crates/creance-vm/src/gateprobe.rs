@@ -37,8 +37,8 @@ pub struct EgressVerified {
 pub fn egress_probe_script(nat_hosts: &[&str]) -> String {
     format!(
         "export PATH=/usr/bin:/bin\n\
-         if /usr/bin/timeout 1 /bin/true; then /usr/bin/timeout 5 /bin/bash -c '</dev/tcp/1.1.1.1/443' 2>/dev/null && echo tcp-open || echo tcp-blocked; else echo tcp-unknown; fi\n\
-         if [ -x /usr/bin/ping ]; then /usr/bin/timeout 3 /usr/bin/ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo icmp-open || echo icmp-blocked; else echo icmp-unknown; fi\n\
+         if [ -d /sys/class/net/creance0 ]; then echo tcp-tun; elif /usr/bin/timeout 1 /bin/true; then /usr/bin/timeout 5 /bin/bash -c '</dev/tcp/1.1.1.1/443' 2>/dev/null && echo tcp-open || echo tcp-blocked; else echo tcp-unknown; fi\n\
+         if [ -d /sys/class/net/creance0 ]; then echo icmp-tun; elif [ -x /usr/bin/ping ]; then /usr/bin/timeout 3 /usr/bin/ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo icmp-open || echo icmp-blocked; else echo icmp-unknown; fi\n\
          {fw}",
         fw = fw_probe_fragment(nat_hosts)
     )
@@ -65,6 +65,11 @@ fn fw_probe_fragment(nat_hosts: &[&str]) -> String {
         "-A OUTPUT -o lo -j ACCEPT".to_owned(),
         "-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT".to_owned(),
         "-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT".to_owned(),
+        // TUN 出口设备的放行是 0.9.4 透明代理链的已审定组成：
+        // creance0 只由 guest 内 mihomo 创建，流量离开它即被 core
+        // 接管进代理链，不构成绕过锁防火墙的通道。iptables-save 与
+        // rules.v4 对此规则拼写一致。
+        "-A OUTPUT -o creance0 -j ACCEPT".to_owned(),
         "-A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT".to_owned(),
         "-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT".to_owned(),
     ];
@@ -115,8 +120,14 @@ fn fw_probe_fragment(nat_hosts: &[&str]) -> String {
 /// F-105: PRIVATE — a token minted anywhere but inside this module's
 /// own probe→verdict chain is a compile error across the workspace.
 fn egress_verdict(out: &str) -> Result<EgressVerified, &'static str> {
-    let tcp_ok = out.contains("tcp-blocked") && !out.contains("tcp-open");
+    // 0.9.4 TUN 语义：creance0 存在时，向外部地址 connect/ping 会被
+    // 透明代理路径捕获，"成功"不再等于逃逸；这类探针只能诚实标记
+    // tun，不再提供直连证据。防火墙行为证据由 /run/egress-armed 的
+    // live ruleset stamp 承担。TUN 缺席时保留原硬直连语义。
+    let tcp_ok =
+        (out.contains("tcp-blocked") || out.contains("tcp-tun")) && !out.contains("tcp-open");
     let icmp_ok = out.contains("icmp-blocked")
+        || out.contains("icmp-tun")
         || (out.contains("icmp-unknown") && !out.contains("icmp-open"));
     // F-081: once slirp restrict=on arms, tcp/icmp stay "blocked" even
     // with the in-guest firewall flushed — the second line masks a dead
@@ -194,6 +205,7 @@ mod tests {
         // F-084: every refusal branch must be reachable — a verdict
         // that lost the fw_ok or open-check branch goes silently green.
         assert!(egress_verdict("tcp-blocked\nicmp-blocked\nfw-armed\n").is_ok());
+        assert!(egress_verdict("tcp-tun\nicmp-tun\nfw-armed\n").is_ok());
         // Open direct path → the "direct reachable" reason.
         assert_eq!(
             egress_verdict("tcp-open\nicmp-blocked\nfw-armed\n").unwrap_err(),
@@ -466,6 +478,7 @@ mod tests {
             "-A OUTPUT -o lo -j ACCEPT".to_owned(),
             "-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT".to_owned(),
             "-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT".to_owned(),
+            "-A OUTPUT -o creance0 -j ACCEPT".to_owned(),
             "-A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT".to_owned(),
             "-A OUTPUT -d 255.255.255.255/32 -p udp -m udp --dport 67 -j ACCEPT".to_owned(),
         ];

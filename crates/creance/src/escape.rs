@@ -413,9 +413,60 @@ fi"#
     // implemented", and reporting ESCAPE there was a false alarm that
     // trained users to ignore real ones. A configured-but-dead route
     // still reports ESCAPE honestly.
+    // 探针脚本的 wire 凭证环境（0.9.4 TUN 语义探针用）：无路由时
+    // 为空串——脚本里的 [ -n "$WIREAUTH" ] 分支自然落到诚实路径。
+    let wire_env = match proxy {
+        Some((auth, port)) => format!("WIREAUTH={auth}\nWIREPORT={port}"),
+        None => String::new(),
+    };
+    // 0.9.4 TUN 语义重定义：直连成功不再是逃逸证据——tun 捕获后走的
+    // 仍是代理链。证据改为出口身份对比：直连尝试与 wire 代理尝试必须
+    // 呈现同一出口 IP（都被捕获走代理）才为 PASS。直连彻底失败同样是
+    // PASS（pre-TUN 封锁形态）。已知边界：direct 类型节点出口=宿主裸 IP，
+    // 两测量不可区分——真实订阅节点才是本探针的有效场景。无路由时对比
+    // 无基准——成功即逃逸（且脚本不得出现 socks5 引用，钉纪律）。
+    let direct_probe = if proxy.is_some() {
+        r#"if command -v curl >/dev/null 2>&1; then
+  DIRECT_IP=$(curl -m 6 -s https://1.1.1.1/cdn-cgi/trace 2>/dev/null | grep -oE 'ip=[0-9.]+' | head -1 | cut -d= -f2)
+  if [ -z "$DIRECT_IP" ]; then
+    echo "PROBE net-direct-egress PASS"
+  else
+    WIRE_IPS=""
+    i=0
+    while [ $i -lt 3 ]; do
+      WIP=$(curl -m 6 -s --socks5-hostname "session:$WIREAUTH"@127.0.0.1:$WIREPORT https://1.1.1.1/cdn-cgi/trace 2>/dev/null | grep -oE 'ip=[0-9.]+' | head -1 | cut -d= -f2)
+      [ -n "$WIP" ] && WIRE_IPS="$WIRE_IPS $WIP"
+      i=$((i+1))
+    done
+    MATCH=0
+    for WIP in $WIRE_IPS; do
+      [ "$DIRECT_IP" = "$WIP" ] && MATCH=1
+    done
+    # direct 类型节点的宿主出口可能是多 IP 池，单次对比会 flaky；
+    # 三次采样取交集。真实订阅节点出口稳定，宿主直连逃逸仍不可混入。
+    if [ "$MATCH" = 1 ]; then
+      echo "PROBE net-direct-egress PASS"
+    else
+      echo "PROBE net-direct-egress ESCAPE"
+    fi
+  fi
+else
+  echo "PROBE net-direct-egress SKIP"
+fi"#
+    } else {
+        r#"if command -v curl >/dev/null 2>&1; then
+  if curl -m 5 -s -o /dev/null https://1.1.1.1/ || curl -m 5 -s -o /dev/null http://93.184.216.34/; then
+    echo "PROBE net-direct-egress ESCAPE"
+  else
+    echo "PROBE net-direct-egress PASS"
+  fi
+else
+  echo "PROBE net-direct-egress SKIP"
+fi"#
+    };
     let proxy_probe = match proxy {
         Some((auth, port)) => format!(
-            r#"if curl -m 8 -s --socks5-hostname "session:{auth}"@127.0.0.1:{port} https://1.1.1.1/cdn-cgi/trace | grep -q ip=; then
+            r#"if curl -m 8 -s --socks5-hostname "session:{auth}"@127.0.0.1:{port} https://1.1.1.1/cdn-cgi/trace | grep -q ip= || curl -m 8 -s --socks5-hostname "session:{auth}"@127.0.0.1:{port} https://1.1.1.1/cdn-cgi/trace | grep -q ip=; then
   echo "PROBE proxy-path PASS"
 else
   echo "PROBE proxy-path ESCAPE"
@@ -437,6 +488,7 @@ fi"#
 # treats a missing probe line as failure, and the README says plainly
 # that guest probes are telemetry, not the security control.
 export PATH=/usr/bin:/bin
+{wire_env}
 FLAG={flag_path}
 # Filesystem: the host flag must not be reachable by any guest path.
 # F-064: literal emission like every other probe — a helper-routed id was
@@ -486,21 +538,17 @@ echo "PROBE sock-abstract SKIP"
 # 0.3 ENFORCED NETWORK PROBES — the topology firewall must hold:
 # direct egress to external IPs is dropped, external DNS is dropped,
 # IPv6 is disabled. Escape = any of them succeeds.
-if command -v curl >/dev/null 2>&1; then
-  if curl -m 5 -s -o /dev/null https://1.1.1.1/ || curl -m 5 -s -o /dev/null http://93.184.216.34/; then
-    echo "PROBE net-direct-egress ESCAPE"
-  else
-    echo "PROBE net-direct-egress PASS"
-  fi
-else
-  echo "PROBE net-direct-egress SKIP"
-fi
+{direct_probe}
+# DNS（0.9.4）：fake-ip 形态下解析成功是常态——证据看答案落点：
+# 198.18/16 = fake-ip 激活（真实 DNS 从未发生）PASS；真实地址 =
+# 解析泄漏 ESCAPE；解析失败无法区分 pre-TUN 封锁与链断裂，诚实 SKIP。
 if command -v getent >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
-  if timeout 4 getent hosts example.com >/dev/null 2>&1; then
-    echo "PROBE net-dns-external ESCAPE"
-  else
-    echo "PROBE net-dns-external PASS"
-  fi
+  DNS_ANSWER=$(timeout 4 getent hosts example.com 2>/dev/null | head -1 | awk '{{print $1}}')
+  case "$DNS_ANSWER" in
+    198.18.*) echo "PROBE net-dns-external PASS" ;;
+    "")       echo "PROBE net-dns-external SKIP" ;;
+    *)        echo "PROBE net-dns-external ESCAPE" ;;
+  esac
 else
   echo "PROBE net-dns-external SKIP"
 fi
@@ -516,7 +564,12 @@ fi
 # F-060: ICMP used to be allowed to ANY destination — an echo channel the
 # TCP/DNS probes never watched. External echoes must die (only the NAT
 # subnets keep ICMP for path-MTU); no ping binary = honestly SKIP.
-if command -v ping >/dev/null 2>&1; then
+if [ -d /sys/class/net/creance0 ]; then
+  # TUN system stack 可对 ICMP echo 本地应答（实测 rtt 0.1ms）——
+  # ping 成功不再区分真逃逸与本地应答，诚实 SKIP；防火墙 live-ruleset
+  # 证据由 up-gate 承担。
+  echo "PROBE net-icmp-external SKIP"
+elif command -v ping >/dev/null 2>&1; then
   if timeout 3 ping -c1 -W2 1.1.1.1 >/dev/null 2>&1; then
     echo "PROBE net-icmp-external ESCAPE"
   else

@@ -1032,8 +1032,10 @@ fn watchdog_fuse_source_pins() {
         prod.lines()
             .filter(|l| l.trim() == "if !synced && wire_sync_ticks >= 20 {")
             .count(),
-        1,
-        "wire push throttle verbatim"
+        2,
+        "wire push throttle verbatim — vsock 桥路与 ssh -R fallback 路各一份\
+         （0.9.4：出口核心的 PORT+AUTH 材料两种传输都需要，区别在于\
+         fallback 不 restart forwarder 避免 F-A1 端口争用）"
     );
     assert_eq!(
         prod.lines()

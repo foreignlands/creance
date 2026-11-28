@@ -28,6 +28,7 @@ pub fn rules_v4_text(nat_allows: &[&str]) -> String {
     let mut out = String::from(
         "*filter\n:INPUT ACCEPT [0:0]\n:FORWARD ACCEPT [0:0]\n:OUTPUT DROP [0:0]\n\
          -A OUTPUT -o lo -j ACCEPT\n\
+         -A OUTPUT -o creance0 -j ACCEPT\n\
          -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n\
          -A OUTPUT -p udp --dport 67 -d 255.255.255.255 -j ACCEPT\n",
     );
@@ -50,6 +51,12 @@ pub fn guest_bootstrap(
     nat_allows: &[&str],
 ) -> String {
     let rules_v4 = rules_v4_text(nat_allows);
+    // TUN 出口核心的路由排除：NAT 宿主机端点不进代理捕获（控制面/
+    // wire 走的是它们）——按后端参数化，QEMU 与 Lima 各自的宿主段。
+    let route_excludes = nat_allows
+        .iter()
+        .map(|h| format!("    - {h}/32\n"))
+        .collect::<String>();
     // B 类 L1：浏览器指纹注入扩展——设备画像从 username（本身是种子
     // 派生、跨重建稳定）派生；JS 模板在 format! 之外拼装，绕开
     // 大括号转义地狱。
@@ -209,6 +216,11 @@ cat > /etc/systemd/user/creance-wire.service <<'WIREUNIT'
 [Unit]
 Description=creance own-wire forwarder
 ConditionPathExists=%h/.creance-wire
+# 与 gatewire 同一纪律（0.9.4）：fallback 路 ssh -R 已占用 guest 端
+# 口，wire 材料文件两种传输都会推送——仅靠 .creance-wire 判定会在
+# fallback 路上武装 socat 抢端口（F-A1）。vsock 标记只在桥真正在
+# vsock 上时才落地。
+ConditionPathExists=%h/.creance-vsock
 
 [Service]
 ExecStart=/bin/sh -c '. "$HOME/.creance-wire" && exec socat TCP-LISTEN:$PORT,bind=127.0.0.1,reuseaddr,fork VSOCK-CONNECT:2:$PORT'
@@ -323,6 +335,24 @@ timeout "$TOOLCHAIN_BUDGET" sh -c '
     && mv /usr/local/bin/node.new /usr/local/bin/node 2>> /var/log/creance-toolchain.log \
     || rm -f /usr/local/bin/node.new /tmp/creance-node.tar.gz
   echo "node install rc=$? path=$(command -v /usr/local/bin/node 2>/dev/null || echo none)" >> /var/log/creance-toolchain.log
+  # creance-egress（0.9.4）：guest 侧 mihomo——TUN 透明出口。与宿主核心
+  # 同版本同钉板纪律；篡改的压缩包拒绝解压，install 失败不致命
+  # （best-effort 腿）但会在日志里留 missing。
+  case "$ARCH" in
+    x64)   CREANCE_MH_SHA256=223fab877e5795ce780ba39902e5f0b1113c1256ae244a7160f1165e017e9ccc; CREANCE_MH_ARCH=amd64 ;;
+    arm64) CREANCE_MH_SHA256=daaf78a6240a282cdfd75bcbf98fe321f6bd52765cc29e79f344191198f0b50f; CREANCE_MH_ARCH=arm64 ;;
+    *)     CREANCE_MH_SHA256=; CREANCE_MH_ARCH= ;;
+  esac
+  if [ -n "$CREANCE_MH_SHA256" ]; then
+    curl -fsSL -m 180 -o /tmp/creance-mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-linux-$CREANCE_MH_ARCH-v1.19.34.gz" >> /var/log/creance-toolchain.log 2>&1
+    echo "mihomo download rc=$?" >> /var/log/creance-toolchain.log
+    echo "$CREANCE_MH_SHA256  /tmp/creance-mihomo.gz" | sha256sum -c - >> /var/log/creance-toolchain.log 2>&1 || rm -f /tmp/creance-mihomo.gz
+    [ -f /tmp/creance-mihomo.gz ] && gunzip -c /tmp/creance-mihomo.gz > /usr/local/bin/creance-egress.new 2>> /var/log/creance-toolchain.log \
+      && chmod +x /usr/local/bin/creance-egress.new \
+      && mv /usr/local/bin/creance-egress.new /usr/local/bin/creance-egress 2>> /var/log/creance-toolchain.log \
+      || rm -f /usr/local/bin/creance-egress.new /tmp/creance-mihomo.gz
+    echo "mihomo install rc=$? bin=$(command -v creance-egress || echo missing)" >> /var/log/creance-toolchain.log
+  fi
   chmod +x /usr/local/bin/node /usr/local/bin/creance-call /usr/local/bin/creance-oauth /usr/local/bin/creance-browser 2>/dev/null || true
   # The pinned download dies fast on MITM-intercepting networks; the
   # apt fallback must therefore run EARLY — the base extras (git, xz —
@@ -382,6 +412,129 @@ fi
 # `restart`, not `start`: a RemainAfterExit oneshot already active is a
 # no-op under start, but Lima replays this script and must re-apply
 # + re-stamp.
+# systemd-resolved 的 127.0.0.53 stub 在 loopback，TUN 的 dns-hijack
+# 捕不到它；若上游仍是 slirp 提供的 NAT DNS，查询只会撞防火墙。
+# 受控 VM 里把每条 networkd 链路的 DNS 固定为 1.1.1.1 并忽略 DHCP
+# DNS——systemd-resolved 的上游查询出 loopback 后被 TUN/fake-ip 捕获。
+# 社区同案：mihomo 自己 resolvectl 写入在非 root core 下静默失败。
+for net in /run/systemd/network/*.network; do
+  [ -e "$net" ] || continue
+  base=$(basename "$net")
+  mkdir -p "/etc/systemd/network/$base.d"
+  cat > "/etc/systemd/network/$base.d/creance-dns.conf" <<'DNSDROPIN'
+[Network]
+DNS=1.1.1.1
+DNSSEC=no
+
+[DHCPv4]
+UseDNS=no
+
+[DHCPv6]
+UseDNS=no
+
+[IPv6AcceptRA]
+UseDNS=no
+DNSDROPIN
+done
+systemctl restart systemd-networkd
+systemctl restart systemd-resolved
+
+# creance-egress TUN 透明代理（0.9.4）：guest 内 mihomo 让所有工具
+# 零感知正确出网——fake-ip 意味着 DNS 在 guest 从不真实解析，DNS 丢
+# 弃锁不再误杀兼容性，反泄漏牙齿反而更强。上游 = wire 的 socks5
+# （127.0.0.1 字面量，无 DNS 自举问题）；wire 端口/凭证由 daemon 推送
+# 的 ~/.creance-wire 提供——与 creance-wire forwarder 同一份材料。
+mkdir -p /etc/creance-egress
+cat > /etc/creance-egress/config.template.yaml <<'EGRESSTPL'
+log-level: warning
+mode: rule
+# QEMU/cloud 镜像常将 ipv6.conf.all.disable_ipv6=1；mihomo 默认
+# ipv6:true 会尝试配置 v6 地址并以 EPERM 失败（社区同案）。本链
+# 只需要 v4 透明出口，显式关闭。
+ipv6: false
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  nameserver:
+    - 1.1.1.1
+    - 8.8.8.8
+tun:
+  enable: true
+  stack: system
+  device: creance0
+  auto-route: true
+  auto-detect-interface: false
+  dns-hijack:
+    - any:53
+    - tcp://any:53
+  route-exclude-address:
+{route_excludes}    - 127.0.0.0/8
+proxies:
+  - name: egress
+    type: socks5
+    server: 127.0.0.1
+    port: __WIREPORT__
+    username: session
+    password: __WIREAUTH__
+    udp: false
+rules:
+  - MATCH,egress
+EGRESSTPL
+cat > /usr/local/bin/creance-egress-run <<'EGRESSRUN'
+#!/bin/sh
+# 从 daemon 推送的 wire 材料渲染运行配置并 exec 出口核心。材料缺失
+# = 闸从未开 = 按设计无出口；非零退出交给 Restart=always  retry。
+WIREFILE=/home/{username}/.creance-wire
+[ -f "$WIREFILE" ] || exit 1
+. "$WIREFILE"
+[ -n "$PORT" ] && [ -n "$AUTH" ] || exit 1
+RUNDIR="$HOME/.creance-egress"
+mkdir -p "$RUNDIR" || exit 1
+umask 077
+sed -e "s/__WIREPORT__/$PORT/" -e "s/__WIREAUTH__/$AUTH/" /etc/creance-egress/config.template.yaml > "$RUNDIR/config.yaml"
+exec /usr/local/bin/creance-egress -d "$RUNDIR" -f "$RUNDIR/config.yaml"
+EGRESSRUN
+cat > /etc/systemd/system/creance-egress.service <<'EGRESSUNIT'
+[Unit]
+Description=creance transparent egress core
+After=network-online.target
+
+[Service]
+# 顶层禁 chmod（钉纪律）——sh 调起不吃执行位，与既有 discipline 同路。
+ExecStart=/bin/sh /usr/local/bin/creance-egress-run
+Restart=always
+RestartSec=5
+# 以宿主会话用户运行：wire 材料是该用户的 0600 私有文件，root
+# 若无 CAP_DAC_OVERRIDE 反而读不到。只授予 TUN 所需的 NET_ADMIN；
+# 该权能限定在 guest netns 内，不扩大到宿主机。
+User={username}
+Group={username}
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+EGRESSUNIT
+cat > /etc/systemd/system/creance-egress.path <<'EGRESSPATH'
+[Unit]
+Description=wire material watcher for the egress core
+
+[Path]
+# wire 材料每次开闸被 daemon 重写——内容变化即重启核心，端口/凭证
+# 跟随最新材料，无需宿主反向执行特权命令。
+PathExists=/home/{username}/.creance-wire
+PathChanged=/home/{username}/.creance-wire
+Unit=creance-egress.service
+
+[Install]
+WantedBy=multi-user.target
+EGRESSPATH
+systemctl daemon-reload
+systemctl enable --now creance-egress.path >/dev/null
+
 systemctl restart egress-lock.service
 
 # 020 PRIVILEGE RETIREMENT — cloud-init unconditionally grants the guest
@@ -648,7 +801,11 @@ mod tests {
         // concatenates adjacent quoted segments, so `system""d`,
         // `egress-""lock` and `cat >"…"` only differ on the surface.
         let norm: String = s.chars().filter(|c| *c != '\'' && *c != '"').collect();
-        assert_eq!(norm.matches("cat >").count(), 9, "{s}");
+        assert_eq!(
+            norm.matches("cat >").count(),
+            14,
+            "9 件原有 + creance-egress 四件（0.9.4）+ DNS drop-in 一件（TUN 接管 systemd-resolved 上游）——{s}"
+        );
         // Navigation/side-write verbs are banned outright: a `cd` into
         // the unit dir plus a relative `cat > x` writes a second unit
         // without touching the counts; `tee`/`dd` spellings bypass
@@ -717,7 +874,10 @@ mod tests {
                         "systemctl enable egress-lock.service >/dev/null",
                         "systemctl restart egress-lock.service",
                         "systemctl --global enable creance-wire.service",
-                        "systemctl --global enable creance-gatewire.service"
+                        "systemctl --global enable creance-gatewire.service",
+                        "systemctl enable --now creance-egress.path >/dev/null",
+                        "systemctl restart systemd-networkd",
+                        "systemctl restart systemd-resolved"
                     ]
                     .contains(&ln.as_str()),
                     "unexpected systemctl line: {l}"
@@ -735,7 +895,11 @@ mod tests {
                 );
             }
         }
-        assert_eq!(norm.matches("systemd/").count(), 6, "{s}");
+        assert_eq!(
+            norm.matches("systemd/").count(),
+            11,
+            "DNS drop-in adds /run+mkdir+cat three systemd/ paths (0.9.4 TUN 接管)—{s}"
+        );
         // F-096/F-098: the rules.v4 heredoc is checked STRUCTURALLY AND
         // EXECUTED. Structure: the `cat >` line is exactly the literal
         // (no `if`/`&&` prefix can mask it), exactly two lines mention
@@ -980,13 +1144,18 @@ mod tests {
                 .expect("rules.v4 was never written — the script died before the cat"),
             rules_v4_text(&["10.0.2.2", "10.0.2.3"]),
         );
-        let units: Vec<String> = std::fs::read_dir(stub.join("etc/systemd/system"))
+        let mut units: Vec<String> = std::fs::read_dir(stub.join("etc/systemd/system"))
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
+        units.sort();
         assert_eq!(
             units,
-            ["egress-lock.service"],
+            [
+                "creance-egress.path",
+                "creance-egress.service",
+                "egress-lock.service"
+            ],
             "unexpected units: {units:?}"
         );
         assert!(
@@ -1006,6 +1175,10 @@ mod tests {
                 "enable egress-lock.service",
                 "--global enable creance-wire.service",
                 "--global enable creance-gatewire.service",
+                "restart systemd-networkd",
+                "restart systemd-resolved",
+                "daemon-reload",
+                "enable --now creance-egress.path",
                 "restart egress-lock.service"
             ],
             "systemctl calls: {calls}"

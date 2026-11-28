@@ -51,12 +51,19 @@ impl Gate {
             e.to_string()
         })?;
 
-        // Own-wire dataplane: the instance record's hw_cid selects vsock
-        // over ssh -R. Lima/macOS and legacy records read 0.
+        // 0.9.4 路线修正：ssh -R 恢复为唯一默认数据面。vsock 的
+        // bind/listen 成功不等于 guest→host 传输可用（嵌套虚拟化与
+        // 部分内核上连接直接 reset），而 daemon 没有健康证据触发
+        // fallback——wire 会静默坏死。ssh -R 复用已存在、已认证、
+        // 跨 QEMU/Lima 一致的通道；vsock 代码保留但不再被选择，
+        // 直到有端到端健康探针。Lima/macOS 与 legacy 记录本就读 0。
         #[cfg(target_os = "linux")]
-        let hw_cid = creance_vm::qemu::load_hw(profile_dir, instance)
-            .map(|h| h.cid)
-            .unwrap_or(0);
+        let hw_cid = {
+            let _recorded = creance_vm::qemu::load_hw(profile_dir, instance)
+                .map(|h| h.cid)
+                .unwrap_or(0);
+            0
+        };
         #[cfg(not(target_os = "linux"))]
         let hw_cid: u32 = 0;
 
@@ -289,12 +296,15 @@ impl Gate {
                                 .unwrap_or(false);
                             if !synced && wire_sync_ticks >= 20 {
                                 wire_sync_ticks = 0;
+                                let auth = creance_proxy::load(&watchdog.profile_dir)
+                                    .map(|st| st.auth)
+                                    .unwrap_or_default();
                                 if creance_vm::vm::guest_script(
                                     &watchdog.profile_dir,
                                     &watchdog.instance,
                                     &format!(
-                                        "umask 077; printf 'PORT=%s\\n' '{}' > \"$HOME/.creance-wire\"; systemctl --user restart creance-wire 2>/dev/null || true",
-                                        watchdog.proxy_port
+                                        "umask 077; printf 'PORT=%s\\nAUTH=%s\\n' '{}' '{}' > \"$HOME/.creance-wire\"; systemctl --user restart creance-wire 2>/dev/null || true",
+                                        watchdog.proxy_port, auth
                                     ),
                                 )
                                 .is_ok()
@@ -310,6 +320,37 @@ impl Gate {
                         &watchdog.instance,
                         watchdog.proxy_port,
                     );
+                    // ssh -R fallback 路同样需要 wire 材料（0.9.4 TUN 出口
+                    // 核心的包装器读 PORT+AUTH）——但不 restart forwarder：
+                    // ssh -R 已占用 guest 端口，socat 绑定会打起来（F-A1）。
+                    wire_sync_ticks += 1;
+                    let marker = Path::new(&watchdog.record_path)
+                        .parent()
+                        .map(|p| p.join(".wire-synced"));
+                    let expected = format!("PORT={}\nMIGRATE-v1", watchdog.proxy_port);
+                    if let Some(marker) = marker {
+                        let synced = std::fs::read_to_string(&marker)
+                            .map(|m| m.trim() == expected)
+                            .unwrap_or(false);
+                        if !synced && wire_sync_ticks >= 20 {
+                            wire_sync_ticks = 0;
+                            let auth = creance_proxy::load(&watchdog.profile_dir)
+                                .map(|st| st.auth)
+                                .unwrap_or_default();
+                            if creance_vm::vm::guest_script(
+                                &watchdog.profile_dir,
+                                &watchdog.instance,
+                                &format!(
+                                    "rm -f \"$HOME/.creance-vsock\"; systemctl --user stop creance-wire 2>/dev/null || true; umask 077; printf 'PORT=%s\nAUTH=%s\n' '{}' '{}' > \"$HOME/.creance-wire\"",
+                                    watchdog.proxy_port, auth
+                                ),
+                            )
+                            .is_ok()
+                            {
+                                let _ = std::fs::write(&marker, &expected);
+                            }
+                        }
+                    }
                 }
                 if !closed {
                     // 熔断采样：连接被拒瞬间返回（常见死核心形态）；一个

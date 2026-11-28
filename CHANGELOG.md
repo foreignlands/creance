@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.9.4] - 2026-11-28
+
+### TUN 透明出口——agent 零感知出网（0.8 产品化轮的底层解锁）
+
+- **guest 内 mihomo TUN 核心**（provision 注入，与宿主核心同
+  v1.19.34+sha256 钉板纪律）：fake-ip 模式下 DNS 在 guest 从不真实
+  解析——锁防火墙的 DNS 丢弃不再是兼容性杀手，反泄漏语义反而更强。
+  所有工具（opencode/curl/git/node）无需任何代理配置即正确出网。
+- **systemd-resolved 接管**：127.0.0.53 stub 在 loopback，TUN 的
+  dns-hijack 捕不到；networkd drop-in 把链路 DNS 固定到 1.1.1.1
+  并忽略 DHCP DNS，resolved 的上游查询出 loopback 后被 fake-ip
+  捕获。同时显式 `ipv6: false`——creance guest 本就禁用 v6，
+  mihomo 默认 v6 配置会以 EPERM 起不来（社区同案）。
+- **wire 材料扩展**：daemon 推送的 ~/.creance-wire 现在含 PORT+AUTH；
+  出口核心包装器据此渲染运行配置，`.path` unit 监听材料变化自动
+  重启。核心以 guest 会话用户运行，只持 CAP_NET_ADMIN——比 root
+  方案权能更窄（root 无 DAC_OVERRIDE 反而读不了 0600 材料）。
+- **ssh -R 恢复为唯一默认数据面**：vsock 的 bind/listen 成功不等于
+  guest→host 传输可用（嵌套虚拟化实测 connection reset），daemon
+  无健康证据触发 fallback，wire 会静默坏死。ssh -R 复用已认证、
+  跨 QEMU/Lima 一致的通道；vsock 代码休眠，直到有端到端健康探针。
+  旧实例的 stale socat forwarder 由迁移推送自动清理。
+- **探针语义重定义**（防母鸡级谎言复发）：up-gate 与 escape 的
+  TCP/ICMP“直连成功”在 TUN 捕获后不再等于逃逸；net-direct-egress
+  改为出口身份对比（三次采样取交集，兼容 direct 节点多 IP 池），
+  net-dns-external 看答案落点（198.18/16 fake-ip = PASS），ICMP 在
+  TUN 活性时诚实 SKIP（system stack 可本地应答，ping 不可区分）。
+- **端到端实证**：fake-ip 解析（example.com→198.18.0.6）、域名
+  HTTP 200、出口 IP 正确、opencode 1.19.6 安装成功、escape-test
+  全 PASS（ICMP 诚实 SKIP）、gate-close 后 curl 立即 fail-closed。
+- 记档边界：UDP 不可过 ssh -R（socks5 udp associate 不可达），QUIC
+  类应用 fail-closed；direct 类型节点下 direct-egress 探针证据力弱
+  （真实订阅节点才是有效场景）。
+
 ## [0.9.3] - 2026-11-27
 
 ### 全链贯通 + probe 自废武功修复
